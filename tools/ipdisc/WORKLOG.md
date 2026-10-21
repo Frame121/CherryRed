@@ -27,8 +27,17 @@ Pre-existing kext safety changes in src/navi48-bringup/ are out of M1 scope:
 - Overflow protection in regByteOffset()
 
 These changes were committed separately as commit 819724f and predate the
-current session. No test coverage exists for these C++ guards in the current
-tree.
+current session.
+
+UNVERIFIED — C++ KEXT SAFETY GUARDS (commit 819724f):
+The bounds checking, overflow protection, and PCI identity re-check in
+commit 819724f have NO test coverage in the current tree. The 30 Python
+tests in tools/ipdisc/test_ipdiscovery.py exercise the Python parser,
+not the C++ kext implementation. These guards compile cleanly but are
+not verified at the edges. Test coverage will be added in a future
+milestone (M6: Build and integration validation) when a macOS build
+environment is available. Do not treat these guards as tested or rely on
+them for safety-critical decisions until coverage is added.
 
 ## 2026-10-21 — Phase 25 board presence verified; start() identity guard restored
 
