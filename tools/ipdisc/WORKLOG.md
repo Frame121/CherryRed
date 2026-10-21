@@ -10,6 +10,17 @@ in the entry that records them.
 M1 scope: tools/ipdisc/ only (7 new files: ipdiscovery.py, mkfixture.py,
 test_ipdiscovery.py, dump.py, cpp_parity.md, parity_cases.json, README.md).
 
+M1 DELIVERED SCOPE (commit 8eb0704):
+Commit 8eb0704 "Add Navi 33 research sources and the IP-discovery tooling"
+contains 39 files total, exceeding the approved M1 scope:
+- 7 approved M1 files under tools/ipdisc/ (present, correct)
+- 19 research documentation files under tools/ipdisc/ (out of approved M1 scope)
+- 13 files under src/navi33-research/ (entirely separate research scaffold, out of M1 scope)
+
+The src/navi33-research/ scaffold is accepted as a separate deliverable under
+commit 8eb0704 and is NOT part of M1 acceptance. M1 acceptance is limited to
+the 7 tools/ipdisc/ files, tested at 30/30 pass.
+
 Pre-existing kext safety changes in src/navi48-bringup/ are out of M1 scope:
 - PCI identity re-check in Navi48Bringup::start()
 - IP discovery bounds checking (tableEnd field)
