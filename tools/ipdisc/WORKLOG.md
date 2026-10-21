@@ -39,6 +39,17 @@ milestone (M6: Build and integration validation) when a macOS build
 environment is available. Do not treat these guards as tested or rely on
 them for safety-critical decisions until coverage is added.
 
+PUSH HOLD DECISION (session 2026-10-21):
+Commits 819724f, c21c12b, c1d5891, and 74910bb are HELD locally and not
+pushed to origin/main. Rationale:
+- 819724f adds untested safety-critical C++ code to the kext
+- Pushing without test coverage could give false confidence
+- M6 (build and integration validation) is the appropriate milestone to
+  add C++ test coverage and push
+- Documentation commits (c21c12b, c1d5891, 74910bb) depend on 819724f
+  for context and are held together to maintain commit ordering
+Authorization received to hold all 4 commits until M6.
+
 ## 2026-10-21 — Phase 25 board presence verified; start() identity guard restored
 
 - **Repository state:** branch `main`, HEAD
