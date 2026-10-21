@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="https://cobalt64.com"><img alt="Website" src="https://img.shields.io/badge/website-cobalt64.com-4560ff?style=for-the-badge"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-2b3bd6?style=for-the-badge"></a>
-  <img alt="Status: preview" src="https://img.shields.io/badge/status-preview-8a7dff?style=for-the-badge">
+  <a href="https://cobalt64.com"><img alt="Website" src="https://img.shields.io/badge/website-cobalt64.com-d2042d?style=for-the-badge"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-9f1239?style=for-the-badge"></a>
+  <img alt="Status: preview" src="https://img.shields.io/badge/status-preview-e11d48?style=for-the-badge">
 </p>
 
 <p align="center">

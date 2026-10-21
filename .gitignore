@@ -22,3 +22,6 @@ src/navi48-bringup/firmware/
 runs/
 *.log
 .DS_Store
+# python bytecode
+__pycache__/
+*.py[cod]
