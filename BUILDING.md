@@ -1,4 +1,6 @@
-# Building the bring-up kext
+﻿# Building CherryRed bring-up components
+
+> Project history: CherryRed continues the Cobalt64 research project. Existing component names and third-party credits are retained where needed for technical accuracy and attribution.
 
 > **WARNING.** Navi48Bringup.kext writes GPU registers directly (PCIe BARs, PSP, SMU, RLC, SDMA, CP,
 > MES, display engine). It is experimental, it has only been run on one x86_64 test PC with one
