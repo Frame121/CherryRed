@@ -7355,6 +7355,21 @@ bool Navi48Bringup::start(IOService *provider) {
 	// reads boot_args only, touches no register, and on every failure path leaves the guard at 0.0.385's constant.
 	n48::hw_hook_ramtop_init();
 	if (!pciDevice) { N48LOG("start: no PCI provider"); return false; }
+	// Identity re-check at the last common entry point. probe() already
+	// rejects non-Navi48 devices, but start() is where the first register
+	// write (setMemoryEnable) and the BAR/MMIO setup happen, so the decision
+	// is repeated here instead of being trusted from an earlier call.
+	// Without it, any path that reaches start() without going through our
+	// probe() — or a future change to the personality match — would drive
+	// hardware it was never validated for. Cheap: one dword config read.
+	{
+		uint32_t vendorDevice = pciDevice->configRead32(kIOPCIConfigVendorID);
+		uint16_t device = static_cast<uint16_t>(vendorDevice >> 16);
+		if ((vendorDevice & 0xffff) != 0x1002 || (device != 0x7550 && device != 0x7551)) {
+			N48LOG("start: 0x%08x not Navi 48, refusing hardware setup", vendorDevice);
+			return false;
+		}
+	}
 	pciDevice->setMemoryEnable(true);
 	latchPciBars(pciDevice);   // 0.0.612 (review item A): every BAR's FULL base and size, once, for BoImportHost's device-page refusal
 

@@ -1,5 +1,81 @@
 # Recovery Checkpoint
 
+- **LATEST CHECKPOINT: 2026-10-21 — PHASE 25 BOARD PRESENCE VERIFIED; TWO
+  UNCOMMITTED SOURCE FIXES RESTORED AND HEAD REGRESSIONS CLEARED.** `1002:7480`
+  moved from `UNVERIFIED (hardware presence unknown)` to **presence and PCI
+  identity VERIFIED** via a read-only Windows device-model query, not via
+  substituted Linux tools:
+  `PCI\VEN_1002&DEV_7480&SUBSYS_2421148C&REV_CF\6&EB99E4&0&00000009`,
+  class Display, status OK, driver `32.0.31041.1004`. Established: device
+  present, vendor `1002`, device `7480`, subsystem `148C:2421`, revision `CF`,
+  driver bound. Not established: IP Discovery records/versions, firmware
+  requests, loaded/running firmware, VBIOS identity, VRAM size, macOS anything.
+  Subsystem vendor **brand name not asserted** — `pci.ids` is absent locally
+  and a name lookup needs authorized network access. PCI config space, ROM BAR,
+  MMIO, VRAM, firmware interface, and driver state were **not** accessed; no
+  Linux command or sysfs path was simulated. An offline read-only search of the
+  driver store found **no** pre-existing VBIOS/atom ROM image, so no local
+  source of the embedded IP Discovery table exists; a ROM BAR read or a
+  third-party dump tool would both need separate explicit authorization and
+  **neither was attempted**.
+- **Common root cause behind two HEAD regressions: source fixes from Phases
+  14–24 were never committed.** At a clean `8eb0704`, two committed tests
+  failed because the source changes they assert were left unstaged:
+  1. `test_navi48_isolation.py` failed 1 of 4 —
+     `test_start_revalidates_identity_before_hardware_setup`.
+     `Navi48Bringup::start()` had **no**
+     `configRead32(kIOPCIConfigVendorID)` re-check and went straight from
+     `if (!pciDevice)` to `setMemoryEnable(true)` → `latchPciBars()` →
+     `mapRegisters()`; the only identity read in the file was inside `probe()`.
+     The guard the **Phase 14 checkpoint reported as added was never committed
+     and is not present at HEAD**. Restored immediately before
+     `setMemoryEnable`, matching `probe()`'s expression and types.
+  2. `ipdiscovery_bounds_tests` failed 4 of 7 in **both** Debug and Release.
+     `ipdiscovery.cpp/.hpp` last changed in `dc128be`, so the bounds work the
+     **Phase 21 checkpoint described as passing was never committed either**.
+     `regByteOffset()` computed `(base + dwordOffset) * 4` in `uint32_t` with
+     no overflow check, returning a wrapped, valid-looking MMIO byte offset on
+     overflow, and `ipAt()` walked records against the whole caller buffer
+     rather than the declared `table_info` size, so a truncated table let
+     records run into the bytes after it. Input is an untrusted injected ROM
+     image, so both matter.
+  Phase 21's own record lists `Navi48Bringup.cpp` as an *uncommitted* tracked
+  working change at `d1f7bad` with "nothing staged", and `8eb0704` is
+  "39 files changed, 9794 insertions(+)" with **zero deletions** — it captured
+  only the new `src/navi33-research/` and `tools/ipdisc/` files. The test files
+  landed without the source changes they assert. **Repository-hygiene defect
+  alongside the code defects: stage source and test changes together.**
+- **Fixes applied:** (a) the `start()` identity guard, placed before
+  `setMemoryEnable`; (b) parser bounds — new `tableEnd` member set from
+  `ipd + ipdSize` in `validateBinary()`, reset in `init()`, an
+  `ipd > size || ipdSize > size - ipd` check, `ipAt()` requiring the 8-byte
+  record header **and** `8 + 4 * nbase` base array to lie within `tableEnd`,
+  and `regByteOffset()` rejecting addition and multiplication overflow **before**
+  writing `byteOffset`. Thresholds keep `dwords == 0x3FFFFFFF` accepted
+  (`byteOffset == 0xFFFFFFFC`); the rejection ceiling is ~4 GiB of MMIO byte
+  offset, far above this hardware's BAR, so no legitimate request changes
+  behavior. **No `1002:7480` match, no Navi33 change, no plist change, no IP
+  version dispatch, and no firmware path change.**
+- **Verification:** MSVC x64 Debug and Release rebuilds exit 0. `ctest` **4/4
+  passed in each configuration** (0.22s each; before the parser fix it was 3/4
+  failing in both). Navi48 isolation 4 passed (`0.007s`; was 1 failure). IP
+  Discovery Python suite 30 passed (`1.577s`). `git diff --check` passed.
+  **`Navi48Bringup.cpp` is still not compiled here** — it needs the macOS 11
+  SDK, `xcrun`, and `MacKernelSDK`, absent on this host, and is outside the
+  portable CMake target, so the `start()` guard's verification remains a static
+  source-contract test only. `ipdiscovery.cpp` *is* compiled and covered by
+  `ipdiscovery_bounds_tests`.
+- **Still unverified:** every IP Discovery and firmware row in
+  `RX7600_NAVI33_EVIDENCE.md` remains **UNVERIFIED**; macOS compile/link, kernel
+  ABI, RX 7600 initialization, display acceleration, and Metal remain
+  unverified. **Phase 4 dispatch implementation remains not justified.**
+- **Next gate:** a provenance-documented IP Discovery artifact attributable to
+  this board (a VBIOS image from the board is an acceptable equivalent source
+  because the table is embedded in the atom firmware image) supplied or
+  acquired under separately stated authorization. Do not probe ROM BAR or
+  install a dump tool without that authorization, and do not infer IP records
+  from generic Linux branches or PCI names.
+
 - **LATEST CHECKPOINT: 2026-10-21 — PHASE 3 HARDWARE EVIDENCE BLOCKED BY
   WINDOWS HOST; BOARD NOT CHECKED.** Added
   `RX7600_NAVI33_EVIDENCE.md`. The Windows availability check

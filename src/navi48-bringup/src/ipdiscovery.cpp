@@ -62,6 +62,10 @@ bool IpDiscovery::validateBinary(size_t offset) {
 		return false;
 
 	size_t ipd = offset + ipdOffset;
+	// The table's declared size must lie inside the declared binary region
+	// (which validateBinary already kept inside the caller's buffer).
+	if (ipd > size || static_cast<size_t>(ipdSize) > size - ipd)
+		return false;
 	uint32_t sig;
 	uint16_t numDies;
 	if (!readU32(ipd, sig) || sig != kIpdsSignature || !readU16(ipd + 12, numDies) || numDies == 0)
@@ -78,6 +82,7 @@ bool IpDiscovery::validateBinary(size_t offset) {
 		return false;
 
 	binBase = offset;
+	tableEnd = ipd + ipdSize;
 	dieBase = die;
 	numIps = nips;
 	return true;
@@ -87,6 +92,7 @@ bool IpDiscovery::init(const uint8_t *buffer, size_t bufferSize) {
 	data = buffer;
 	size = bufferSize;
 	valid = false;
+	tableEnd = 0;
 	if (!data || size < 512)
 		return false;
 
@@ -108,13 +114,20 @@ bool IpDiscovery::ipAt(uint16_t index, IpEntry &out) const {
 
 	// ip_v3/v4 with 32-bit bases: u16 hw_id, u8 instance, u8 num_base,
 	// u8 major, u8 minor, u8 revision, u8 sub/variant, u32 bases[].
-	// Walk the variable-size records to the requested index.
+	// Walk the variable-size records to the requested index. The walk is
+	// bounded by the declared IP_DISCOVERY table size, not by the caller's
+	// buffer: the buffer can be much larger than the table it declares, and a
+	// truncated table must not let a record run into the bytes after it.
 	size_t p = dieBase + 4;
 	for (uint16_t i = 0; ; i++) {
+		if (p > tableEnd || tableEnd - p < 8u)
+			return false;
 		uint16_t hwId;
 		uint8_t inst, nbase, major, minor, rev;
 		if (!readU16(p, hwId) || !readU8(p + 2, inst) || !readU8(p + 3, nbase) ||
 		    !readU8(p + 4, major) || !readU8(p + 5, minor) || !readU8(p + 6, rev))
+			return false;
+		if (tableEnd - p < 8u + 4u * static_cast<size_t>(nbase))
 			return false;
 
 		if (i == index) {
@@ -148,6 +161,14 @@ bool IpDiscovery::regByteOffset(uint16_t hwId, uint8_t instance, uint8_t segment
 	IpEntry ip;
 	if (!findIp(hwId, instance, ip) || segment >= ip.numBases)
 		return false;
-	byteOffset = (ip.bases[segment] + regDwordOffset) * 4;
+	// Reject overflow *before* producing an offset. A wrapped result would be
+	// a different but valid-looking MMIO address, and on refusal byteOffset
+	// must keep the caller's value.
+	if (ip.bases[segment] > UINT32_MAX - regDwordOffset)
+		return false;
+	uint32_t dwords = ip.bases[segment] + regDwordOffset;
+	if (dwords > UINT32_MAX / 4u)
+		return false;
+	byteOffset = dwords * 4u;
 	return true;
 }

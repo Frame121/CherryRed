@@ -1,99 +1,112 @@
 <p align="center">
-  <a href="https://cobalt64.com"><img src="docs/assets/logo.svg" alt="Cobalt64 logo" width="128" height="128"></a>
+  <a href="https://github.com/Frame121/CherryRed">
+    <img src="docs/assets/logo.svg" alt="CherryRed GPU emblem" width="132" height="132">
+  </a>
 </p>
 
-<h1 align="center">Cobalt64</h1>
+<h1 align="center">CherryRed</h1>
 
 <p align="center">
-  <b>The first open-source GPU-accelerated graphics driver for macOS.</b><br>
-  Native Metal acceleration for modern AMD Radeon GPUs that Apple does not support.
-</p>
-
-<p align="center">
-  <a href="https://cobalt64.com"><img alt="Website" src="https://img.shields.io/badge/website-cobalt64.com-d2042d?style=for-the-badge"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-9f1239?style=for-the-badge"></a>
-  <img alt="Status: preview" src="https://img.shields.io/badge/status-preview-e11d48?style=for-the-badge">
+  <strong>Experimental AMD graphics research for macOS.</strong><br>
+  Exploring native display and Metal acceleration paths for Radeon GPUs beyond Apple's supported generations.
 </p>
 
 <p align="center">
-  <img alt="macOS Tahoe 26.6.2" src="https://img.shields.io/badge/macOS-Tahoe%2026.6.2-000000?logo=apple&logoColor=white">
-  <img alt="Bootloader: OpenCore" src="https://img.shields.io/badge/bootloader-OpenCore-555555">
+  <a href="https://github.com/Frame121/CherryRed"><img alt="Repository" src="https://img.shields.io/badge/GitHub-CherryRed-d80a35?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-b91c3b?style=for-the-badge"></a>
+  <img alt="Project status" src="https://img.shields.io/badge/status-experimental-9f1239?style=for-the-badge">
 </p>
 
 <p align="center">
-  <a href="https://cobalt64.com"><b>Visit cobalt64.com</b></a> to check whether your graphics card is supported,
-  read how Cobalt64 works and get the first public release when it ships.
+  <sub>Cherry Red edition · Research first, hardware claims backed by evidence.</sub>
 </p>
 
 ---
 
-## About
+## About CherryRed
 
-Apple's own AMD drivers end with RDNA 2. Cobalt64 is an open-source graphics driver that
-brings modern Radeon GPUs to macOS: it brings up the GPU itself, runs Metal on top of a
-macOS port of Mesa's RADV Vulkan driver, and drives the displays natively.
+CherryRed is the renamed continuation of **Cobalt64**. The project preserves Cobalt64's existing code, research history, and third-party attributions while establishing CherryRed as the current project name. This repository investigates graphics-driver components and compatibility paths for modern AMD Radeon GPUs on macOS, including bring-up code, display-engine helpers, command-stream translation research, host-side tests, and hardware-evidence tools.
 
-The first supported family is **RDNA 4**, starting with the **Radeon RX 9070 XT (Navi 48)**,
-where all development and testing happens today. Other families (for example RDNA 3 /
-RX 7000) are future work: much of the stack is shared, but each GPU generation needs its own
-display and power-management bring-up, and someone with that hardware to test it.
+The codebase includes an experimental RDNA 4 / Navi 48 bring-up path and a separate research track for RDNA 3 / Navi 33, including the Radeon RX 7600. These tracks have different evidence and validation states; passing a host-side test does **not** mean a GPU is supported by macOS.
 
-## Status
+## Support status
 
-Reached on one x86_64 test PC with an RX 9070 XT, macOS Tahoe 26.6.2, booted through OpenCore:
-
-- **GPU-composited desktop on three displays at once** (one DisplayPort, two HDMI), with
-  WindowServer's Metal compositor running on this driver stack.
-- **Apps on the GPU:** a growing set of built-in apps (Maps, Preview, Photos, System Settings,
-  Music and others) render through it.
-- **Resizable BAR**, and the driver arming itself at boot.
-
-This is a **preview**: a lot is still rough, display modes are limited to what the test PC's
-monitors needed, and many pieces work around one specific macOS build.
-
-### In progress
-
-- 4K output over HDMI
-- Smoother frame pacing and higher refresh rates
-- GPU rendering for more apps (Safari, Chromium/Electron apps)
-- Display modes from each monitor's EDID instead of fixed modes
-- Hardware video decoding
-
-## Can I install this?
-
-**Not yet.** Wait for the first public release; it will come with an installer and a
-step-by-step guide on [cobalt64.com](https://cobalt64.com). This repository is the source
-code, and running it today needs a lot of manual setup on a separate macOS install.
-
-## What this repo contains
-
-| Path | Contents |
-|---|---|
-| `src/navi48-bringup` | Bring-up kext (IOKit): PCIe/BAR setup, IP discovery, PSP/SMU/GMC/GFX/SDMA/MES initialisation, display (DCN 4.1) mode-setting, a user client ("N48N") exposing buffers, command submission and scanout, and hooks into Apple's AMDRadeonX6000 accelerator. |
-| `src/dcn41` | DCN 4.1 display-engine helpers and generated register headers (derived from Linux amdgpu, MIT). |
-| `src/xlat12` | Command-stream translation from Apple's GFX10.3 PM4/register programming to gfx12. |
-| `src/g2capture` | Small capture tool for Apple shader-compiler records. |
-| `tools/native` | navi48metal (a Metal device bundle that runs Metal on top of the Vulkan driver), mtlprobe (API probe), autotranslate (AIR -> SPIR-V translation scripts) and navi48accel (aux kext). |
-| `tools/pc`, `tools/dcn41`, `tools/conductor` | PC-side test CLI and run scripts, display-register tooling, test suite runners and "planted break" mutation tests. |
-| `mesa-patches` | RADV (Mesa Vulkan) Darwin port as nine patches on a pinned Mesa commit; see `mesa-patches/README.txt`. |
-
-## External projects and dependencies (not vendored; clone them yourself)
-
-| Project | Where | Notes |
+| GPU family | Example GPU | Current status |
 |---|---|---|
-| RDNA4FB | https://github.com/somestupidgirl/RDNA4FB | display-only RDNA4 kext, MacKernelSDK |
-| mac-amdgpu | https://github.com/lemonade-sdk/mac-amdgpu | Navi 48 bring-up on macOS |
-| USBToolBox | https://github.com/USBToolBox/tool | USB port mapping, optional |
-| metal2vulkan | https://github.com/steelbrain/metal2vulkan | Metal AIR -> SPIR-V translator, LGPL-3.0-or-later; upstream is not included. Our changes and the n48xlate in-process wrapper are in `third-party/metal2vulkan-n48/`, LGPL-3.0, separate from the MIT code here; see its NOTICE |
-| Mesa | https://gitlab.freedesktop.org/mesa/mesa | RADV, MIT; see `mesa-patches/` |
-| linux-firmware | | AMD firmware blobs, own licence; see above |
+| RDNA 4 / Navi 48 | Radeon RX 9070 XT | Experimental bring-up path inherited from Cobalt64. Reported results are limited to the documented test configuration; this is not a general-purpose release. |
+| RDNA 3 / Navi 33 | Radeon RX 7600 | **Research only. Not supported for working macOS graphics acceleration.** Real-card IP Discovery evidence and hardware validation are still missing. |
+| Other GPUs | Varies | Not claimed as supported unless documented with reproducible evidence. |
 
-## Credits
+**Important:** CherryRed is not currently a plug-and-play driver. No installer or stable public release is provided here. Do not assume that a successful build, parser test, or OpenCore boot proves that a GPU is initialized or accelerated.
 
-RDNA4FB (Sunneva N. Mariudottir), mac-amdgpu (lemonade-sdk / Geramy Loveless), the Mesa
-project (RADV and the register databases), the Linux amdgpu driver authors at AMD and the
-community (register definitions and documentation), and the metal2vulkan author (steelbrain).
+## RX 7600 / Navi 33 research
 
-<sub>Cobalt64 is an independent project and is not affiliated with or endorsed by AMD or Apple.
-AMD, Radeon and RDNA are trademarks of Advanced Micro Devices, Inc. Apple, Mac, macOS and Metal
-are trademarks of Apple Inc. Kernel extensions write directly to the hardware: use at your own risk.</sub>
+The Navi 33 work is deliberately evidence-gated. The project will not enable hardware initialization based on guessed IP versions or data copied from a different GPU family.
+
+Current research includes:
+
+- A bounded IP Discovery parser and host-side regression tests.
+- A read-only scanner for inspecting the installed Windows AMD driver file.
+- Evidence, provenance, and source-verification notes under [`tools/ipdisc/`](tools/ipdisc/).
+- A documented Windows-only workflow while a trusted Linux environment is unavailable.
+- An explicit separation between Navi 48 routing and unverified Navi 33 support.
+
+Still required before claiming RX 7600 support:
+
+1. A real-card IP Discovery artifact with reproducible provenance.
+2. Verified Navi 33 IP and firmware mapping from authoritative sources.
+3. A macOS build and review with the appropriate SDK/toolchain.
+4. Hardware validation of initialization, display output, memory handling, and Metal workloads.
+
+See the [Navi 33 research notes](tools/ipdisc/RX7600_NAVI33_EVIDENCE.md), [evidence acquisition plan](tools/ipdisc/RX7600_EVIDENCE_ACQUISITION_PLAN.md), and [Windows-only plan](tools/ipdisc/WINDOWS_ONLY_PLAN.md).
+
+## Repository map
+
+| Path | Purpose |
+|---|---|
+| `src/navi48-bringup/` | Experimental Navi 48 IOKit bring-up code and host-side tests inherited from Cobalt64. |
+| `src/dcn41/` | Display Core 4.1 helpers and register-related tooling. |
+| `src/navi33-research/` | Isolated research code and tests for the Navi 33 investigation. |
+| `src/navi33-survey/` | Survey and research material for Navi 33. |
+| `src/xlat12/` | Command-stream translation components and supporting tables. |
+| `src/g2capture/` | Small shader-compiler record capture utility. |
+| `tools/ipdisc/` | IP Discovery parsing, evidence intake, provenance notes, and Windows inspection tools. |
+| `tools/native/` | Native helper tools and experimental Metal-related components. |
+| `tools/dcn41/`, `tools/pc/`, `tools/conductor/` | Build helpers, host tools, hardware test scripts, and test harnesses. |
+| `mesa-patches/` | Experimental RADV/Mesa Darwin-port patches and their notes. |
+| `docs/assets/` | Project logo and visual assets. |
+
+## Running the Navi 33 host tests on Windows
+
+These tests exercise research code on the host. They do not load a kernel extension, initialize the GPU, or validate macOS acceleration.
+
+From the repository root in PowerShell:
+
+```powershell
+python -B tools\ipdisc\test_ipdiscovery.py
+python -B tools\ipdisc\test_scan_windows_driver.py
+ctest --test-dir build\navi33-research-msvc -C Debug --output-on-failure
+ctest --test-dir build\navi33-research-msvc -C Release --output-on-failure
+```
+
+The scanner is intended for static inspection of a driver file. It does not read GPU MMIO registers or VRAM. Review the research notes and source provenance before treating any output as hardware evidence.
+
+## Build and installation notes
+
+- The experimental macOS components require a suitable macOS environment and project-specific dependencies; see [`BUILDING.md`](BUILDING.md) and the relevant component README files.
+- Do not load experimental kernel extensions on a machine containing data you cannot afford to lose.
+- Back up the system and keep a known-good boot path before any hardware bring-up.
+- Firmware blobs and third-party components may have separate licences and are not automatically redistributed by this repository.
+
+## Credits and project history
+
+CherryRed continues the **Cobalt64** project and credits the original Cobalt64 work, repository history, and contributors. It also builds on work from the Mesa/RADV project, Linux `amdgpu` contributors, RDNA4FB, mac-amdgpu, and metal2vulkan. See component notices and third-party licence files for details. Renaming this project does not transfer ownership of third-party code or supersede their licences and notices.
+
+CherryRed is an independent project and is not affiliated with, endorsed by, or sponsored by AMD or Apple. AMD, Radeon, and RDNA are trademarks of Advanced Micro Devices, Inc. Apple, macOS, and Metal are trademarks of Apple Inc. Experimental kernel extensions can crash or damage a system; use them only if you understand the risks.
+
+---
+
+<p align="center">
+  <strong>Built with curiosity. Validated with evidence.</strong><br>
+  <sub>CherryRed · Continuing the Cobalt64 research legacy</sub>
+</p>

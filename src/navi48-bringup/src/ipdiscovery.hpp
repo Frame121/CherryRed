@@ -77,6 +77,9 @@ private:
 	const uint8_t *data { nullptr };
 	size_t size { 0 };
 	size_t binBase { 0 };    // offset of binary_header in data
+	size_t tableEnd { 0 };   // one past the last byte of the IP_DISCOVERY
+	                         // table (table_info size), so record walks stay
+	                         // inside the declared table, not the whole buffer
 	size_t dieBase { 0 };    // offset of die_header in data
 	uint16_t numIps { 0 };
 	bool valid { false };
