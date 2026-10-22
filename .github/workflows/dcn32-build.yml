@@ -2,7 +2,7 @@ name: dcn32-build
 
 on:
   push:
-    branches: [ cherry-red/dcn32-ci ]
+    branches: [ CherryRed ]
   workflow_dispatch:
 
 jobs:

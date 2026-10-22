@@ -1,4 +1,5 @@
-# Navi48-MacOS - changes since the previous public snapshot (5 October 2026)
+# CherryRed — inherited Navi 48 development notes (5 October 2026)
+
 
 Kext: Navi48Bringup 0.0.664. Metal bundle: revision 20.
 Mesa patches: nine (was five), still on the same pinned Mesa commit. Everything below is
@@ -71,3 +72,6 @@ The expected display CRC is measured on the boot itself (or set with `AA_CRC_RG2
   the build still needs MacKernelSDK from RDNA4FB and the AMD firmware from linux-firmware.
 - Not included, as before: AMD firmware, captures and fixtures derived from Apple software,
   translated Apple shaders (spvcache), build outputs, notes.
+
+
+Project history: these notes describe the inherited Cobalt64/Navi48-MacOS codebase. CherryRed preserves the original work and applicable third-party credits and licences.

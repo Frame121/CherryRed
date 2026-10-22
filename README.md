@@ -1,10 +1,10 @@
 <p align="center">
-  <a href="https://github.com/Frame121/Cobalt64">
-    <img src="docs/assets/logo.svg" alt="Cobalt64 cherry-red GPU emblem" width="132" height="132">
+  <a href="https://github.com/Frame121/CherryRed">
+    <img src="docs/assets/logo.svg" alt="CherryRed GPU emblem" width="132" height="132">
   </a>
 </p>
 
-<h1 align="center">Cobalt64</h1>
+<h1 align="center">CherryRed</h1>
 
 <p align="center">
   <strong>Experimental AMD graphics research for macOS.</strong><br>
@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Frame121/Cobalt64"><img alt="Repository" src="https://img.shields.io/badge/GitHub-source-d80a35?style=for-the-badge&logo=github&logoColor=white"></a>
+  <a href="https://github.com/Frame121/CherryRed"><img alt="Repository" src="https://img.shields.io/badge/GitHub-CherryRed-d80a35?style=for-the-badge&logo=github&logoColor=white"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-b91c3b?style=for-the-badge"></a>
   <img alt="Project status" src="https://img.shields.io/badge/status-experimental-9f1239?style=for-the-badge">
 </p>
@@ -23,21 +23,21 @@
 
 ---
 
-## What is Cobalt64?
+## About CherryRed
 
-Cobalt64 is an experimental open-source project investigating graphics-driver components and compatibility paths for modern AMD Radeon GPUs on macOS. The repository contains bring-up code, display-engine helpers, command-stream translation research, host-side tests, and tools for collecting and validating hardware evidence.
+CherryRed is the renamed continuation of **Cobalt64**. The project preserves Cobalt64's existing code, research history, and third-party attributions while establishing CherryRed as the current project name. This repository investigates graphics-driver components and compatibility paths for modern AMD Radeon GPUs on macOS, including bring-up code, display-engine helpers, command-stream translation research, host-side tests, and hardware-evidence tools.
 
-The codebase includes an RDNA 4 / Navi 48 bring-up path. It also contains a separate research track for the RDNA 3 / Navi 33 family, including the Radeon RX 7600. These tracks have different evidence and validation states; passing a host-side test does **not** mean a GPU is supported by macOS.
+The codebase includes an experimental RDNA 4 / Navi 48 bring-up path and a separate research track for RDNA 3 / Navi 33, including the Radeon RX 7600. These tracks have different evidence and validation states; passing a host-side test does **not** mean a GPU is supported by macOS.
 
 ## Support status
 
 | GPU family | Example GPU | Current status |
 |---|---|---|
-| RDNA 4 / Navi 48 | Radeon RX 9070 XT | Experimental bring-up path in this repository. Reported results are limited to the project's documented test configuration; this is not a general-purpose release. |
+| RDNA 4 / Navi 48 | Radeon RX 9070 XT | Experimental bring-up path inherited from Cobalt64. Reported results are limited to the documented test configuration; this is not a general-purpose release. |
 | RDNA 3 / Navi 33 | Radeon RX 7600 | **Research only. Not supported for working macOS graphics acceleration.** Real-card IP Discovery evidence and hardware validation are still missing. |
 | Other GPUs | Varies | Not claimed as supported unless documented with reproducible evidence. |
 
-**Important:** Cobalt64 is not currently a plug-and-play driver. No installer or stable public release is provided here. Do not assume that a successful build, parser test, or OpenCore boot proves that a GPU is initialized or accelerated.
+**Important:** CherryRed is not currently a plug-and-play driver. No installer or stable public release is provided here. Do not assume that a successful build, parser test, or OpenCore boot proves that a GPU is initialized or accelerated.
 
 ## RX 7600 / Navi 33 research
 
@@ -64,7 +64,7 @@ See the [Navi 33 research notes](tools/ipdisc/RX7600_NAVI33_EVIDENCE.md), [evide
 
 | Path | Purpose |
 |---|---|
-| `src/navi48-bringup/` | Experimental Navi 48 IOKit bring-up code and host-side tests. |
+| `src/navi48-bringup/` | Experimental Navi 48 IOKit bring-up code and host-side tests inherited from Cobalt64. |
 | `src/dcn41/` | Display Core 4.1 helpers and register-related tooling. |
 | `src/navi33-research/` | Isolated research code and tests for the Navi 33 investigation. |
 | `src/navi33-survey/` | Survey and research material for Navi 33. |
@@ -98,19 +98,15 @@ The scanner is intended for static inspection of a driver file. It does not read
 - Back up the system and keep a known-good boot path before any hardware bring-up.
 - Firmware blobs and third-party components may have separate licences and are not automatically redistributed by this repository.
 
-## Contributing
+## Credits and project history
 
-Evidence-backed reports and reproducible tests are welcome. When adding GPU-specific support, include the exact PCI ID, hardware configuration, source revision, artifact hashes where applicable, and a clear distinction between observed results and hypotheses. Do not mark a GPU supported based only on family-level assumptions.
+CherryRed continues the **Cobalt64** project and credits the original Cobalt64 work, repository history, and contributors. It also builds on work from the Mesa/RADV project, Linux `amdgpu` contributors, RDNA4FB, mac-amdgpu, and metal2vulkan. See component notices and third-party licence files for details. Renaming this project does not transfer ownership of third-party code or supersede their licences and notices.
 
-## Credits and legal
-
-This project builds on research and work from the Mesa/RADV project, Linux `amdgpu` contributors, RDNA4FB, mac-amdgpu, and metal2vulkan. See the component notices and third-party licence files for details.
-
-Cobalt64 is an independent project and is not affiliated with, endorsed by, or sponsored by AMD or Apple. AMD, Radeon, and RDNA are trademarks of Advanced Micro Devices, Inc. Apple, macOS, and Metal are trademarks of Apple Inc. Experimental kernel extensions can crash or damage a system; use them only if you understand the risks.
+CherryRed is an independent project and is not affiliated with, endorsed by, or sponsored by AMD or Apple. AMD, Radeon, and RDNA are trademarks of Advanced Micro Devices, Inc. Apple, macOS, and Metal are trademarks of Apple Inc. Experimental kernel extensions can crash or damage a system; use them only if you understand the risks.
 
 ---
 
 <p align="center">
   <strong>Built with curiosity. Validated with evidence.</strong><br>
-  <sub>Cobalt64 · Cherry Red edition</sub>
+  <sub>CherryRed · Continuing the Cobalt64 research legacy</sub>
 </p>
