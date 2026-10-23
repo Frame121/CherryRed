@@ -39,8 +39,14 @@ jobs:
           make -C src/navi33-probe MKSDK="$GITHUB_WORKSPACE/build/MacKernelSDK"
           file src/navi33-probe/build/Navi33Probe.kext/Contents/MacOS/Navi33Probe
           nm -u src/navi33-probe/build/Navi33Probe.kext/Contents/MacOS/Navi33Probe
+      - name: Package and verify archive
+        run: |
+          ditto -c -k --keepParent src/navi33-probe/build/Navi33Probe.kext build/Navi33Probe-experimental.zip
+          ditto -x -k build/Navi33Probe-experimental.zip build/archive-check
+          test -x build/archive-check/Navi33Probe.kext/Contents/MacOS/Navi33Probe
+          codesign --verify build/archive-check/Navi33Probe.kext
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: Navi33Probe-experimental
-          path: src/navi33-probe/build/Navi33Probe.kext
+          path: build/Navi33Probe-experimental.zip
           if-no-files-found: error

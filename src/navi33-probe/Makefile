@@ -14,8 +14,8 @@ OBJS := $(BUILD)/Navi33Probe.o $(BUILD)/kmod_info.o
 COMMON = -arch x86_64 -target x86_64-apple-macos11.0 -isysroot "$(SDK)" \
     -I"$(MKSDK)/Headers" -Isrc -DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE \
     -DAPPLE -DNeXT -D_FORTIFY_SOURCE=0 -nostdinc -fno-builtin -fno-common \
-    -fno-stack-protector -mkernel -fapple-kext -Wall -Wextra -Os -g
-CXXFLAGS = $(COMMON) -std=c++17 -fno-exceptions -fno-rtti -fcheck-new \
+    -fno-stack-protector -mkernel -Wall -Wextra -Os -g
+CXXFLAGS = $(COMMON) -std=c++17 -fapple-kext -fno-exceptions -fno-rtti -fcheck-new \
     -fno-c++-static-destructors
 CFLAGS = $(COMMON)
 LDFLAGS = -arch x86_64 -target x86_64-apple-macos11.0 -isysroot "$(SDK)" \

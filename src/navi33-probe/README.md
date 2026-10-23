@@ -2,8 +2,10 @@
 
 `Navi33Probe.kext` is the first isolated macOS-facing diagnostic for the
 RX 7600 family research track. **It is not a graphics driver with working
-display or Metal acceleration.** Its macOS build and hardware behavior have
-not yet been validated. Host tests do not establish kext loadability.
+display or Metal acceleration.** Its x86_64 build and ad-hoc signing passed on
+macOS CI ([run 39909757521](https://github.com/Frame121/CherryRed/actions/runs/39909757521)).
+Loading and hardware behavior have not been validated. Host tests and a
+successful build do not establish kext loadability.
 
 ## Contract
 
@@ -44,6 +46,8 @@ Output: `src/navi33-probe/build/Navi33Probe.kext`, with an ad-hoc signature.
 The Makefile targets the macOS 11 x86_64 kernel ABI. This is a build target,
 not a claim of verified compatibility with macOS 11 or later versions.
 No installation or system-security changes are performed by the build.
+CI packages the bundle into `Navi33Probe-experimental.zip` before uploading,
+preserving executable permissions. This artifact is a diagnostic only.
 
 On an authorized macOS test host, first validate the bundle, kernel symbols,
 and matching behavior using that host's kext validation process. Loading

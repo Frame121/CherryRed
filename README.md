@@ -51,8 +51,8 @@ Current research includes:
   and compilation checks against real kernel headers. Hardware initialization
   and graphics acceleration remain unimplemented.
 - An isolated, opt-in [macOS PCI diagnostic](src/navi33-probe/README.md)
-  that reads identity and declines driver attachment; macOS build and hardware
-  validation are pending, and it provides no display or Metal acceleration.
+  that reads identity and declines driver attachment; macOS CI build/signing
+  passed, hardware validation is pending, and it provides no display or Metal acceleration.
 - A read-only scanner for inspecting the installed Windows AMD driver file.
 - Evidence, provenance, and source-verification notes under [`tools/ipdisc/`](tools/ipdisc/).
 - A documented Windows-only workflow while a trusted Linux environment is unavailable.
