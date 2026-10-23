@@ -19,7 +19,7 @@ CXXFLAGS = $(COMMON) -std=c++17 -fno-exceptions -fno-rtti -fcheck-new \
     -fno-c++-static-destructors
 CFLAGS = $(COMMON)
 LDFLAGS = -arch x86_64 -target x86_64-apple-macos11.0 -isysroot "$(SDK)" \
-    -nostdlib -Xlinker -kext -L"$(MKSDK)/Library/x86_64" -lkmodc++ -lkmod \
+    -nostdlib -Xlinker -kext -L"$(MKSDK)/Library/x86_64" -lkmod \
     -Wl,-no_deduplicate
 
 .PHONY: all check-env clean

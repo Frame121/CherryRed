@@ -46,6 +46,10 @@ The Navi 33 work is deliberately evidence-gated. The project will not enable har
 Current research includes:
 
 - A bounded IP Discovery parser and host-side regression tests.
+- A [Navi 33 driver foundation](src/navi33-driver/README.md) with bounded
+  firmware inspection, software VRAM address allocation, preparation rollback,
+  and compilation checks against real kernel headers. Hardware initialization
+  and graphics acceleration remain unimplemented.
 - An isolated, opt-in [macOS PCI diagnostic](src/navi33-probe/README.md)
   that reads identity and declines driver attachment; macOS build and hardware
   validation are pending, and it provides no display or Metal acceleration.
@@ -71,6 +75,7 @@ See the [Navi 33 research notes](tools/ipdisc/RX7600_NAVI33_EVIDENCE.md), [evide
 | `src/dcn41/` | Display Core 4.1 helpers and register-related tooling. |
 | `src/navi33-research/` | Isolated research code and tests for the Navi 33 investigation. |
 | `src/navi33-probe/` | Read-only macOS PCI diagnostic source for `1002:7480`; no initialization or acceleration. |
+| `src/navi33-driver/` | Freestanding firmware/resource preparation library, host tool and tests; no hardware backend. |
 | `src/navi33-survey/` | Survey and research material for Navi 33. |
 | `src/xlat12/` | Command-stream translation components and supporting tables. |
 | `src/g2capture/` | Small shader-compiler record capture utility. |

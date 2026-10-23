@@ -30,8 +30,10 @@ does not authenticate evidence or implement a production hardware backend.
 
 ## Build on an x86_64 macOS validation host
 
-Use Xcode Command Line Tools and the external MacKernelSDK described in
-[`BUILDING.md`](../../BUILDING.md). No firmware is required for this target.
+Use Xcode Command Line Tools and external
+[MacKernelSDK](https://github.com/acidanthera/MacKernelSDK) at
+`3f750085caa17ec3a7880f11c11bf4f48cd6a164` (the pin used by CI).
+The build links its `libkmod.a`. No firmware is required for this target.
 From the repository root:
 
 ```sh

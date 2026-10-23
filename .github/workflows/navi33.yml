@@ -1,0 +1,46 @@
+name: Navi33 host and macOS build
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/navi33-driver/**'
+      - 'src/navi33-probe/**'
+      - '.github/workflows/navi33.yml'
+  pull_request:
+    paths:
+      - 'src/navi33-driver/**'
+      - 'src/navi33-probe/**'
+      - '.github/workflows/navi33.yml'
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Host tests
+        run: |
+          cmake -S src/navi33-driver -B build/navi33-driver -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build/navi33-driver --parallel
+          ctest --test-dir build/navi33-driver --output-on-failure
+          cmake -S src/navi33-probe -B build/navi33-probe
+          cmake --build build/navi33-probe --parallel
+          ctest --test-dir build/navi33-probe --output-on-failure
+      - name: Fetch pinned MacKernelSDK
+        run: |
+          git clone https://github.com/acidanthera/MacKernelSDK.git build/MacKernelSDK
+          git -C build/MacKernelSDK checkout --detach 3f750085caa17ec3a7880f11c11bf4f48cd6a164
+      - name: Compile driver core against kernel headers
+        run: bash src/navi33-driver/tools/check_kernel_compile.sh build/MacKernelSDK build/kernel-objects
+      - name: Build and verify diagnostic kext
+        run: |
+          make -C src/navi33-probe MKSDK="$GITHUB_WORKSPACE/build/MacKernelSDK"
+          file src/navi33-probe/build/Navi33Probe.kext/Contents/MacOS/Navi33Probe
+          nm -u src/navi33-probe/build/Navi33Probe.kext/Contents/MacOS/Navi33Probe
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Navi33Probe-experimental
+          path: src/navi33-probe/build/Navi33Probe.kext
+          if-no-files-found: error
