@@ -24,4 +24,8 @@ done
     -c "$component_root/../navi33-probe/src/Navi33Probe.cpp" -o "$compile_output/Navi33Probe.o"
 "${CC:-clang}" "${common[@]}" \
     -c "$component_root/../navi33-probe/src/kmod_info.c" -o "$compile_output/kmod_info.o"
-echo "Kernel-header compilation passed (6 objects); link, signing, and hardware remain separate checks."
+"${CXX:-clang++}" "${common[@]}" "${cpp[@]}" \
+    -c "$component_root/../navi33-survey/Navi33Survey.cpp" -o "$compile_output/Navi33Survey.o"
+"${CC:-clang}" "${common[@]}" \
+    -c "$component_root/../navi33-survey/kmod_info.c" -o "$compile_output/survey_kmod_info.o"
+echo "Kernel-header compilation passed (8 objects); link, signing, and hardware remain separate checks."

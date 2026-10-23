@@ -5,12 +5,14 @@ on:
     paths:
       - 'src/navi33-driver/**'
       - 'src/navi33-probe/**'
+      - 'src/navi33-survey/**'
       - 'tools/ipdisc/**'
       - '.github/workflows/navi33.yml'
   pull_request:
     paths:
       - 'src/navi33-driver/**'
       - 'src/navi33-probe/**'
+      - 'src/navi33-survey/**'
       - 'tools/ipdisc/**'
       - '.github/workflows/navi33.yml'
 permissions:
@@ -30,6 +32,9 @@ jobs:
           cmake -S src/navi33-probe -B build/navi33-probe
           cmake --build build/navi33-probe --parallel
           ctest --test-dir build/navi33-probe --output-on-failure
+          cmake -S src/navi33-survey -B build/navi33-survey
+          cmake --build build/navi33-survey --parallel
+          ctest --test-dir build/navi33-survey --output-on-failure
       - name: Fetch pinned MacKernelSDK
         run: |
           git clone https://github.com/acidanthera/MacKernelSDK.git build/MacKernelSDK
@@ -51,4 +56,16 @@ jobs:
         with:
           name: Navi33Probe-experimental
           path: build/Navi33Probe-experimental.zip
+          if-no-files-found: error
+      - name: Build and package PCI survey
+        run: |
+          make -C src/navi33-survey MKSDK="$GITHUB_WORKSPACE/build/MacKernelSDK"
+          ditto -c -k --keepParent src/navi33-survey/build/Navi33Survey.kext build/Navi33Survey-experimental.zip
+          ditto -x -k build/Navi33Survey-experimental.zip build/survey-archive-check
+          test -x build/survey-archive-check/Navi33Survey.kext/Contents/MacOS/Navi33Survey
+          codesign --verify build/survey-archive-check/Navi33Survey.kext
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Navi33Survey-experimental
+          path: build/Navi33Survey-experimental.zip
           if-no-files-found: error
