@@ -25,13 +25,14 @@ bool IpDiscovery::readU8(size_t off, uint8_t &v) const {
 }
 
 bool IpDiscovery::readU16(size_t off, uint16_t &v) const {
-	if (off + 2 > size) return false;
+	// Subtraction-based bounds checks avoid overflow in off + width.
+	if (off > size || size - off < 2u) return false;
 	v = static_cast<uint16_t>(data[off] | (data[off + 1] << 8));
 	return true;
 }
 
 bool IpDiscovery::readU32(size_t off, uint32_t &v) const {
-	if (off + 4 > size) return false;
+	if (off > size || size - off < 4u) return false;
 	v = static_cast<uint32_t>(data[off]) |
 	    (static_cast<uint32_t>(data[off + 1]) << 8) |
 	    (static_cast<uint32_t>(data[off + 2]) << 16) |
@@ -40,49 +41,98 @@ bool IpDiscovery::readU32(size_t off, uint32_t &v) const {
 }
 
 bool IpDiscovery::validateBinary(size_t offset) {
-	uint16_t vmajor, checksum, binSize;
-	if (!readU16(offset + 4, vmajor) || !readU16(offset + 8, checksum) ||
-	    !readU16(offset + 10, binSize))
-		return false;
-	if (binSize < 16 || offset + binSize > size)
+	// Do not form offset + field-width until the caller buffer is known to
+	// contain the fixed binary header. readU* also uses subtraction checks.
+	if (offset > size || size - offset < 12u)
 		return false;
 
-	// Checksum: 16-bit byte sum of everything after the checksum field.
+	uint32_t signature;
+	uint16_t vmajor, checksum, binSize;
+	if (!readU32(offset, signature) || signature != kBinarySignature ||
+	    !readU16(offset + 4, vmajor) || !readU16(offset + 8, checksum) ||
+	    !readU16(offset + 10, binSize))
+		return false;
+	if (static_cast<size_t>(binSize) > size - offset)
+		return false;
+
+	const size_t binEnd = offset + static_cast<size_t>(binSize);
+	if (binSize < 12u)
+		return false;
+
+	// Checksum: 16-bit wrapping byte sum from the checksum field through
+	// the declared binary end (format behavior).
 	uint16_t sum = 0;
-	for (size_t i = offset + 10; i < offset + binSize; i++)
+	for (size_t i = offset + 10; i < binEnd; ++i)
 		sum = static_cast<uint16_t>(sum + data[i]);
 	if (sum != checksum)
 		return false;
 
-	// IP_DISCOVERY is table_list[0]; list position depends on header version.
-	size_t tableList = offset + (vmajor >= 2 ? 16 : 12);
+	// v1 has six fixed table_info entries. v2 has a counted list at +16.
+	// Validate the ENTIRE list against binSize before reading any entry.
+	size_t tableListRel = 12u;
+	size_t tableCount = 6u;
+	if (vmajor >= 2u) {
+		uint16_t count;
+		if (binSize < 16u || !readU16(offset + 12u, count) || count == 0u)
+			return false;
+		tableListRel = 16u;
+		tableCount = static_cast<size_t>(count);
+	}
+	const size_t tableListBytes = tableCount * 8u;
+	if (tableListRel > binSize ||
+	    tableListBytes > static_cast<size_t>(binSize) - tableListRel)
+		return false;
+	const size_t tableListEndRel = tableListRel + tableListBytes;
+
+	// IP_DISCOVERY is table_list[0]; table_info is 8 bytes.
+	const size_t tableList = offset + tableListRel;
 	uint16_t ipdOffset, ipdSize;
-	if (!readU16(tableList, ipdOffset) || !readU16(tableList + 4, ipdSize) ||
-	    ipdOffset == 0 || ipdSize < 80)
+	if (!readU16(tableList, ipdOffset) || !readU16(tableList + 4u, ipdSize) ||
+	    ipdOffset == 0u || ipdSize < 80u)
 		return false;
 
-	size_t ipd = offset + ipdOffset;
-	// The table's declared size must lie inside the declared binary region
-	// (which validateBinary already kept inside the caller's buffer).
-	if (ipd > size || static_cast<size_t>(ipdSize) > size - ipd)
+	// Offsets are relative to the binary start. Keep the table within both
+	// the declared binary and caller buffer, and reject header/list overlap.
+	if (static_cast<size_t>(ipdOffset) < tableListEndRel ||
+	    static_cast<size_t>(ipdOffset) > binSize ||
+	    static_cast<size_t>(ipdSize) > static_cast<size_t>(binSize) - ipdOffset)
 		return false;
+	const size_t ipd = offset + static_cast<size_t>(ipdOffset);
+	const size_t ipdEnd = ipd + static_cast<size_t>(ipdSize);
+
 	uint32_t sig;
-	uint16_t numDies;
-	if (!readU32(ipd, sig) || sig != kIpdsSignature || !readU16(ipd + 12, numDies) || numDies == 0)
+	uint16_t ipdVersion, declaredIpdSize, numDies;
+	if (!readU32(ipd, sig) || sig != kIpdsSignature ||
+	    !readU16(ipd + 4u, ipdVersion) ||
+	    !readU16(ipd + 6u, declaredIpdSize) ||
+	    declaredIpdSize != ipdSize || declaredIpdSize < 80u ||
+	    !readU16(ipd + 12u, numDies) || numDies == 0u)
 		return false;
+	// Version is recorded for evidence; the parser does not infer Navi33 IP
+	// versions or enable hardware paths from an untrusted table.
+	(void)ipdVersion;
 
-	// Single-die parts only (true for all dGPUs); die_info[0] at +14.
+	// The fixed IPDS header (including 16 die_info entries) is 80 bytes.
+	// die_info[0] is at +14; its offset member is at +16.
 	uint16_t dieOffset;
-	if (!readU16(ipd + 16, dieOffset) || dieOffset == 0)
+	if (!readU16(ipd + 16u, dieOffset) || dieOffset == 0u)
+		return false;
+	if (static_cast<size_t>(dieOffset) < static_cast<size_t>(ipdOffset) + 80u ||
+	    static_cast<size_t>(dieOffset) > binSize ||
+	    4u > static_cast<size_t>(binSize) - dieOffset)
+		return false;
+	const size_t die = offset + static_cast<size_t>(dieOffset);
+	// A die header must also fit inside this IP_DISCOVERY table, not just
+	// elsewhere in the binary or caller buffer.
+	if (die < ipd || die > ipdEnd || ipdEnd - die < 4u)
 		return false;
 
-	size_t die = offset + dieOffset;
 	uint16_t nips;
-	if (!readU16(die + 2, nips) || nips == 0 || nips > 256)
+	if (!readU16(die + 2u, nips) || nips == 0u || nips > 256u)
 		return false;
 
 	binBase = offset;
-	tableEnd = ipd + ipdSize;
+	tableEnd = ipdEnd;
 	dieBase = die;
 	numIps = nips;
 	return true;
@@ -92,13 +142,16 @@ bool IpDiscovery::init(const uint8_t *buffer, size_t bufferSize) {
 	data = buffer;
 	size = bufferSize;
 	valid = false;
+	binBase = 0;
 	tableEnd = 0;
+	dieBase = 0;
+	numIps = 0;
 	if (!data || size < 512)
 		return false;
 
 	// The binary is not alignment-guaranteed within a flash dump (this ROM:
 	// 0x34900); scan for the signature on 4-byte steps.
-	for (size_t off = 0; off + 512 <= size; off += 4) {
+	for (size_t off = 0; off <= size - 512u; off += 4u) {
 		uint32_t sig;
 		if (readU32(off, sig) && sig == kBinarySignature && validateBinary(off)) {
 			valid = true;

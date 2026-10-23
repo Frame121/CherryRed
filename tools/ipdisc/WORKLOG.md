@@ -2473,3 +2473,146 @@ Authorization received to hold all 4 commits until M6.
   Markdown hard-break trailing spaces in seven older reports; these files
   were not edited. New evidence/review files and continuity updates have no
   trailing whitespace. No C++/parser tests or hardware commands were run.
+
+
+## 2026-10-22 — Spec citation audit and host test recheck
+
+- **Objective:** Continue the RX 7600/Navi33 evidence work with a documentation-only improvement and re-run existing tests on the connected Windows host.
+- **Changes:** Updated `RX7600_NAVI33_IP_DISPATCH_SPEC.md` to add pinned line-range links for the Linux IP dispatch switches, explicitly link both IH v6.0/v6.1 implementations and the IH dispatch range, and separate PSP TOC and TA helper citations. No driver or parser source was changed.
+- **Tests actually run:** `python -B tools/ipdisc/test_ipdiscovery.py` — 30 tests passed; `python -B src/navi33-research/tests/test_navi48_isolation.py` — 4 tests passed. Ran the pre-existing Debug and Release executables: Navi33 research 35/35, lifecycle 32/32, IP Discovery bounds 7 fixture cases passed in each configuration. Ran `audit_portable_core.py` for Debug and Release; both exited 0 and reported preliminary Windows-only evidence.
+- **Limitations:** CMake/CTest are not on PATH in this PowerShell environment. The audit shows Windows test binaries link, but this is not a macOS compile/link or Apple-kernel ABI result. No board-attributed IP Discovery artifact, VBIOS identity, or firmware request/loaded-state capture was produced. No hardware registers, ROM BAR, MMIO, firmware interface, EFI, or system settings were accessed.
+- **Git/scope:** `git diff --check` exited 0. Only `tools/ipdisc/RX7600_NAVI33_IP_DISPATCH_SPEC.md` is modified by this task; no files staged or committed. Branch `cherry-red/dcn32-ci`, HEAD `6f2f394`.
+- **Next blocker:** Need provenance-documented IP Discovery/VBIOS evidence for this exact board, or a suitable authorized Linux capture. Do not implement a board-specific dispatch table from generic source branches alone.
+
+## 2026-10-22 — Live board identity and Linux capture availability
+
+- Re-ran a read-only Windows PnP/WMI GPU identity query on Frame121. RX 7600 reports PCI `1002:7480`, subsystem `148C:2421`, revision `CF`, driver `32.0.31041.1004`, instance `PCI\VEN_1002&DEV_7480&SUBSYS_2421148C&REV_CF\6&EB99E4&0&00000009`.
+- Checked local evidence-capture prerequisites: `wsl.exe --list --quiet` listed no installed distributions; `lspci` and `adb` are absent from PowerShell PATH. OpenSSH client exists but no host was contacted.
+- No Linux `dmesg`, sysfs/debugfs, IP Discovery binary, VBIOS, firmware info, hardware register, ROM BAR, MMIO, or firmware interface was read. No packages installed or settings changed.
+- Outcome: PCI identity is reconfirmed; IP versions, board model/VBIOS and firmware request/loaded states remain unverified. Need user-provided trusted artifact or separate authorization for Linux capture setup. Do not infer board dispatch from generic Linux branches.
+
+## 2026-10-22 — post-cleanup regression recheck
+
+- Scope: read-only regression verification after the user requested continued Cobalt64 work. No C++/driver source, plist, EFI, or system configuration was changed in this task.
+- `python -B tools\\ipdisc\\test_ipdiscovery.py`: **30 passed, 0 failed**.
+- `python -B src\\navi33-research\\tests\\test_navi48_isolation.py`: **4 passed, 0 failed**.
+- Existing MSVC test executables (not rebuilt; CMake/CTest and compiler commands are absent from PATH): Debug and Release each reported Navi 33 research **35/35**, lifecycle **32/32**, and IP Discovery bounds **7 fixture cases passed**.
+- `git diff --check`: exit 0; only line-ending warnings (LF may be converted to CRLF) for already-modified Markdown files.
+- These tests validate offline parser/model/isolation behavior only. They do not provide physical-card IP Discovery records, firmware evidence, macOS compilation, GPU initialization, acceleration, or Metal support.
+- Next meaningful gate remains a trusted, provenance-documented IP Discovery artifact attributable to the physical RX 7600 board. No artifact was fabricated and no GPU/ROM/MMIO/firmware access was attempted. No files staged or committed.
+
+
+## 2026-10-22 — Static audit correction: C++ IP Discovery bounds are incomplete
+
+- **Scope:** Read-only source comparison of `src/navi48-bringup/src/ipdiscovery.cpp`, `tools/ipdisc/ipdiscovery.py`, and `tools/ipdisc/cpp_parity.md`. No parser, kext, hardware, firmware, or build configuration was changed.
+- **Finding:** The C++ `validateBinary()` check currently reads `if (ipd > size || static_cast<size_t>(ipdSize) > size - ipd)`. This limits the table to the caller buffer, **not** to the declared binary interval `[offset, offset + binSize)`. Its preceding comment and `cpp_parity.md` claim that the table is bounded by the declared binary, so the documentation overstates the implementation.
+- **Related boundary gap:** C++ reads the first die offset and then `numIps` at `die + 2` without first verifying that the complete die header lies inside the declared IP_DISCOVERY table. `ipAt()` bounds subsequent record walks by `tableEnd`, but that does not validate the die header read itself.
+- **Additional header gap:** C++ requires `binSize >= 16`, but does not validate that the complete v1 six-entry table list (or counted v2 list) fits within the declared binary before reading the first table entry. The v2 path also does not validate its table count. These should be checked against the pinned format and existing fixture assumptions before any patch.
+- **Python comparison:** Python strict mode already checks the table end against `binary_size`, verifies the die header lies inside the table, and validates the strict header/list structure. Existing Python tests are synthetic parser tests only; they do not establish C++ parity.
+- **Verification limitation:** This Windows host has no usable C++ compiler/build tool in the searched standard paths/PATH. Do not claim a C++ regression test passed for these findings. Existing prebuilt C++ test binaries are stale with respect to any proposed fix.
+- **Next safe step:** Add synthetic C++ regression cases for table-beyond-binary, die-header-outside-table, and truncated v1/v2 table lists; implement checked subtraction/range validation; then rebuild and run Debug/Release tests in an authorized provisioned toolchain. Until then, keep the C++ parser safety status **INCOMPLETE / UNVERIFIED**. Do not route Navi33 through Navi48 or infer board-specific IP versions from this parser.
+
+
+## 2026-10-22 — C++ IP Discovery parser bounds hardening
+
+- Hardened `src/navi48-bringup/src/ipdiscovery.cpp`: validate the fixed header before offset arithmetic; use subtraction-based bounds checks in 16/32-bit readers; validate the complete v1 six-entry or v2 counted table list within declared `binSize`; reject zero v2 table count; require IP_DISCOVERY table extent to fit inside the declared binary and start after the table list; require the first die header to fit inside both the binary and the IP_DISCOVERY table; clear all parser state on every `init` attempt.
+- Added `src/navi48-bringup/tests/ipdiscovery_bounds_test.cpp`, synthetic-only C++ regressions for valid v1/v2, table beyond declared binary, die header beyond table, truncated v1 list, and truncated v2 list.
+- Verification: Python synthetic suite `python -B tools/ipdisc/test_ipdiscovery.py` passed 30/30; `git diff --check` exited 0 (only Git LF/CRLF warnings).
+- C++ regression harness is **NOT RUN**: `clang++`, `g++`, and `cl` were not found on PATH. Do not claim C++ compile/runtime success until a suitable authorized compiler is available and this test is built/run. No hardware, ROM, MMIO, firmware, or kext was accessed.
+- Remaining parser limitations: table checksum and IP Discovery version are not validated; record parsing remains lazy (each accessed record is bounds-checked, but all records are not validated in `init`). The change reduces identified bounds risks but is not a complete security certification.
+
+
+## 2026-10-22 — IPDS declared-size consistency guard
+
+- Hardened `src/navi48-bringup/src/ipdiscovery.cpp`: read the IP_DISCOVERY header's own declared size and require it to match the enclosing `table_info` size; reject values below the fixed 80-byte header.
+- Added a regression case in `src/navi33-research/tests/test_ipdiscovery_bounds.cpp` that corrupts only the IPDS declared size and verifies fail-closed behavior.
+- Validation on the Windows host: MSVC x64 Release build passed; MSVC x64 Debug build passed; CTest 4/4 passed in Release and 4/4 in Debug; `tools/ipdisc/test_ipdiscovery.py` 30/30 passed; `src/navi33-research/tests/test_navi48_isolation.py` 4/4 passed; `git diff --check` passed.
+- Scope: parser robustness only. No target IP versions inferred, no hardware initialization, and no ROM/MMIO/firmware access. All existing worktree changes remain uncommitted.
+- Next gate remains an existing, provenance-documented artifact attributed to the physical RX 7600 board. Do not add Navi33 dispatch or hardware initialization before that evidence is reviewed.
+
+
+## 2026-10-22 — Deterministic C++ malformed-input regression expansion
+
+- Added a deterministic std::mt19937 corpus loop to src/navi33-research/tests/test_ipdiscovery_bounds.cpp: 512 generated malformed buffers sized 512–2048 bytes, with an aligned IP Discovery binary signature injected into half of the cases. Each case must be rejected and leave the parser invalid with zero IP records.
+- Rebuilt the affected MSVC target and ran CTest in Debug and Release: 4/4 passed in each configuration. The expanded bounds test completed in both builds; no crash or false acceptance was observed in this deterministic corpus.
+- git diff --check passed; only pre-existing LF/CRLF conversion warnings appeared for modified Markdown files.
+- This is offline parser robustness work with synthetic data only. It does not add Navi33 dispatch, prove any physical RX 7600 IP versions, or validate macOS/kernel/firmware/hardware operation. No files were staged or committed.
+- Next gate remains provenance-documented IP Discovery evidence attributable to the physical RX 7600; keep hardware dispatch disabled until that evidence is reviewed.
+
+## 2026-10-22 — Windows-only GPU inventory checkpoint
+
+- Extended `tools/ipdisc/windows_probe.ps1` to collect read-only Windows OS/PnP metadata for the physical RX 7600, including PCI hardware IDs, PnP location, driver version/date, and driver service. It explicitly does not read PCI configuration space, BAR/MMIO, VRAM, or write firmware.
+- Captured `tools/ipdisc/evidence/windows_probe.json`; SHA-256: `218A5AFB7D9B935E18FB2183EC62980FFC904F3BF3BD7AD19B8AE31D2EA9AF19`. The report confirms device ID `1002:7480`, subsystem `148C:2421`, revision `CF`, driver `32.0.31041.1004`, PnP status `OK`, PCI bus 3/device 0/function 0.
+- HIP SDK / `hipInfo.exe` was not found, so Windows runtime architecture validation is still outstanding. No SDK was installed.
+- Rebuilt MSVC Debug and Release; CTest 4/4 passed in each configuration; Python IP Discovery tests 30/30 passed; `git diff --check` passed with line-ending warnings only.
+- This inventory is not an IP Discovery dump and does not resolve the physical-card IP-version gate. Keep Navi33 hardware dispatch disabled; no files staged or committed.
+
+
+## 2026-10-22 — Windows AMD display-driver static IPDS scan
+
+- Added scan_windows_driver.py, a read-only static-file scanner. It finds aligned IPDS signatures and only accepts an embedded candidate if the existing strict parser validates the enclosing binary and its declared table offset points to that exact signature. It never queries PCI/MMIO/VRAM or communicates with the GPU.
+- Added test_scan_windows_driver.py: 5 tests, 4 passed and 1 skipped because symlink creation is unavailable in this Windows environment. Tests cover an aligned synthetic fixture, false-positive IPDS bytes, size limits, and minimum input size.
+- Scanned the installed AMD amdkmdag.sys from the current driver package: size 84,454,408 bytes; SHA-256 92a83d34adb17a8c419a153b62e94e2cf3c478e260571af6699574800af3f3df. Found four aligned IPDS byte signatures at offsets 21,156,316; 29,993,756; 30,908,248; 31,117,628, but zero enclosing IP Discovery binaries passed strict validation and exact table-offset correlation. These hits are not board IP evidence.
+- Saved report to tools/ipdisc/evidence/windows_driver_scan.json; report SHA-256 9FAC110DB356D6D3B7649F9CFD036B5E7750FCC4D01643105E80B4E21A036AC4.
+- MSVC CTest: Debug 4/4, Release 4/4. Python parser suite 30/30 passed; scanner tests as above; git diff --check passed with existing LF/CRLF warnings only.
+- Official AMD HIP SDK requirements list RX 7600 as RDNA3 gfx1102 with runtime/HIP SDK support, but hipInfo.exe is not installed. This is generic SDK compatibility, not a physical IP Discovery record. No SDK or GPU driver was installed or changed.
+- Attempted a bounded source fetch for the pinned Linux commit from GitHub; requests were rate-limited (HTTP 429). A kernel.org fetch did not advertise filtering, so it was stopped rather than downloading the full Linux repository. No upstream source verification claim is made.
+- No source files were staged or committed. Existing worktree changes remain preserved. Navi33 hardware dispatch stays disabled; physical-board IP versions remain unresolved.
+
+
+## 2026-10-22 — static scanner integrity hardening
+
+- Re-ran the strict Python parser suite: 30/30 passed.
+- Extended `test_scan_windows_driver.py`: 5 passed, 1 skipped (symlink creation unavailable in this Windows environment).
+- Hardened `scan_windows_driver.py` to hash input content both before and after the static scan and reject a content-hash mismatch, in addition to the existing size/mtime/ctime checks.
+- Rebuilt MSVC Debug and Release configurations; CTest passed 4/4 in each configuration. `git diff --check` passed; Git emitted only existing LF/CRLF warnings.
+- Updated `WINDOWS_ONLY_PLAN.md` with scoped progress estimates: Windows-only research/tooling 85%; end-to-end RX 7600 macOS driver goal 10%. These are project-stage estimates, not claims of functional support.
+- No GPU register/MMIO/VRAM access, VBIOS capture, firmware flashing, SDK install, display-driver change, kext load, or Git commit was performed. Existing worktree changes were preserved.
+
+
+## 2026-10-22 — scanner output safety
+
+- Found and fixed a read-only-contract edge case: the scanner CLI could previously overwrite its input if `--json` pointed at the same path (including a path resolving to the same file).
+- The CLI now rejects that path collision before scanning or writing. Added a regression test confirming exit code 2 and byte-for-byte preservation of the input.
+- Validation: scanner tests 6 passed, 1 skipped (Windows symlink creation unavailable); strict parser suite 30/30 passed; `git diff --check` passed with existing LF/CRLF warnings.
+- No hardware, firmware, display driver, SDK, or system settings were accessed or changed. Existing worktree changes remain uncommitted.
+
+
+## 2026-10-23 — Continuation regression verification
+
+- Re-ran the offline Python IP Discovery parser suite from the current working tree: `python -B tools\\ipdisc\\test_ipdiscovery.py` — **30/30 passed**, exit 0.
+- Re-ran the static Windows driver scanner tests: `python -B tools\\ipdisc\\test_scan_windows_driver.py` — **6 passed, 1 skipped**, exit 0. The skip is the expected symlink test because this Windows environment does not permit creating the symlink; no test failed.
+- Re-ran Release CTest in `build/navi33-research-msvc`: **4/4 passed**, exit 0 (`navi33_research_tests`, `navi33_driver_core_tests`, `ipdiscovery_bounds_tests`, `navi48_routing_isolation`). `git diff --check` exited 0; only existing LF/CRLF warnings appeared.
+- Tried to re-fetch the pinned Linux source files from the GitHub Contents API for `d0c647a6aae2ce577372594a176c82733e1ed267`. The three file endpoints returned HTTP 404 in this attempt; follow-up API/raw requests did not return output within the bounded wait and were terminated. This attempt **does not independently verify or disprove** the earlier source inspection recorded in prior reports. No source was substituted from a moving branch, and no source-verification claim is added.
+- No source implementation, dispatch, driver, GPU setting, or system configuration was changed in this continuation. No hardware/ROM/MMIO/VRAM/firmware access, SDK installation, or kext load occurred. Existing worktree changes remain uncommitted and preserved.
+- Decision gate unchanged: no physical-board IP Discovery artifact has been validated; RX 7600 IP versions and firmware requirements remain unresolved. Keep Navi33 hardware dispatch disabled until provenance-documented board evidence is available and independently reviewed.
+
+
+## 2026-10-23 — Debug regression rerun and upstream source checkpoint
+
+- Re-ran MSVC Debug CTest in `build/navi33-research-msvc`: **4/4 passed**. Re-ran Python parser suite: **30/30 passed**. Re-ran scanner suite: **6 passed, 1 skipped** (symlink creation unavailable). All commands exited 0.
+- `git diff --check` remains clean apart from Git's existing LF/CRLF warnings. No source implementation, hardware dispatch, system setting, driver, or firmware was changed in this checkpoint.
+- Located a read-only upstream Linux source page for `torvalds/linux` commit `9b1f2cbdb6d3062c468d3f9b579501f0f7ce330b`, file `drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c`, blob `27d8ae19a7a40ebd27489ab08546eac76133fe87`. This revision's `amdgpu_discovery_read_binary()` reads the discovery region using `RREG32(mmRCC_CONFIG_MEMSIZE)` and `amdgpu_device_vram_access()`, then validates signature/checksum during initialization. Source URL and limitation recorded in `RX7600_NAVI33_EVIDENCE.md`.
+- This is **not** the previously planned hash `d0c647a6aae2ce577372594a176c82733e1ed267`; Windows API requests for that hash returned 404, and the alternate request timed out. The new source page is not claimed as an equivalent revision, was not downloaded or built, and does not establish this physical board's IP versions.
+- Hardware gate remains unresolved: no board-attributed IP Discovery artifact or firmware logs. Navi33 dispatch stays disabled. No BAR/MMIO/VRAM/ROM capture, custom kernel driver, firmware change, SDK installation, kext load, or Git commit was performed.
+
+
+## 2026-10-23 — Remote continuation and regression recheck
+
+- **Connection:** Desktop Commander device `Frame121` reported online. Continued in the existing checkout at `D:\\ALL\\Framelpo ALL Project\\Hackintosh AMD Driver\\Cobalt64`.
+- **Git state before this entry:** branch `main`, HEAD `970257f` (`Rebrand main as CherryRed and rewrite README`). The pre-existing modified and untracked parser/research files were preserved. No staging, commit, reset, clean, or stash operation was performed.
+- **Tests rerun directly from existing binaries / scripts:**
+  - `python -B tools\\ipdisc\\test_ipdiscovery.py`: 30 passed.
+  - `python -B tools\\ipdisc\\test_scan_windows_driver.py`: 6 passed, 1 skipped because symlink creation is unavailable in this Windows environment.
+  - Debug `ipdiscovery_bounds_tests.exe`: 8 fixture cases plus 512 malformed inputs passed.
+  - Debug `ipdiscovery_bounds_security_tests.exe`: 10 synthetic-data groups passed.
+  - Debug `navi33_driver_core_tests.exe`: 32 passed.
+  - Debug `navi33_research_tests.exe`: 35 passed.
+  - Release `ipdiscovery_bounds_tests.exe`: 8 fixture cases plus 512 malformed inputs passed.
+  - Release `navi33_driver_core_tests.exe`: 32 passed.
+  - Release `navi33_research_tests.exe`: 35 passed.
+  - `git diff --check`: exit 0; Git emitted an LF-to-CRLF warning for `tools/ipdisc/WORKLOG.md`.
+- **Not rerun:** CTest was not available on PATH and was not rerun in this session. The ASan executable was not rerun; its earlier startup failure remains unresolved and must not be called a passing sanitizer run.
+- **Evidence review:** `windows_probe.json` remains a read-only Windows PnP/CIM record; `windows_driver_scan.json` contains four aligned IPDS signature offsets but no valid strict-parser binary candidates. Public Linux hardware reports for PCI `1002:7480` demonstrate generic Linux driver sightings only, not this board's IP Discovery records. No firmware or GPU hardware interface was accessed.
+- **Decision:** Continue the hardened parser, parity tests, and evidence documentation. Navi33 hardware dispatch and initialization remain gated until a provenance-documented artifact attributable to the physical RX 7600 establishes its IP records. No Navi48 ID/plist change, custom BAR/MMIO probe, firmware modification, or macOS support claim is justified by these host-side tests.
+- **Checkpoint:** `tools/ipdisc/EXECUTION_STATUS_2026-10-23.md` records the current results and limits. This documentation update is intentionally uncommitted.

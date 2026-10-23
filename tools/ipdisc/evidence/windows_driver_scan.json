@@ -1,0 +1,15 @@
+{
+  "collected_at": "2026-10-22T16:44:56.469196+00:00",
+  "source_path": "[redacted local Windows DriverStore path]",
+  "source_size": 84454408,
+  "source_sha256": "92a83d34adb17a8c419a153b62e94e2cf3c478e260571af6699574800af3f3df",
+  "scan_scope": "static file bytes only; no GPU or device access",
+  "aligned_ipds_signature_offsets": [
+    21156316,
+    29993756,
+    30908248,
+    31117628
+  ],
+  "valid_strict_binary_candidates": [],
+  "interpretation": "A valid embedded structure is only a parser-validated byte sequence. It does not authenticate the file, prove the sequence came from a physical GPU, or establish board-specific IP versions."
+}
