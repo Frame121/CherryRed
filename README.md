@@ -46,6 +46,9 @@ The Navi 33 work is deliberately evidence-gated. The project will not enable har
 Current research includes:
 
 - A bounded IP Discovery parser and host-side regression tests.
+- An isolated, opt-in [macOS PCI diagnostic](src/navi33-probe/README.md)
+  that reads identity and declines driver attachment; macOS build and hardware
+  validation are pending, and it provides no display or Metal acceleration.
 - A read-only scanner for inspecting the installed Windows AMD driver file.
 - Evidence, provenance, and source-verification notes under [`tools/ipdisc/`](tools/ipdisc/).
 - A documented Windows-only workflow while a trusted Linux environment is unavailable.
@@ -67,6 +70,7 @@ See the [Navi 33 research notes](tools/ipdisc/RX7600_NAVI33_EVIDENCE.md), [evide
 | `src/navi48-bringup/` | Experimental Navi 48 IOKit bring-up code and host-side tests inherited from Cobalt64. |
 | `src/dcn41/` | Display Core 4.1 helpers and register-related tooling. |
 | `src/navi33-research/` | Isolated research code and tests for the Navi 33 investigation. |
+| `src/navi33-probe/` | Read-only macOS PCI diagnostic source for `1002:7480`; no initialization or acceleration. |
 | `src/navi33-survey/` | Survey and research material for Navi 33. |
 | `src/xlat12/` | Command-stream translation components and supporting tables. |
 | `src/g2capture/` | Small shader-compiler record capture utility. |
