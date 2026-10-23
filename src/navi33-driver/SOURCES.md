@@ -1,5 +1,21 @@
 # Source references
 
+The discovery wire layout was checked against
+[`discovery.h`](https://github.com/torvalds/linux/blob/d0c647a6aae2ce577372594a176c82733e1ed267/drivers/gpu/drm/amd/include/discovery.h)
+at the same pinned Linux revision. Relevant structures are `binary_header`,
+`binary_header_v2`, `table_info`, `ip_discovery_header`, `die_header`, `ip`,
+`ip_v3` and `ip_v4`. This file carries an AMD MIT permission notice. The new
+C++ implementation uses explicit byte decoding; no packed Linux structures
+or hardware implementation are copied. Existing local strict Python parser
+fixtures serve as a compatibility check, with additional rejection of
+duplicate keys and mismatched die IDs. No Navi48 initialization code is linked.
+
+Binary/table/die offsets are bytes from the binary start; record base values
+are dword offsets. Record byte 7 has harvest/reserved nibbles for versions
+1–2 and subrevision/variant nibbles for versions 3–4. The reader preserves
+the raw byte rather than applying a board-specific interpretation. It does
+not decode the separate harvest table, topology, or firmware selection.
+
 The common firmware envelope layout was checked against
 [`common_firmware_header` in Linux amdgpu_ucode.h](https://github.com/torvalds/linux/blob/d0c647a6aae2ce577372594a176c82733e1ed267/drivers/gpu/drm/amd/amdgpu/amdgpu_ucode.h#L30)
 at commit `d0c647a6aae2ce577372594a176c82733e1ed267`. The file carries an AMD

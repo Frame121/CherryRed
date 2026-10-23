@@ -46,6 +46,38 @@ PreparationResult Preparation::prepare(AddressRange aperture, const AddressRange
     return {};
 }
 
+PreparationResult Preparation::prepareFromDiscovery(
+    const uint8_t* discoveryBytes, size_t discoverySize,
+    const DiscoveryRequirement* requirements, AddressRange aperture,
+    const AddressRange* excluded, size_t excludedCount,
+    const FirmwareInput* inputs, size_t count, uint64_t alignment) noexcept {
+    if (state_ != PreparationState::Identified) return {PreparationError::InvalidState};
+    if (!requirements || !inputs || !count || count > kMaxFirmware)
+        return {PreparationError::InvalidRequest};
+    Discovery discovery;
+    const auto parseError = discovery.initialize(discoveryBytes, discoverySize);
+    if (parseError != DiscoveryError::None)
+        return {PreparationError::DiscoveryInvalid, 0, FirmwareError::None,
+                MemoryError::None, parseError};
+    DiscoveryRecord records[kMaxFirmware]{};
+    for (size_t i = 0; i < count; ++i) {
+        const auto& requested = requirements[i];
+        auto& record = records[i];
+        if (!discovery.find(requested.hwId, requested.instance, record))
+            return {PreparationError::MissingIp, i};
+        if (record.major != requested.major || record.minor != requested.minor ||
+            record.revision != requested.revision || record.attributes != requested.attributes)
+            return {PreparationError::IpMismatch, i};
+    }
+    const auto result = prepare(aperture, excluded, excludedCount, inputs, count, alignment);
+    if (result.error != PreparationError::None) return result;
+    for (size_t i = 0; i < count; ++i) {
+        firmware_[i].discovery = records[i];
+        firmware_[i].hasDiscoveryRecord = true;
+    }
+    return {};
+}
+
 PreparationResult Preparation::start() const noexcept {
     if (state_ != PreparationState::Prepared) return {PreparationError::InvalidState};
     // Parsed envelopes and planned addresses do not authorize register writes.

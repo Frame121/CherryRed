@@ -5,11 +5,13 @@ on:
     paths:
       - 'src/navi33-driver/**'
       - 'src/navi33-probe/**'
+      - 'tools/ipdisc/**'
       - '.github/workflows/navi33.yml'
   pull_request:
     paths:
       - 'src/navi33-driver/**'
       - 'src/navi33-probe/**'
+      - 'tools/ipdisc/**'
       - '.github/workflows/navi33.yml'
 permissions:
   contents: read

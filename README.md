@@ -47,7 +47,8 @@ Current research includes:
 
 - A bounded IP Discovery parser and host-side regression tests.
 - A [Navi 33 driver foundation](src/navi33-driver/README.md) with bounded
-  firmware inspection, software VRAM address allocation, preparation rollback,
+  firmware and IP Discovery inspection, software VRAM address allocation,
+  preparation checked against input IP records, rollback,
   and compilation checks against real kernel headers. Hardware initialization
   and graphics acceleration remain unimplemented.
 - An isolated, opt-in [macOS PCI diagnostic](src/navi33-probe/README.md)
