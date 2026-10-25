@@ -1,5 +1,5 @@
 //
-//  Navi33Survey.cpp — see Navi33Survey.hpp. READ-ONLY. UNTESTED (never built or loaded).
+//  Navi33Survey.cpp — see Navi33Survey.hpp. READ-ONLY. Hardware loading remains unverified.
 //
 #include "Navi33Survey.hpp"
 #include <IOKit/IOLib.h>
@@ -15,7 +15,7 @@ static constexpr uint32_t kReBarExtCapId = 0x0015;   // Resizable BAR (extended 
 
 OSDefineMetaClassAndStructors(Navi33Survey, IOService)
 
-IOService *Navi33Survey::probe(IOService *provider, SInt32 *score)
+static IOPCIDevice *eligible(IOService *provider)
 {
 	uint32_t enabled = 0;
 	if (!PE_parse_boot_argn("navi33survey", &enabled, sizeof(enabled)) || enabled != 1)
@@ -26,19 +26,22 @@ IOService *Navi33Survey::probe(IOService *provider, SInt32 *score)
 		return nullptr;
 
 	if (pci->configRead16(kIOPCIConfigVendorID) != kAmdVendorId ||
-	    pci->configRead16(kIOPCIConfigDeviceID) != kNavi33Device)
+	    pci->configRead16(kIOPCIConfigDeviceID) != kNavi33Device ||
+	    pci->configRead8(0x0b) != 0x03)
 		return nullptr;                                  // never touch another device
 
-	return super::probe(provider, score);
+	return pci;
+}
+
+IOService *Navi33Survey::probe(IOService *provider, SInt32 *score)
+{
+	return eligible(provider) ? super::probe(provider, score) : nullptr;
 }
 
 bool Navi33Survey::start(IOService *provider)
 {
-	if (!super::start(provider))
-		return false;
-
-	IOPCIDevice *pci = OSDynamicCast(IOPCIDevice, provider);
-	if (!pci)
+	IOPCIDevice *pci = eligible(provider);
+	if (!pci || !super::start(provider))
 		return false;
 
 	N33LOG("start (read-only survey, no register BAR mapped, no writes)");
@@ -86,8 +89,8 @@ void Navi33Survey::surveyBars(IOPCIDevice *pci)
 
 void Navi33Survey::surveyPcieLink(IOPCIDevice *pci)
 {
-	IOByteCount off = 0;
-	if (!pci->findPCICapability(kPcieCapId, &off) || off == 0) {
+	UInt8 off = 0;
+	if (!pci->findPCICapability(kPcieCapId, &off) || off < 0x40 || off > 0xec || (off & 3)) {
 		N33LOG("PCIe capability not found");
 		return;
 	}
@@ -99,17 +102,40 @@ void Navi33Survey::surveyPcieLink(IOPCIDevice *pci)
 void Navi33Survey::surveyResizableBar(IOPCIDevice *pci)
 {
 	IOByteCount off = 0;
-	if (!pci->extendedFindPCICapability(kReBarExtCapId, &off) || off == 0) {
-		N33LOG("Resizable BAR capability not found");
+	// IOPCIFamily requires the negated ID for the extended capability list.
+	uint32_t header = pci->extendedFindPCICapability(0u - kReBarExtCapId, &off);
+	if (!header || header == 0xffffffffu || (header & 0xffff) != kReBarExtCapId ||
+	    off < 0x100 || off > 0xff4 || (off & 3)) {
+		N33LOG("Resizable BAR capability not found or invalid");
 		return;
 	}
-	uint32_t cap = pci->configRead32(off + 4);   // supported sizes (bit n => 2^(n+20) bytes)
-	uint32_t ctl = pci->configRead32(off + 8);   // current size field in bits 13:8
-	unsigned curShift = ((ctl >> 8) & 0x3F) + 20;
-	if (curShift > 62) {                         // bogus/unreadable value: do not shift
-		N33LOG("ReBAR cap 0x%08x ctl 0x%08x (size field out of range)", cap, ctl);
+	const unsigned next = header >> 20;
+	const unsigned limit = next ? next : 0x1000;
+	if (limit <= off || limit > 0x1000 || (limit & 3) || limit - off < 12) {
+		N33LOG("Invalid ReBAR capability boundary");
 		return;
 	}
-	N33LOG("ReBAR cap 0x%08x ctl 0x%08x (current BAR size 2^%u = %llu MiB)",
-	       cap, ctl, curShift, (unsigned long long)(1ULL << curShift) >> 20);
+	uint32_t first = pci->extendedConfigRead32(off + 8);
+	unsigned count = (first >> 5) & 7;
+	if (first == 0xffffffffu || count == 0 || count > 6 ||
+	    4 + count * 8 > limit - off) {
+		N33LOG("Invalid ReBAR entry count");
+		return;
+	}
+	unsigned seen = 0;
+	for (unsigned i = 0; i < count; ++i) {
+		uint32_t cap = pci->extendedConfigRead32(off + 4 + i * 8);
+		uint32_t ctl = i ? pci->extendedConfigRead32(off + 8 + i * 8) : first;
+		unsigned bar = ctl & 7;
+		unsigned size = (ctl >> 8) & 0x3f;
+		// This decoder supports sizes represented by the 28-bit capability bitmap.
+		if (cap == 0xffffffffu || ctl == 0xffffffffu || bar > 5 ||
+		    (seen & (1u << bar)) || size >= 28 || !(cap & (1u << (size + 4)))) {
+			N33LOG("Invalid or unsupported ReBAR entry %u", i);
+			return;
+		}
+		seen |= 1u << bar;
+		N33LOG("ReBAR BAR%u supported 0x%08x current %llu MiB", bar, cap >> 4,
+		       (unsigned long long)(1ULL << size));
+	}
 }

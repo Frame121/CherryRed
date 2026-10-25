@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(navi33_survey_tests LANGUAGES CXX)
+add_executable(navi33_survey_tests tests/test_survey.cpp Navi33Survey.cpp)
+target_include_directories(navi33_survey_tests PRIVATE tests/shim .)
+target_compile_features(navi33_survey_tests PRIVATE cxx_std_17)
+target_compile_options(navi33_survey_tests PRIVATE -Wall -Wextra -Werror)
+enable_testing()
+add_test(NAME navi33_survey_tests COMMAND navi33_survey_tests)
