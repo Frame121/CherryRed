@@ -1,0 +1,20 @@
+name: build
+on: [push, pull_request]
+
+jobs:
+  kext:
+    runs-on: macos-14
+    strategy:
+      matrix:
+        config: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap SDK
+        run: sh scripts/bootstrap.sh
+      - name: Build
+        run: |
+          if [ "${{ matrix.config }}" = "Debug" ]; then make DEBUG=1; else make; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RedNavi-${{ matrix.config }}
+          path: build/${{ matrix.config }}/RedNavi.kext
