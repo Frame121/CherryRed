@@ -16,7 +16,7 @@ macOS is booted on this machine through OpenCore with the UHD 630 driving the sc
 
 ## To collect before running anything on macOS
 
-- [ ] Above 4G Decoding / Resizable BAR state in the BIOS
+- [x] Above 4G Decoding / Resizable BAR state in the BIOS: Resizable BAR ON. VRAM is 16 GB.
 - [ ] VBIOS dump (GPU-Z)
 - [ ] IP discovery from a Linux live boot (`dmesg | grep -i discovery`, `/sys/kernel/debug/dri/*/`)
 - [ ] ACPI VFCT table presence
