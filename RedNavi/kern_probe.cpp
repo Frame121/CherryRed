@@ -16,9 +16,16 @@
 #define kRNMmData          0x04
 #define kRNMmIndexHi       0x18
 
-// IP discovery lives in the top 64 KB of VRAM (DISCOVERY_TMR_OFFSET in amdgpu_discovery.c).
-#define kRNDiscoveryTmrSize   (64 * 1024)
-#define kRNBinarySignature    0x28211407u   // "BINARY_SIGNATURE" in amdgpu_discovery.h
+// Register byte offsets (dword index * 4) from amdgpu_discovery.c, "consistent across all the SOCs".
+#define kRNRccConfigMemsize   (0xde3 * 4)    // VRAM size in MB (mmRCC_CONFIG_MEMSIZE)
+#define kRNMp0C2pmsg33        (0x16061 * 4)  // bit 31 set once IFWI init is done (mmMP0_SMN_C2PMSG_33)
+
+// IP discovery sits DISCOVERY_TMR_OFFSET below the end of VRAM and is DISCOVERY_TMR_SIZE long
+// (amdgpu_discovery.h). BINARY_SIGNATURE is in include/discovery.h.
+#define kRNDiscoveryTmrOffset (64 * 1024)
+#define kRNDiscoveryTmrSize   (10 * 1024)
+#define kRNBinarySignature    0x28211407u
+#define kRNFallbackVramMB     (16u * 1024)  // RX 7800 XT, used if the memsize register reads 0 or all ones
 
 class RedNaviProbe : public IOService {
     OSDeclareDefaultStructors(RedNaviProbe)
@@ -60,26 +67,54 @@ void RedNaviProbe::dumpPci() {
 }
 
 void RedNaviProbe::dumpDiscovery() {
-    // Try the plausible VRAM sizes of Navi 32 boards (16 GB for the 7800 XT; 12 GB for the 7700 XT).
-    static const uint64_t sizes[] = {16ull << 30, 12ull << 30, 8ull << 30};
-    for (uint64_t vram : sizes) {
-        uint64_t base = vram - kRNDiscoveryTmrSize;
-        uint32_t sig = vramRead(base);
-        IOLog("RedNavi: discovery probe vram=%llu MB base=0x%llx sig=0x%08x\n", vram >> 20, base, sig);
-        if (sig != kRNBinarySignature) continue;
+    // amdgpu waits up to 2 s for IFWI init before reading the table.
+    uint32_t msg = 0;
+    for (int i = 0; i < 2000; i++) {
+        msg = rd(kRNMp0C2pmsg33);
+        if (msg & 0x80000000u) break;
+        IOSleep(1);
+    }
+    IOLog("RedNavi: C2PMSG_33 = 0x%08x\n", msg);
 
-        // struct binary_header: u32 signature, u16 ver_major, u16 ver_minor, u16 checksum, u16 size, then table list.
-        uint32_t ver = vramRead(base + 4);
-        uint32_t csumSize = vramRead(base + 8);
-        IOLog("RedNavi: IP discovery found: version %u.%u size %u bytes\n", ver & 0xFFFF, ver >> 16, csumSize >> 16);
-        // Dump the first 512 bytes raw so the table can be decoded offline (tools/decode_discovery.py).
-        for (uint32_t off = 0; off < 512; off += 16) {
-            IOLog("RedNavi: DISC %03x: %08x %08x %08x %08x\n", off,
-                  vramRead(base + off), vramRead(base + off + 4), vramRead(base + off + 8), vramRead(base + off + 12));
-        }
+    uint32_t vramMB = rd(kRNRccConfigMemsize);
+    IOLog("RedNavi: RCC_CONFIG_MEMSIZE = 0x%08x\n", vramMB);
+    if (vramMB == 0 || vramMB == 0xFFFFFFFFu) {
+        vramMB = kRNFallbackVramMB;
+        IOLog("RedNavi: memsize register unusable, assuming %u MB\n", vramMB);
+    }
+
+    uint64_t base = ((uint64_t)vramMB << 20) - kRNDiscoveryTmrOffset;
+    uint32_t sig = vramRead(base);
+    IOLog("RedNavi: discovery base=0x%llx sig=0x%08x (expect 0x%08x)\n", base, sig, kRNBinarySignature);
+    if (sig != kRNBinarySignature) {
+        IOLog("RedNavi: IP discovery signature not found\n");
         return;
     }
-    IOLog("RedNavi: IP discovery signature not found (VRAM size guess wrong or index window unavailable)\n");
+
+    // struct binary_header: u32 signature, u16 ver_major, u16 ver_minor, u16 checksum, u16 size, then table list.
+    uint32_t ver = vramRead(base + 4);
+    uint32_t csumSize = vramRead(base + 8);
+    uint32_t size = csumSize >> 16;
+    IOLog("RedNavi: IP discovery found: version %u.%u size %u bytes\n", ver & 0xFFFF, ver >> 16, size);
+    if (size == 0 || size > kRNDiscoveryTmrSize) size = kRNDiscoveryTmrSize;
+
+    // Copy the whole table. Read it back with: ioreg -rn RedNaviProbe -l -x | grep ip-discovery
+    OSData *blob = OSData::withCapacity(size);
+    if (!blob) return;
+    for (uint32_t off = 0; off < size; off += 4) {
+        uint32_t v = vramRead(base + off);
+        blob->appendBytes(&v, sizeof(v));
+    }
+    setProperty("ip-discovery", blob);
+
+    // Also log it as hex lines for tools/decode_discovery.py (IOSleep keeps the log buffer from overflowing).
+    const uint32_t *d = static_cast<const uint32_t *>(blob->getBytesNoCopy());
+    for (uint32_t off = 0; off + 16 <= size; off += 16) {
+        const uint32_t *l = d + off / 4;
+        IOLog("RedNavi: DISC %04x: %08x %08x %08x %08x\n", off, l[0], l[1], l[2], l[3]);
+        if ((off & 0xFF) == 0xF0) IOSleep(5);
+    }
+    blob->release();
 }
 
 bool RedNaviProbe::start(IOService *provider) {
