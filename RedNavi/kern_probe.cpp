@@ -2,6 +2,10 @@
 // maps the register BAR, and logs what the GPU tells us about itself: PCI config, BAR sizes
 // and the IP discovery table (the authoritative list of IP block versions).
 //
+// Second stage: reads the PSP (MP0) and SMU (MP1) mailbox registers, using the base addresses
+// found in that table, to show what the VBIOS left running. Results are logged and published
+// as the "ip-discovery" and "mailbox-regs" properties (ioreg -rn RedNaviProbe -l -x).
+//
 // Nothing is written to the GPU except the MM_INDEX/MM_DATA window used to read VRAM.
 
 #include <IOKit/IOLib.h>
@@ -27,11 +31,36 @@
 #define kRNBinarySignature    0x28211407u
 #define kRNFallbackVramMB     (16u * 1024)  // RX 7800 XT, used if the memsize register reads 0 or all ones
 
+// Hardware IDs in the discovery table (soc15_hw_ip.h).
+#define kRNHwIdMp1            1
+#define kRNHwIdMp0            255
+
+// Mailbox registers: dword offsets from the IP base address, taken from mp_13_0_0_offset.h
+// (PSP, used by psp_v13_0.c) and smu_v13_0.c (SMU message, argument and response).
+struct RNMailboxReg {
+    const char *name;
+    uint16_t hwId;
+    uint32_t dword;
+};
+static const RNMailboxReg kRNMailboxRegs[] = {
+    {"MP0_C2PMSG_33", kRNHwIdMp0, 0x061},  // bit 31: IFWI init done
+    {"MP0_C2PMSG_35", kRNHwIdMp0, 0x063},  // bootloader command / status, bit 31: ready
+    {"MP0_C2PMSG_36", kRNHwIdMp0, 0x064},  // bootloader address
+    {"MP0_C2PMSG_64", kRNHwIdMp0, 0x080},  // ring command / response
+    {"MP0_C2PMSG_67", kRNHwIdMp0, 0x083},  // ring write pointer
+    {"MP0_C2PMSG_71", kRNHwIdMp0, 0x087},  // ring size
+    {"MP0_C2PMSG_81", kRNHwIdMp0, 0x091},  // sOS alive when not zero
+    {"MP1_C2PMSG_66", kRNHwIdMp1, 0x282},  // SMU message
+    {"MP1_C2PMSG_82", kRNHwIdMp1, 0x292},  // SMU argument
+    {"MP1_C2PMSG_90", kRNHwIdMp1, 0x29a},  // SMU response, 1 means OK
+};
+
 class RedNaviProbe : public IOService {
     OSDeclareDefaultStructors(RedNaviProbe)
 
     IOPCIDevice *pci {nullptr};
     IOMemoryMap *regs {nullptr};
+    OSData *disc {nullptr};   // copy of the IP discovery table
 
     uint32_t rd(uint32_t off) { return *reinterpret_cast<volatile uint32_t *>(regs->getVirtualAddress() + off); }
     void wr(uint32_t off, uint32_t v) { *reinterpret_cast<volatile uint32_t *>(regs->getVirtualAddress() + off) = v; }
@@ -46,6 +75,8 @@ class RedNaviProbe : public IOService {
 
     void dumpPci();
     void dumpDiscovery();
+    bool ipBase(uint16_t hwId, uint32_t *base);
+    void dumpMailboxes();
 
 public:
     bool start(IOService *provider) override;
@@ -114,7 +145,63 @@ void RedNaviProbe::dumpDiscovery() {
         IOLog("RedNavi: DISC %04x: %08x %08x %08x %08x\n", off, l[0], l[1], l[2], l[3]);
         if ((off & 0xFF) == 0xF0) IOSleep(5);
     }
-    blob->release();
+    disc = blob;
+}
+
+// Walk the discovery table (layout in include/discovery.h) and return the first base address of
+// instance 0 of the given hardware ID. Every read is bounds-checked against the copied table.
+bool RedNaviProbe::ipBase(uint16_t hwId, uint32_t *base) {
+    if (!disc) return false;
+    const uint8_t *b = static_cast<const uint8_t *>(disc->getBytesNoCopy());
+    uint32_t len = disc->getLength();
+    auto u16 = [&](uint32_t o) -> uint32_t { return o + 2 <= len ? static_cast<uint32_t>(b[o] | (b[o + 1] << 8)) : 0u; };
+    auto u32 = [&](uint32_t o) -> uint32_t { return o + 4 <= len ? u16(o) | (u16(o + 2) << 16) : 0; };
+
+    if (u16(4) >= 2) return false;                       // binary header v2 has another table layout
+    uint32_t ipOff = u16(12);                            // table_list[0].offset (IP_DISCOVERY)
+    uint32_t numDies = u16(ipOff + 12);
+    bool base64 = u16(ipOff + 4) == 4 && (ipOff + 78 < len) && (b[ipOff + 78] & 1);
+    if (numDies > 16) numDies = 16;
+
+    for (uint32_t d = 0; d < numDies; d++) {
+        uint32_t pos = u16(ipOff + 14 + d * 4 + 2);      // die_info[d].die_offset, absolute
+        uint32_t numIps = u16(pos + 2);
+        pos += 4;
+        for (uint32_t i = 0; i < numIps && pos + 8 <= len; i++) {
+            uint32_t nbase = b[pos + 3];
+            if (u16(pos) == hwId && b[pos + 2] == 0 && nbase > 0) {
+                *base = u32(pos + 8);
+                return true;
+            }
+            pos += 8 + nbase * (base64 ? 8 : 4);
+        }
+    }
+    return false;
+}
+
+void RedNaviProbe::dumpMailboxes() {
+    OSDictionary *out = OSDictionary::withCapacity(16);
+    if (!out) return;
+    uint32_t regLen = static_cast<uint32_t>(regs->getLength());
+
+    for (const RNMailboxReg &r : kRNMailboxRegs) {
+        uint32_t base = 0;
+        if (!ipBase(r.hwId, &base)) {
+            IOLog("RedNavi: %s: hardware ID %u not in discovery table\n", r.name, r.hwId);
+            continue;
+        }
+        uint32_t off = (base + r.dword) * 4;
+        if (off + 4 > regLen) {
+            IOLog("RedNavi: %s: byte offset 0x%x outside the %u byte register BAR\n", r.name, off, regLen);
+            continue;
+        }
+        uint32_t v = rd(off);
+        IOLog("RedNavi: %s @0x%05x = 0x%08x\n", r.name, off, v);
+        OSNumber *n = OSNumber::withNumber(v, 32);
+        if (n) { out->setObject(r.name, n); n->release(); }
+    }
+    setProperty("mailbox-regs", out);
+    out->release();
 }
 
 bool RedNaviProbe::start(IOService *provider) {
@@ -133,11 +220,13 @@ bool RedNaviProbe::start(IOService *provider) {
     IOLog("RedNavi: registers mapped, %llu KB\n", (uint64_t)regs->getLength() >> 10);
 
     dumpDiscovery();
+    dumpMailboxes();
     registerService();
     return true;
 }
 
 void RedNaviProbe::stop(IOService *provider) {
+    if (disc) { disc->release(); disc = nullptr; }
     if (regs) { regs->release(); regs = nullptr; }
     IOService::stop(provider);
 }
