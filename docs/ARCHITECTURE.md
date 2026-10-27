@@ -37,9 +37,29 @@ IP block families (from `amdgpu_discovery.c`): GC 11.0.x, MES 11, SDMA 6.x, PSP 
 | SMUIO | 13.0.6 |
 | PCIE | 7.4.0 |
 
-So GC is 11.0.3, not 11.0.1. The decoder labels a few hardware IDs as `hwNN` because its name table is a subset of `soc15_hw_ip.h`.
+So GC is 11.0.3, not 11.0.1.
 
-**Still to check:** firmware file names for these versions in linux-firmware.
+## Firmware for this card
+
+File names come from the `MODULE_FIRMWARE` lines in the Linux driver and were checked against `WHENCE` in linux-firmware. All of them exist there with the licence "Redistributable. See LICENSE.amdgpu". The licence text itself still has to be read before we decide whether the repo may ship or mirror the files; until then they are fetched at runtime.
+
+| Block | File in `amdgpu/` |
+|---|---|
+| PSP | `psp_13_0_10_sos.bin`, `psp_13_0_10_ta.bin` |
+| SMU | `smu_13_0_10.bin` |
+| Display (DMCUB, DCN 3.2.0) | `dcn_3_2_0_dmcub.bin` |
+| GC | `gc_11_0_3_pfp.bin`, `_me.bin`, `_mec.bin`, `_rlc.bin`, `_imu.bin` |
+| MES | `gc_11_0_3_mes_2.bin`, `gc_11_0_3_mes1.bin` (`gc_11_0_3_mes.bin` is also declared) |
+| SDMA | `sdma_6_0_3.bin` |
+| VCN | `vcn_4_0_0.bin` |
+
+For M3 (native framebuffer) only the PSP and DMCUB files matter, plus the SMU file if the clocks must be brought up first. The DMCUB name is inferred from the DMU version 3.2.0; it is not confirmed by reading `amdgpu_dm.c`, which could not be fetched.
+
+## Probe findings that shape M2
+
+- The register window works: `MM_INDEX`/`MM_DATA` reads of VRAM return valid data, and `RCC_CONFIG_MEMSIZE` gave a size that placed the table correctly. M2 can read VRAM the same way before any aperture mapping exists.
+- The IP table lists base addresses per block (for example GC `0x1260`, `0xa000`, `0x1c000`, `0x2402c00`; DMU `0x12`, `0xc0`, `0x34c0`, `0x9000`, `0x2403c00`). The compatibility layer can build its register-offset tables from these instead of hard-coding them.
+- DF shows 5 instances and several blocks (CLKA, FUSE, THM, UMC) show instances 1 to 4 with other versions. These are most likely the four memory-cache dies (MCDs) of Navi 32 next to the graphics die; this is inferred from the four matching base-address groups, not checked against AMD documentation.
 
 PSP initialises before display and graphics: the DMUB firmware used by the display engine is loaded through it.
 

@@ -18,13 +18,19 @@ BINARY_SIGNATURE = 0x28211407
 DISCOVERY_TABLE_SIGNATURE = 0x53445049  # "IPDS"
 TABLE_NAMES = ["IP_DISCOVERY", "GC", "HARVEST_INFO", "VCN_INFO", "MALL_INFO", "NPS_INFO", "MEM_RESERVED_INFO"]
 
-# From drivers/gpu/drm/amd/include/soc15_hw_ip.h (subset).
+# From drivers/gpu/drm/amd/include/soc15_hw_ip.h.
 HW_IDS = {
-    1: "MP1", 2: "MP2", 3: "THM", 4: "SMUIO", 6: "CLKA", 10: "PWR", 11: "GC", 12: "UVD/VCN", 15: "DCI",
-    21: "VPE", 34: "MMHUB", 35: "ATHUB", 40: "OSSSYS", 41: "HDP", 42: "SDMA0", 43: "SDMA1", 44: "ISP",
-    46: "DF", 47: "CLKB", 50: "L1IMU_PCIE", 51: "L1IMU_NBIF", 66: "WAFLC", 68: "SDMA2", 69: "SDMA3",
-    70: "PCIE", 91: "LSDMA", 108: "NBIF", 170: "USB", 200: "XGMI", 216: "XGBE", 255: "MP0",
-    271: "DMU", 274: "DAZ", 295: "AIGC",
+    1: "MP1", 2: "MP2", 3: "THM", 4: "SMUIO", 5: "FUSE", 6: "CLKA", 10: "PWR", 11: "GC", 12: "UVD/VCN",
+    13: "AUDIO_AZ", 14: "ACP", 15: "DCI", 16: "DCO", 17: "XDMA", 18: "DCEAZ", 19: "SDPMUX", 20: "NTB",
+    21: "VPE", 22: "UMSCH", 24: "IOHC", 28: "L2IMU", 32: "VCE", 34: "MMHUB", 35: "ATHUB",
+    36: "DBGU_NBIO", 37: "DFX", 38: "DBGU0", 39: "DBGU1", 40: "OSSSYS", 41: "HDP", 42: "SDMA0",
+    43: "SDMA1", 44: "ISP", 45: "DBGU_IO", 46: "DF", 47: "CLKB", 48: "FCH", 49: "DFX_DAP",
+    50: "L1IMU_PCIE", 51: "L1IMU_NBIF", 52: "L1IMU_IOAGR", 53: "L1IMU3", 54: "L1IMU4", 55: "L1IMU5",
+    56: "L1IMU6", 57: "L1IMU7", 58: "L1IMU8", 59: "L1IMU9", 60: "L1IMU10", 61: "L1IMU11", 62: "L1IMU12",
+    63: "L1IMU13", 64: "L1IMU14", 65: "L1IMU15", 66: "WAFLC", 67: "FCH_USB_PD", 68: "SDMA2",
+    69: "SDMA3", 70: "PCIE", 80: "PCS", 89: "DDCL", 90: "SST", 91: "LSDMA", 100: "IOAGR", 108: "NBIF",
+    124: "IOAPIC", 128: "SYSTEMHUB", 144: "NTBCCP", 150: "UMC", 168: "SATA", 170: "USB", 176: "CCXSEC",
+    200: "XGMI", 216: "XGBE", 255: "MP0", 271: "DMU", 272: "DIO", 274: "DAZ", 294: "ATU", 295: "AIGC",
 }
 
 
