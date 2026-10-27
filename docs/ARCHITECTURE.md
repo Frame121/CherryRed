@@ -21,7 +21,25 @@ Confirmed: RX 7800 XT is Navi 32, gfx1101, PCI `1002:747E`. Linux handles it thr
 
 IP block families (from `amdgpu_discovery.c`): GC 11.0.x, MES 11, SDMA 6.x, PSP 13.0.x, SMU 13.0.x, DCN 3.2.x, VCN 4.0.x.
 
-**Not yet verified:** exact versions for this board (sources disagree on GC 11.0.1 vs 11.0.3) and the firmware file names. The M1 probe reads the IP discovery table from the card itself and settles this.
+**Measured on the card (M1 probe, 2026-10-27, Sapphire RX 7800 XT, macOS 15.8.2).** The IP discovery table is binary version 1.2, 1556 bytes, checksum OK, read from VRAM at `VRAM size - 64 KB`. Raw dump: `docs/logs/ioreg-rednavi-747e.txt`; decode it with `tools/decode_discovery.py`.
+
+| Block | Version |
+|---|---|
+| GC | 11.0.3 |
+| SDMA0, SDMA1 | 6.0.3 |
+| MP0 (PSP), MP1 (SMU) | 13.0.10 |
+| DMU (DCN) | 3.2.0 |
+| NBIF | 4.3.0 |
+| OSSSYS (IH) | 6.0.0 |
+| MMHUB | 3.0.0 |
+| HDP | 6.0.0 |
+| VCN | 4.0.0, 4.0.1 |
+| SMUIO | 13.0.6 |
+| PCIE | 7.4.0 |
+
+So GC is 11.0.3, not 11.0.1. The decoder labels a few hardware IDs as `hwNN` because its name table is a subset of `soc15_hw_ip.h`.
+
+**Still to check:** firmware file names for these versions in linux-firmware.
 
 PSP initialises before display and graphics: the DMUB firmware used by the display engine is loaded through it.
 
