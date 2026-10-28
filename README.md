@@ -12,7 +12,7 @@ Goal: a real framebuffer on the card, driven by our own kext (DCN 3.2 display en
 |---|---|---|
 | M0 | Repo, CI (macOS runner), build scripts | Done, CI green (Debug and Release) |
 | M1 | Probe kext: matches `1002:747E`, maps the register BAR, reads the IP discovery table | Done: ran on a real RX 7800 XT, versions recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| M1.5 | Probe stage 2: read-only PSP and SMU mailbox registers | Written, not yet run on hardware |
+| M1.5 | Probe stage 2: read-only PSP and SMU mailbox registers | Done: PSP bootloader ready, sOS not running, SMU alive |
 | M2 | Compatibility layer (LinuxKPI-style), PSP 13 + SMU 13 + DMUB firmware bring-up | Not started |
 | M3 | Native framebuffer: port of amdgpu DC (DCN 3.2) + `IOFramebuffer` | Not started |
 | M4 | GFX11, MES, SDMA 6, GPU VM, IH ring, user client | Not started |

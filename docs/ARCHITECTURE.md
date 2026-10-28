@@ -61,6 +61,8 @@ For M3 (native framebuffer) only the PSP and DMCUB files matter, plus the SMU fi
 - The IP table lists base addresses per block (for example GC `0x1260`, `0xa000`, `0x1c000`, `0x2402c00`; DMU `0x12`, `0xc0`, `0x34c0`, `0x9000`, `0x2403c00`). The compatibility layer can build its register-offset tables from these instead of hard-coding them.
 - DF shows 5 instances and several blocks (CLKA, FUSE, THM, UMC) show instances 1 to 4 with other versions. These are most likely the four memory-cache dies (MCDs) of Navi 32 next to the graphics die; this is inferred from the four matching base-address groups, not checked against AMD documentation.
 
+- **PSP and SMU state after the VBIOS (probe stage 2, 2026-10-28, raw dump in `docs/logs/ioreg-rednavi-probe2.txt`).** `MP0_C2PMSG_33` and `MP0_C2PMSG_35` read `0x80000000` (IFWI init done, bootloader ready for commands). `MP0_C2PMSG_81` is 0, so no PSP sOS is running yet: M2 has to load `psp_13_0_10_sos.bin` through the bootloader. `MP1_C2PMSG_90` is 1, so the SMU is alive and answered its last message OK; its message and argument registers are 0. All other PSP ring registers are 0. The ioreg values print as `18446744071562067968` because the probe stores them as sign-extended 32-bit numbers; that is `0x80000000`.
+
 PSP initialises before display and graphics: the DMUB firmware used by the display engine is loaded through it.
 
 ## Milestone M3 (native framebuffer) in practice
