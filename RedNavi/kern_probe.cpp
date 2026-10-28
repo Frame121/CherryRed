@@ -20,6 +20,10 @@
 // PSP firmware file; the response carries the TMR size. amdgpu does not send SETUP_TMR on this PSP
 // (boot_time_tmr and autoload are both set for MP0 13.0.10, see docs/PSP_BRINGUP.md).
 //
+// Ninth stage (read-only, always on): reads the DMCUB control, boot-status and mailbox registers
+// (DCN 3.2, register offsets from dcn_3_2_0_offset.h, all at DMU base index 2) to see whether the
+// VBIOS left a display microcontroller running. Published as "dmcub-regs".
+//
 // Eighth stage (read-only, always on): reads the VBIOS image from the PCI expansion ROM, which the
 // DMUB framebuffer window needs (amdgpu_dm_dmub.c copies adev->bios into DMUB_WINDOW_3_VBIOS).
 // Published as the "vbios" property (decode with tools/check_vbios.py). Enabling the ROM decode
@@ -82,6 +86,7 @@
 #define kRNPspBufSize         (1u << 20)
 #define kRNHwIdMp1            1
 #define kRNHwIdMmhub          34
+#define kRNHwIdDmu            271
 #define kRNHwIdMp0            255
 
 // Mailbox registers: dword offsets from the IP base address, taken from mp_13_0_0_offset.h
@@ -90,6 +95,7 @@ struct RNMailboxReg {
     const char *name;
     uint16_t hwId;
     uint32_t dword;
+    uint32_t baseIdx;   // which of the block's base addresses the offset is relative to
 };
 static const RNMailboxReg kRNMailboxRegs[] = {
     {"MP0_C2PMSG_33", kRNHwIdMp0, 0x061},  // bit 31: IFWI init done
@@ -113,6 +119,23 @@ static const RNMailboxReg kRNMmhubRegs[] = {
     {"MMHUB_AGP_BASE",         kRNHwIdMmhub, 0x8f0},
     {"MMHUB_AGP_BOT",          kRNHwIdMmhub, 0x8ef},
     {"MMHUB_AGP_TOP",          kRNHwIdMmhub, 0x8ee},
+};
+
+// DMCUB registers (dcn_3_2_0_offset.h), relative to base index 2 of the DMU block. DMCUB_SCRATCH0 is
+// the firmware boot status (dmub_fw_boot_status in dmub_cmd.h); DMCUB_CNTL.DMCUB_ENABLE is bit 0 in
+// the amdgpu field definitions and DMCUB_SEC_CNTL.DMCUB_SEC_RESET is the reset bit.
+static const RNMailboxReg kRNDmcubRegs[] = {
+    {"DMCUB_CNTL",         kRNHwIdDmu, 0x1f6, 2},
+    {"DMCUB_CNTL2",        kRNHwIdDmu, 0x200, 2},
+    {"DMCUB_SEC_CNTL",     kRNHwIdDmu, 0x1ce, 2},
+    {"DMCUB_SCRATCH0",     kRNHwIdDmu, 0x1e3, 2},
+    {"DMCUB_SCRATCH1",     kRNHwIdDmu, 0x1e4, 2},
+    {"DMCUB_SCRATCH2",     kRNHwIdDmu, 0x1e5, 2},
+    {"DMCUB_INBOX1_WPTR",  kRNHwIdDmu, 0x1d6, 2},
+    {"DMCUB_INBOX1_RPTR",  kRNHwIdDmu, 0x1d7, 2},
+    {"DMCUB_OUTBOX1_WPTR", kRNHwIdDmu, 0x1de, 2},
+    {"DMCUB_GPINT_DATAOUT", kRNHwIdDmu, 0x1f9, 2},
+    {"DMCUB_REGION3_CW0_OFFSET", kRNHwIdDmu, 0x1b5, 2},
 };
 
 class RedNaviProbe : public IOService {
@@ -142,7 +165,7 @@ class RedNaviProbe : public IOService {
     void dumpPci();
     void dumpDiscovery();
     void dumpVbios();
-    bool ipBase(uint16_t hwId, uint32_t *base);
+    bool ipBase(uint16_t hwId, uint32_t *base, uint32_t idx = 0);
     bool loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version);
     void loadPspChain();
     bool createPspRing();
@@ -224,7 +247,7 @@ void RedNaviProbe::dumpDiscovery() {
 
 // Walk the discovery table (layout in include/discovery.h) and return the first base address of
 // instance 0 of the given hardware ID. Every read is bounds-checked against the copied table.
-bool RedNaviProbe::ipBase(uint16_t hwId, uint32_t *base) {
+bool RedNaviProbe::ipBase(uint16_t hwId, uint32_t *base, uint32_t idx) {
     if (!disc) return false;
     const uint8_t *b = static_cast<const uint8_t *>(disc->getBytesNoCopy());
     uint32_t len = disc->getLength();
@@ -243,8 +266,9 @@ bool RedNaviProbe::ipBase(uint16_t hwId, uint32_t *base) {
         pos += 4;
         for (uint32_t i = 0; i < numIps && pos + 8 <= len; i++) {
             uint32_t nbase = b[pos + 3];
-            if (u16(pos) == hwId && b[pos + 2] == 0 && nbase > 0) {
-                *base = u32(pos + 8);
+            if (u16(pos) == hwId && b[pos + 2] == 0 && idx < nbase) {
+                if (base64 && u32(pos + 8 + idx * 8 + 4) != 0) return false;   // above 4 GB, not a register offset we can use
+                *base = u32(pos + 8 + idx * (base64 ? 8 : 4));
                 return true;
             }
             pos += 8 + nbase * (base64 ? 8 : 4);
@@ -261,8 +285,8 @@ void RedNaviProbe::dumpRegs(const RNMailboxReg *list, size_t count, const char *
     for (size_t i = 0; i < count; i++) {
         const RNMailboxReg &r = list[i];
         uint32_t base = 0;
-        if (!ipBase(r.hwId, &base)) {
-            IOLog("RedNavi: %s: hardware ID %u not in discovery table\n", r.name, r.hwId);
+        if (!ipBase(r.hwId, &base, r.baseIdx)) {
+            IOLog("RedNavi: %s: hardware ID %u base %u not in discovery table\n", r.name, r.hwId, r.baseIdx);
             continue;
         }
         uint32_t off = (base + r.dword) * 4;
@@ -519,6 +543,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpVbios();
     dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
+    dumpRegs(kRNDmcubRegs, sizeof(kRNDmcubRegs) / sizeof(kRNDmcubRegs[0]), "dmcub-regs");
     loadPspChain();
     if (createPspRing()) {
         sendPspBootCfgGet();
