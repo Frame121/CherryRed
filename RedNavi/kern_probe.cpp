@@ -83,6 +83,7 @@
 #include <pexpert/pexpert.h>
 #include "dcn_reglist.h"
 #include "dcn_replay.h"
+#include "smu13.h"
 
 #ifdef RN_HAVE_PSP_FW
 #include "psp_fw.h"
@@ -229,6 +230,11 @@ static void rnPublish(IOService *svc, const char *property, const char *const *n
     out->release();
 }
 
+static void rnPublishOne(OSDictionary *d, const char *key, uint64_t v) {
+    OSNumber *n = OSNumber::withNumber(v, 64);
+    if (n) { d->setObject(key, n); n->release(); }
+}
+
 class RedNaviProbe : public IOService {
     OSDeclareDefaultStructors(RedNaviProbe)
 
@@ -269,6 +275,7 @@ class RedNaviProbe : public IOService {
     void dcnReplay();
     void fillScanout();
     void publishFramebuffer();
+    void smuProbe();
     bool dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k);
     bool dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n);
     bool dpcdRead(uint32_t eng, uint32_t addr, uint8_t *d, uint32_t n);
@@ -686,6 +693,45 @@ void RedNaviProbe::fillScanout() {
         }
         if ((y & 63) == 0) IOSleep(1);
     }
+}
+
+// Opt-in (rednavi_smu=1): first talk to the SMU through the compat layer. Only read-style messages: the
+// test message, the firmware version and the driver interface version. Published as "smu-info".
+void RedNaviProbe::smuProbe() {
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_smu", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: SMU messages not requested (boot-arg rednavi_smu=1)\n");
+        return;
+    }
+    uint32_t mp1 = 0;
+    if (!ipBase(kRNHwIdMp1, &mp1)) { IOLog("RedNavi: SMU: no MP1 base\n"); return; }
+
+    struct rn_device adev;
+    rn_device_init(&adev, "RedNavi SMU", reinterpret_cast<volatile void *>(regs->getVirtualAddress()), regs->getLength());
+    adev.reg_offset[RN_MP1_HWIP][0][0] = mp1;
+
+    OSDictionary *out = OSDictionary::withCapacity(8);
+    if (!out) return;
+    static const struct { const char *name; uint32_t msg; uint32_t arg; } msgs[] = {
+        {"test", PPSMC_MSG_TestMessage, 0x12345678},
+        {"smu_version", PPSMC_MSG_GetSmuVersion, 0},
+        {"driver_if_version", PPSMC_MSG_GetDriverIfVersion, 0},
+    };
+    for (const auto &m : msgs) {
+        uint32_t result = 0, resp = 0;
+        int rc = rn_smu13_send(&adev, m.msg, m.arg, &result, &resp, 100000);
+        IOLog("RedNavi: SMU %s: rc %d, response 0x%x, argument 0x%08x\n", m.name, rc, resp, result);
+        char key[40];
+        snprintf(key, sizeof(key), "%s_rc", m.name);
+        rnPublishOne(out, key, static_cast<uint64_t>(static_cast<uint32_t>(rc)));
+        snprintf(key, sizeof(key), "%s_resp", m.name);
+        rnPublishOne(out, key, resp);
+        snprintf(key, sizeof(key), "%s_arg", m.name);
+        rnPublishOne(out, key, result);
+        if (rc == -ETIMEDOUT) break;          // the SMU does not answer: do not pile up more writes
+    }
+    setProperty("smu-info", out);
+    out->release();
 }
 
 // Opt-in (rednavi_fb=1): tell the RedNaviFB kext (a separate bundle, see RedNaviFB/kern_fb.cpp) where the lit
@@ -1328,6 +1374,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dpTrain();
     dcnReplay();
     dcnDump();
+    smuProbe();
     publishFramebuffer();
     registerService();
     return true;

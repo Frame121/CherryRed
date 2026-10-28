@@ -1,0 +1,37 @@
+# Compat layer (LinuxKPI-style)
+
+Goal: let code ported from amdgpu (SMU 13, later DC, GFX, MES) build in the kext with as few edits as possible, instead of re-writing every register access by hand like the probe does. It is written from scratch under BSD-3; FreeBSD's LinuxKPI and drm-kmod were read only for ideas.
+
+State (2026-10-28): the layer builds into `RedNavi.kext` and its pure parts have host tests (`make test`). **It has not been loaded on a real machine yet.** The first consumer is the SMU message stage (`RedNavi/smu13.cpp`, boot-arg `rednavi_smu=1`), which is the first thing to run on hardware.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `compat/include/linux/*.h` | Linux headers: `types`, `errno`, `bits`, `kernel` (container_of, min/max, ERR_PTR, READ_ONCE), `printk`, `device`, `list`, `atomic` (+ kref), `spinlock`, `mutex`, `completion`, `delay`, `jiffies`, `ktime`, `slab`, `io`, `byteorder`, `firmware`, `workqueue`, `dma-mapping` |
+| `compat/include/amd/rn_device.h` | Minimal stand-in for `struct amdgpu_device`: `RREG32`, `WREG32`, `RREG32_SOC15`, `SOC15_REG_OFFSET`, `REG_SET_FIELD` |
+| `compat/include/rn/hooks.h` | The few functions the pure headers need from their environment (log, alloc, sleep, clock, yield) |
+| `compat/src/rn_hooks.cpp` | Kernel implementation of the hooks (`IOLogv`, `IOMalloc`, `IOSleep`, `clock_get_uptime`, `panic`) |
+| `compat/src/rn_slab.cpp` | `kmalloc` family with a size header, so `kfree` and `krealloc` need no size |
+| `compat/src/rn_firmware.cpp` | `request_firmware` from a registry of blobs (`rn_firmware_register("amdgpu/smu_13_0_10.bin", ...)`); nothing is read from disk |
+| `compat/src/rn_workqueue.cpp` | `work_struct`, `delayed_work`, `schedule_work` ... on `thread_call` |
+| `compat/src/rn_dma.cpp` | `dma_alloc_coherent` on a physically contiguous `IOBufferMemoryDescriptor` |
+| `compat/src/rn_reg.cpp` | Register access: direct inside the BAR, `MM_INDEX`/`MM_DATA` past its end |
+| `tests/host/` | Host tests and the host version of the hooks |
+
+## Known limits
+
+- Spinlocks do not mask interrupts (nothing runs in interrupt context yet). Mutexes are not recursive and have no owner; a contended one yields with `IOSleep(1)`.
+- One jiffy is one millisecond (`HZ` 1000).
+- Work items own a `thread_call`; call `rn_work_destroy` before freeing one that was queued. All workqueues are the same shared pool.
+- `dma_alloc_coherent` assumes the address from `getPhysicalAddress()` is what the GPU must use, i.e. no IOMMU. Verify on a machine with VT-d on.
+- GFP flags are accepted but only `__GFP_ZERO` does anything.
+- Not done yet: wait queues, `dma_fence`, IDR/xarray, `ww_mutex`, PCI helpers beyond what the probe does, interrupts, DRM structures.
+
+## Adding a header
+
+Put it under `compat/include/linux/` only if Linux code includes it by that name. Keep it free of IOKit so it runs in the host tests, and route anything kernel-specific through `rn/hooks.h`. Add a check to `tests/host/compat_test.cpp`.
+
+## SMU stage
+
+`rn_smu13_send` follows `smu_msg_v1_send_msg` from Linux: wait for the previous response, clear `C2PMSG_90`, write the argument to `C2PMSG_82`, the message to `C2PMSG_66`, poll `C2PMSG_90` (1 = OK). `rednavi_smu=1` sends `TestMessage`, `GetSmuVersion` and `GetDriverIfVersion` and publishes `smu-info` on the probe node. Message numbers come from `pmfw_if/smu_v13_0_0_ppsmc.h`; SMU 13.0.10 uses those tables. Messages that change clocks or features are not sent.

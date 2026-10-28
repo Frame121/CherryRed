@@ -16,7 +16,7 @@ What this is **not**: there is no acceleration and no Metal. WindowServer render
 | M1 | Probe kext: matches `1002:747E`, maps the register BAR, reads the IP discovery table | Done: ran on a real RX 7800 XT, versions recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | M1.5 | Probe stage 2: read-only PSP and SMU mailbox registers | Done: PSP bootloader ready, sOS not running, SMU alive |
 | M2a | PSP bring-up and DMCUB load, as opt-in probe stages (PSP firmware chain, secure OS, command ring, `LOAD_TOC`, `SETUP_TMR`, DMCUB via the PSP) | Done on a real RX 7800 XT: the secure OS answers commands, and our DMCUB firmware runs and answers mailbox commands (see [docs/PSP_BRINGUP.md](docs/PSP_BRINGUP.md), [docs/DMUB_BRINGUP.md](docs/DMUB_BRINGUP.md)) |
-| M2b | SMU 13 bring-up, and the LinuxKPI-style compatibility layer that replaces the probe's hand-written register code | Not started |
+| M2b | SMU 13 bring-up, and the LinuxKPI-style compatibility layer that replaces the probe's hand-written register code | Started: the layer exists and builds, with host tests ([docs/COMPAT.md](docs/COMPAT.md)); the first SMU messages are written but not run on hardware yet |
 | M3 | Native framebuffer: DCN 3.2 display engine + `IOFramebuffer` | Works for one fixed mode on one DisplayPort connector: DP link training, a pipe state replayed from a Linux capture, `RedNaviFB` for WindowServer (see [docs/DC_PLAN.md](docs/DC_PLAN.md), [docs/DP_BRINGUP.md](docs/DP_BRINGUP.md)). Missing: modes from the EDID, more connectors, a real DC port instead of a replay |
 | M4 | GFX11, MES, SDMA 6, GPU VM, IH ring, user client | Not started |
 | M5 | RADV (Mesa) running on macOS through a libdrm_amdgpu shim | Not started |

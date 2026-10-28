@@ -16,7 +16,7 @@ CXX := clang++
 ARCH := -arch x86_64
 CXXFLAGS := $(ARCH) $(OPT) -std=c++17 -fno-rtti -fno-exceptions -fno-builtin -fno-common -mkernel \
 	-nostdinc -isystem $(SDK)/Headers -DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE \
-	-DAPPLE -DNeXT -mmacosx-version-min=12.0 -Wall
+	-DAPPLE -DNeXT -mmacosx-version-min=12.0 -Wall -Icompat/include
 # Optional local firmware component (python3 tools/gen_psp_fw_header.py ... RedNavi/psp_fw.h).
 ifneq ($(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h),)
 CXXFLAGS += -DRN_HAVE_PSP_FW
@@ -29,7 +29,19 @@ LDFLAGS := $(ARCH) -Xlinker -kext -nostdlib -lkmod -L$(SDK)/Library -lkmodc++ -l
 
 all: $(KEXT) $(FBKEXT)
 
-$(OUT)/kern_probe.o: RedNavi/kern_probe.cpp $(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h)
+$(OUT)/kern_probe.o: RedNavi/kern_probe.cpp $(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h RedNavi/smu13.h compat/include/*/*.h)
+	@mkdir -p $(OUT)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(OUT)/smu13.o: RedNavi/smu13.cpp RedNavi/smu13.h $(wildcard compat/include/*/*.h)
+	@mkdir -p $(OUT)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# LinuxKPI-style compat layer (see docs/COMPAT.md). Plain objects linked into RedNavi.kext.
+COMPAT_SRC := $(wildcard compat/src/*.cpp)
+COMPAT_OBJ := $(patsubst compat/src/%.cpp,$(OUT)/compat_%.o,$(COMPAT_SRC))
+
+$(OUT)/compat_%.o: compat/src/%.cpp $(wildcard compat/include/*/*.h)
 	@mkdir -p $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -37,9 +49,9 @@ $(OUT)/kern_info.o: RedNavi/kern_info.c
 	@mkdir -p $(OUT)
 	clang $(ARCH) $(OPT) -mkernel -nostdinc -isystem $(SDK)/Headers -DKERNEL -mmacosx-version-min=12.0 -c $< -o $@
 
-$(KEXT): $(OUT)/kern_probe.o $(OUT)/kern_info.o RedNavi/Info.plist.in
+$(KEXT): $(OUT)/kern_probe.o $(OUT)/smu13.o $(COMPAT_OBJ) $(OUT)/kern_info.o RedNavi/Info.plist.in
 	@mkdir -p $(KEXT)/Contents/MacOS
-	$(CXX) $(LDFLAGS) $(OUT)/kern_probe.o $(OUT)/kern_info.o -o $(KEXT)/Contents/MacOS/RedNavi
+	$(CXX) $(LDFLAGS) $(OUT)/kern_probe.o $(OUT)/smu13.o $(COMPAT_OBJ) $(OUT)/kern_info.o -o $(KEXT)/Contents/MacOS/RedNavi
 	cp RedNavi/Info.plist.in $(KEXT)/Contents/Info.plist
 	@echo "built $(KEXT)"
 
@@ -61,4 +73,11 @@ $(FBKEXT): $(OUT)/fb_kern_fb.o $(OUT)/fb_kern_info.o RedNaviFB/Info.plist.in
 clean:
 	rm -rf build
 
-.PHONY: all clean
+# Host tests for the pure parts of the compat layer (they run on the Mac, not in the kernel).
+test:
+	@mkdir -p build
+	clang++ -std=c++17 -Wall -DRN_HOST_TEST -Icompat/include tests/host/compat_test.cpp tests/host/host_hooks.cpp \
+		compat/src/rn_slab.cpp compat/src/rn_firmware.cpp compat/src/rn_reg.cpp -o build/compat_test
+	./build/compat_test
+
+.PHONY: all clean test
