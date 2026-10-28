@@ -66,6 +66,17 @@ With `rednavi_psp_cmd=1` the probe put one frame in the ring: a `psp_gfx_cmd_res
 
 So the whole round trip works: the sOS read our frame from VRAM, executed it and wrote the fence back. The boot-config query itself is simply not supported by this PSP, which is harmless (amdgpu only uses it for GECC on some ASICs). We have a working command channel.
 
+## What amdgpu does next, and what DCN 3.2 needs (read from `amdgpu_psp.c`, `amdgpu_dm_dmub.c`)
+
+- After the ring, `psp_hw_start` calls `psp_tmr_init` (which sends **LOAD_TOC** to learn the TMR size) and `psp_tmr_load` (**SETUP_TMR**). `psp_early_init` leaves `autoload_supported` and `boot_time_tmr` both true for MP0 13.0.10, and then `psp_skip_tmr()` returns true: **Linux does not send SETUP_TMR on this PSP**. The TMR is set up by the firmware at boot. Only LOAD_TOC is sent.
+- The display firmware does not need the PSP. `amdgpu_dm_dmub.c` has two paths. With `load_type == AMDGPU_FW_LOAD_PSP` the PSP loads the DMCUB `inst_const` part (`AMDGPU_UCODE_ID_DMCUB`, via `LOAD_IP_FW`). Otherwise the driver copies it into the DMUB framebuffer window itself ("backdoor load", `hw_params.load_inst_const = true`). For a native framebuffer the backdoor path avoids `LOAD_IP_FW` and the TMR bookkeeping entirely.
+- Confirmed: the DMCUB file for DCN 3.2.0 is `amdgpu/dcn_3_2_0_dmcub.bin` (`FIRMWARE_DCN_V3_2_0_DMCUB`).
+- The DMUB window setup also copies the card's **VBIOS image** into the framebuffer (`DMUB_WINDOW_3_VBIOS`, from `adev->bios`). We will need the VBIOS bytes: from the PCI expansion ROM, the ACPI VFCT table, or VRAM.
+
+## Result of LOAD_TOC (probe stage 7, 2026-10-28)
+
+With `rednavi_psp_toc=1` the probe copied the 2304-byte TOC component to the staging buffer and sent `GFX_CMD_ID_LOAD_TOC`. Response (`docs/logs/ioreg-rednavi-probe8-toc.txt`): fence ok, `status` = 0, `tmr_size` = `0xA700000` (167 MiB). The PSP parsed the TOC and accepted it.
+
 ## Next code step
 
-Use the channel for what amdgpu does next: `GFX_CMD_ID_LOAD_TOC` with the TOC component of the SOS file (2304 bytes, gives the TMR size), then `GFX_CMD_ID_SETUP_TMR`, then load the DMCUB firmware through the PSP or directly, as the display path requires. Before that, check in `amdgpu_psp.c` which of these steps DCN 3.2 really needs for a native framebuffer.
+The PSP side needed for a display is probably done. Next is the display path: obtain the VBIOS image, parse `dcn_3_2_0_dmcub.bin`, lay out the DMUB framebuffer windows and start the DMCUB by the backdoor path. Check what the DMCUB needs from the SMU/clocks first. Optional PSP follow-ups: `FB_FW_RESERV_ADDR` query, SMU firmware load (`psp_load_smu_fw`).

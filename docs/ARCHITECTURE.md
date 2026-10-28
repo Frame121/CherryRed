@@ -53,7 +53,7 @@ File names come from the `MODULE_FIRMWARE` lines in the Linux driver and were ch
 | SDMA | `sdma_6_0_3.bin` |
 | VCN | `vcn_4_0_0.bin` |
 
-For M3 (native framebuffer) only the PSP and DMCUB files matter, plus the SMU file if the clocks must be brought up first. The DMCUB name is inferred from the DMU version 3.2.0; it is not confirmed by reading `amdgpu_dm.c`, which could not be fetched.
+For M3 (native framebuffer) only the PSP and DMCUB files matter, plus the SMU file if the clocks must be brought up first. The DMCUB name `dcn_3_2_0_dmcub.bin` is confirmed in `amdgpu_dm_dmub.c` (`FIRMWARE_DCN_V3_2_0_DMCUB`).
 
 ## Probe findings that shape M2
 
