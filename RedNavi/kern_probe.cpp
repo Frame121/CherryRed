@@ -43,6 +43,10 @@
 // The result is the sink's own verdict: DPCD 0x202-0x204 (CR_DONE, CHANNEL_EQ_DONE, SYMBOL_LOCKED, align).
 // Published as "dp-train".
 //
+// Fourteenth stage (read-only, rednavi_dcn_dump=1): reads every DCN 3.2 register of tools/dcn32_reglist.txt
+// (4366 registers) after everything else has run and publishes the values, in list order, as the "dcn-dump"
+// property. tools/linux_dcn_dump.py produces the same list on Linux, so the two states can be diffed.
+//
 // Tenth stage (opt-in, writes to the GPU, rednavi_dmub_load=1 and a build with RedNavi/dmub_fw.h):
 // stops the DMCUB the VBIOS left running, builds the DMUB memory block in VRAM, backdoor-loads the
 // DAL firmware and releases the reset, mirroring dmub_srv_hw_init and the dmub_dcn32_* hooks in amdgpu.
@@ -64,6 +68,7 @@
 #include <IOKit/IOService.h>
 #include <IOKit/pci/IOPCIDevice.h>
 #include <pexpert/pexpert.h>
+#include "dcn_reglist.h"
 
 #ifdef RN_HAVE_PSP_FW
 #include "psp_fw.h"
@@ -242,6 +247,7 @@ class RedNaviProbe : public IOService {
     bool dmubSend(const uint8_t *cmd, uint32_t len, uint32_t reply[16]);
     void dpInit();
     void dpTrain();
+    void dcnDump();
     bool dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k);
     bool dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n);
     bool dpcdRead(uint32_t eng, uint32_t addr, uint8_t *d, uint32_t n);
@@ -636,6 +642,24 @@ void RedNaviProbe::dpTrain() {
     const char *n[9] = {"tx_ok", "cr_ok", "eq_ok", "cr_tries", "eq_tries", "status_202_203", "status_204_205", "adjust_206_207", "tps3"};
     uint32_t v[9] = {txOk, crOk, eqOk, crTries, eqTries, static_cast<uint32_t>(st[0] | (st[1] << 8)), static_cast<uint32_t>(st[2] | (st[3] << 8)), static_cast<uint32_t>(st[4] | (st[5] << 8)), tps3};
     rnPublish(this, "dp-train", n, v, 9);
+}
+
+void RedNaviProbe::dcnDump() {
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_dcn_dump", &arg, sizeof(arg)) || arg != 1) return;
+    uint32_t dmu = 0;
+    if (!ipBase(kRNHwIdDmu, &dmu, 2)) return;
+    uint32_t regLen = static_cast<uint32_t>(regs->getLength());
+    OSData *blob = OSData::withCapacity(kRNDcnRegCount * 4);
+    if (!blob) return;
+    for (uint32_t i = 0; i < kRNDcnRegCount; i++) {
+        uint32_t off = (dmu + kRNDcnRegs[i]) * 4, v = 0xDEADBEEF;
+        if (off + 4 <= regLen) v = rd(off);
+        blob->appendBytes(&v, 4);
+    }
+    setProperty("dcn-dump", blob);
+    blob->release();
+    IOLog("RedNavi: DCN dump of %u registers published\n", kRNDcnRegCount);
 }
 
 void RedNaviProbe::probeAux() {
@@ -1141,6 +1165,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dpInit();
     probeAux();
     dpTrain();
+    dcnDump();
     registerService();
     return true;
 }
