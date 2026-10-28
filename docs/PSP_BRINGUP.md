@@ -40,6 +40,12 @@ Afterwards the driver creates the GPCOM ring (`C2PMSG_64`, `_67`, `_69`, `_70`, 
 - Whether the card accepts this sequence from a cold VBIOS state without the TMR and the rest of the driver init that Linux does first. Linux does ASIC init (`atom` tables) before PSP; we have not.
 - This is the first step that **writes** to the GPU and can hang it. Run only with the UHD 630 as the display.
 
+## Result of the first write (probe 4, 2026-10-28)
+
+With `rednavi_psp_kdb=1` the probe copied the 7488-byte KDB (version 0x2003200) to VRAM offset 1 GB, read it back without mismatches, wrote `C2PMSG_36` and the `LOAD_KEY_DATABASE` command, and `C2PMSG_35` read `0x80000000` (ready, no error bits) afterwards. The machine did not hang and the card is still readable (`docs/logs/ioreg-rednavi-probe4.txt`).
+
+Caveat: Linux accepts the same signal, but `0x80000000` is also the value before the command, so this alone does not prove the bootloader consumed the image. The probe should read `C2PMSG_35` and `_36` again a few milliseconds later, and the next component (SYS_DRV) will show whether the chain advances.
+
 ## Next code step
 
-Probe stage 3, still read-only: read the MMHUB framebuffer location registers to get the VRAM MC base, so a buffer address can be computed. Only after that, a separate opt-in kext flag that writes KDB.
+Extend the opt-in loader to the rest of the chain (SYS_DRV, SOC_DRV, INTF_DRV, DBG_DRV, RAS_DRV, then SOS), logging `C2PMSG_35`, `_36` and `_81` after each step, and stop at the first error.
