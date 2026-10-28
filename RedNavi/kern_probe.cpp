@@ -8,11 +8,21 @@
 // to hand buffers to the PSP bootloader). Results are logged and published as the
 // "ip-discovery", "mailbox-regs" and "mmhub-regs" properties (ioreg -rn RedNaviProbe -l -x).
 //
-// Nothing is written to the GPU except the MM_INDEX/MM_DATA window used to read VRAM.
+// Fourth stage (opt-in, writes to the GPU): with the boot-arg rednavi_psp_kdb=1 and a build that
+// has RedNavi/psp_kdb.h (see tools/gen_psp_fw_header.py), copies the PSP key database into VRAM
+// and hands it to the PSP bootloader, as psp_v13_0_bootloader_load_component does in amdgpu.
+//
+// Without that boot-arg nothing is written to the GPU except the MM_INDEX/MM_DATA window used to
+// read VRAM.
 
 #include <IOKit/IOLib.h>
 #include <IOKit/IOService.h>
 #include <IOKit/pci/IOPCIDevice.h>
+#include <pexpert/pexpert.h>
+
+#ifdef RN_HAVE_PSP_KDB
+#include "psp_kdb.h"
+#endif
 
 #define kRNRegBar          5          // MMIO registers (512 KB on Navi 3x)
 #define kRNVramBar         0          // VRAM aperture (size depends on Resizable BAR)
@@ -34,6 +44,14 @@
 #define kRNFallbackVramMB     (16u * 1024)  // RX 7800 XT, used if the memsize register reads 0 or all ones
 
 // Hardware IDs in the discovery table (soc15_hw_ip.h).
+#define kRNMp0C2pmsg35        0x063       // dword offsets from the MP0 base
+#define kRNMp0C2pmsg36        0x064
+#define kRNMp0C2pmsg81        0x091
+#define kRNPspBlReady         0x80000000u
+#define kRNPspBlLoadKdb       0x80000u    // PSP_BL__LOAD_KEY_DATABASE (amdgpu_psp.h)
+#define kRNVramMcBase         0x8000000000ull  // MMHUB FB_LOCATION_BASE 0x8000 << 24, read by probe stage 3
+#define kRNPspBufVramOffset   0x40000000ull    // 1 GB into VRAM, 1 MB aligned, well clear of the table at the end
+#define kRNPspBufSize         (1u << 20)
 #define kRNHwIdMp1            1
 #define kRNHwIdMmhub          34
 #define kRNHwIdMp0            255
@@ -87,9 +105,16 @@ class RedNaviProbe : public IOService {
         return v;
     }
 
+    void vramWrite(uint64_t pos, uint32_t v) {
+        wr(kRNMmIndex, static_cast<uint32_t>(pos) | 0x80000000u);
+        wr(kRNMmIndexHi, static_cast<uint32_t>(pos >> 31));
+        wr(kRNMmData, v);
+    }
+
     void dumpPci();
     void dumpDiscovery();
     bool ipBase(uint16_t hwId, uint32_t *base);
+    void loadKdb();
     void dumpRegs(const RNMailboxReg *list, size_t count, const char *property);
 
 public:
@@ -219,6 +244,55 @@ void RedNaviProbe::dumpRegs(const RNMailboxReg *list, size_t count, const char *
     out->release();
 }
 
+void RedNaviProbe::loadKdb() {
+#ifdef RN_HAVE_PSP_KDB
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_psp_kdb", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: KDB load not requested (boot-arg rednavi_psp_kdb=1)\n");
+        return;
+    }
+    uint32_t mp0 = 0;
+    if (!ipBase(kRNHwIdMp0, &mp0)) { IOLog("RedNavi: KDB: no MP0 base\n"); return; }
+    uint32_t r35 = (mp0 + kRNMp0C2pmsg35) * 4, r36 = (mp0 + kRNMp0C2pmsg36) * 4, r81 = (mp0 + kRNMp0C2pmsg81) * 4;
+    if (r81 + 4 > regs->getLength()) { IOLog("RedNavi: KDB: registers outside BAR\n"); return; }
+
+    if (rd(r81) != 0) { IOLog("RedNavi: KDB: sOS already alive (C2PMSG_81 = 0x%08x), nothing to do\n", rd(r81)); return; }
+    if (rd(r35) != kRNPspBlReady) { IOLog("RedNavi: KDB: bootloader not ready (C2PMSG_35 = 0x%08x)\n", rd(r35)); return; }
+
+    // psp_copy_fw: zero the whole 1 MB buffer, then copy the image.
+    for (uint32_t off = 0; off < kRNPspBufSize; off += 4) vramWrite(kRNPspBufVramOffset + off, 0);
+    uint32_t len = sizeof(kRNPspKdb);
+    for (uint32_t off = 0; off < len; off += 4) {
+        uint32_t v = 0;
+        for (uint32_t k = 0; k < 4 && off + k < len; k++) v |= static_cast<uint32_t>(kRNPspKdb[off + k]) << (8 * k);
+        vramWrite(kRNPspBufVramOffset + off, v);
+    }
+    uint32_t bad = 0;
+    for (uint32_t off = 0; off < len; off += 4) {
+        uint32_t v = 0;
+        for (uint32_t k = 0; k < 4 && off + k < len; k++) v |= static_cast<uint32_t>(kRNPspKdb[off + k]) << (8 * k);
+        if (vramRead(kRNPspBufVramOffset + off) != v) bad++;
+    }
+    IOLog("RedNavi: KDB: %u bytes (version 0x%x) written to VRAM +0x%llx, %u mismatching dwords\n", len, kRNPspKdbVersion, kRNPspBufVramOffset, bad);
+    if (bad) return;
+
+    wr(r36, static_cast<uint32_t>((kRNVramMcBase + kRNPspBufVramOffset) >> 20));
+    wr(r35, kRNPspBlLoadKdb);
+
+    uint32_t st = 0;
+    for (int i = 0; i < 2000; i++) {
+        st = rd(r35);
+        if (st == kRNPspBlReady) break;
+        IOSleep(1);
+    }
+    IOLog("RedNavi: KDB: C2PMSG_35 = 0x%08x after command (0x80000000 = done, low bits = error), C2PMSG_81 = 0x%08x\n", st, rd(r81));
+    OSNumber *n = OSNumber::withNumber(static_cast<uint64_t>(st), 64);
+    if (n) { setProperty("kdb-load-status", n); n->release(); }
+#else
+    IOLog("RedNavi: built without psp_kdb.h, KDB load not available\n");
+#endif
+}
+
 bool RedNaviProbe::start(IOService *provider) {
     if (!IOService::start(provider)) return false;
     pci = OSDynamicCast(IOPCIDevice, provider);
@@ -237,6 +311,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpDiscovery();
     dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
+    loadKdb();
     registerService();
     return true;
 }
