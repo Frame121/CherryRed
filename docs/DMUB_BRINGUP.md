@@ -1,0 +1,49 @@
+# DMUB / DMCUB bring-up for DCN 3.2 (M3 plan)
+
+Source of truth: `drivers/gpu/drm/amd/display/dmub/` (`dmub_srv.c`, `dmub_dcn32.c`, `dmub_dcn31.c`) and `amdgpu_dm/amdgpu_dm_dmub.c` in the Linux kernel (MIT). Nothing in this document has been run on the card yet; the layout below is a dry run (`tools/dmub_layout.py`).
+
+## What the firmware file contains
+
+`dcn_3_2_0_dmcub.bin` (284432 bytes): header v1.0, firmware version `0x07003600`, `inst_const` 284176 bytes, no separate `bss_data`. The instruction region is wrapped by a 256-byte PSP header (skipped) and a 256-byte PSP footer (dropped), leaving 283664 bytes of code. A 64-byte meta block just before the footer (magic `0x444D5542`) gives the sizes of the firmware-state region (47296), the trace buffer (65552) and the shared state.
+
+## Window layout (all in VRAM)
+
+`python3 tools/dmub_layout.py dcn_3_2_0_dmcub.bin 57856` reproduces `dmub_srv_calc_region_info` with our VBIOS size:
+
+| Window | Offset | Size |
+|---|---|---|
+| INST_CONST | 0x0 | 283712 |
+| STACK (128 KiB stack + 512 KiB context) | 0x45500 | 655360 |
+| BSS_DATA | 0xe5500 | 0 |
+| VBIOS | 0xe5500 | 57856 |
+| MAILBOX (inbox + outbox, 8 KiB each) | 0xf3700 | 16384 |
+| TRACEBUFF | 0xf7700 | 65600 |
+| FW_STATE | 0x107800 | 47296 |
+| SCRATCH_MEM | 0x113100 | 1024 |
+| IB_MEM | 0x113500 | 3200 |
+| SHARED_STATE | 0x114200 | 1536 |
+| LSDMA_BUFFER | 0x114800 | 65536 |
+| CURSOR_OFFLOAD | 0x124800 | 14272 |
+
+Total 1184 KiB, one contiguous block; each window is 256-byte aligned. The struct sizes behind IB_MEM, SHARED_STATE and CURSOR_OFFLOAD (3148, 1536, 14232 bytes) were obtained by compiling `dmub_cmd.h` against stub headers.
+
+amdgpu allocates this block in **GTT** (system memory) on DCN 3.2, with a comment that it limits the choice for latency reasons; other ASICs allow VRAM too. We can put it in **VRAM** and avoid needing GART page tables.
+
+## Hardware init sequence (`dmub_srv_hw_init`, DCN 3.2 uses the dcn31/dcn32 hooks)
+
+1. `reset`: put the DMCUB in reset.
+2. Set up code windows CW0 (instructions) and CW1 (stack), then **backdoor load**: the host copies the instruction region into window 0 and the hardware pulls it in (`dmub_dcn31_backdoor_load`). The host first reads the whole region back so no write is still pending.
+3. Windows CW2 to CW6 (bss, VBIOS, mailbox, trace, firmware state) at fixed DMUB-side bases `0x60000000`, `0x61000000`, `0x63000000` ... `0x66000000`, plus the inbox/outbox/outbox0 ring setup.
+4. `reset_release`, then wait for the firmware to report ready (auto-load flag in the scratch registers).
+
+The register addresses are `regDMCUB_*` in the DCN 3.2 register headers, offset from the DMU base address already in the discovery table.
+
+## What is still unknown
+
+- The exact DCN 3.2 `regDMCUB_*` offsets and which of them need DMU instance bases (read `dmub_dcn31.c`, `dmub_dcn32.c` and the DCN 3.2 `dcn_3_2_0_offset.h`).
+- Which clocks and power domains must be up before releasing reset; the VBIOS left some running, but it is not known how much (the SMU is alive, see ARCHITECTURE.md).
+- Whether the DMCUB can reach VRAM at `0x8000000000 + offset` without our setting up the MMHUB/GART context (the PSP did, but the DMCUB uses its own VMID 0 view).
+
+## Next code step
+
+Probe stage 9, read-only: read the `DMCUB_*` status registers (reset state, firmware-ready flag, scratch registers) to see whether the VBIOS already started a DMCUB. Then a first write step: build the 1184 KiB block in VRAM, backdoor load, release reset, and watch the ready flag.
