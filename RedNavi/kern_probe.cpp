@@ -28,6 +28,10 @@
 // returned. For MP0 13.0.10 amdgpu sets boot_time_tmr = false, so it does send this (the Linux
 // reference dmesg on this card shows "reserve 0xa700000 from 0x83e0000000 for PSP TMR").
 //
+// Eleventh stage (read-only, always on): reads the DCN hot-plug-detect registers (HPDn_DC_HPD_INT_STATUS,
+// bit 1 = DC_HPD_SENSE, bit 4 = SENSE_DELAYED, and the raw pin levels in DC_GPIO_HPD_Y) to see which
+// connectors have a monitor. Published as "hpd-regs".
+//
 // Tenth stage (opt-in, writes to the GPU, rednavi_dmub_load=1 and a build with RedNavi/dmub_fw.h):
 // stops the DMCUB the VBIOS left running, builds the DMUB memory block in VRAM, backdoor-loads the
 // DAL firmware and releases the reset, mirroring dmub_srv_hw_init and the dmub_dcn32_* hooks in amdgpu.
@@ -168,6 +172,16 @@ static const RNMailboxReg kRNDmcubRegs[] = {
     {"DMCUB_OUTBOX1_WPTR", kRNHwIdDmu, 0x1de, 2},
     {"DMCUB_GPINT_DATAOUT", kRNHwIdDmu, 0x1f9, 2},
     {"DMCUB_REGION3_CW0_OFFSET", kRNHwIdDmu, 0x1b5, 2},
+};
+
+static const RNMailboxReg kRNHpdRegs[] = {
+    {"HPD0_INT_STATUS", kRNHwIdDmu, 0x1f14, 2}, {"HPD0_CONTROL", kRNHwIdDmu, 0x1f16, 2},
+    {"HPD1_INT_STATUS", kRNHwIdDmu, 0x1f1c, 2}, {"HPD1_CONTROL", kRNHwIdDmu, 0x1f1e, 2},
+    {"HPD2_INT_STATUS", kRNHwIdDmu, 0x1f24, 2}, {"HPD2_CONTROL", kRNHwIdDmu, 0x1f26, 2},
+    {"HPD3_INT_STATUS", kRNHwIdDmu, 0x1f2c, 2}, {"HPD3_CONTROL", kRNHwIdDmu, 0x1f2e, 2},
+    {"HPD4_INT_STATUS", kRNHwIdDmu, 0x1f34, 2}, {"HPD4_CONTROL", kRNHwIdDmu, 0x1f36, 2},
+    {"DC_GPIO_HPD_MASK", kRNHwIdDmu, 0x28f4, 2}, {"DC_GPIO_HPD_A", kRNHwIdDmu, 0x28f5, 2},
+    {"DC_GPIO_HPD_EN", kRNHwIdDmu, 0x28f6, 2}, {"DC_GPIO_HPD_Y", kRNHwIdDmu, 0x28f7, 2},
 };
 
 class RedNaviProbe : public IOService {
@@ -815,6 +829,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
     dumpRegs(kRNDmcubRegs, sizeof(kRNDmcubRegs) / sizeof(kRNDmcubRegs[0]), "dmcub-regs");
+    dumpRegs(kRNHpdRegs, sizeof(kRNHpdRegs) / sizeof(kRNHpdRegs[0]), "hpd-regs");
     dmcubSnapshot("dmcub-snap-boot");
     loadPspChain();
     if (createPspRing()) {
