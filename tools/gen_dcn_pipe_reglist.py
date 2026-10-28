@@ -19,7 +19,11 @@ GROUPS = [
     ("mpc", r"MPC_OUT0_|MPC_|MPCC0_|MPC_CRC"),
     ("hubbub", r"DCHUBBUB_|DCHUB_"),
     ("dcio", r"DCIO_|RDPCSPIPE4_|DC_GPIO_|DC_REF_CLK|DC_PAD"),
+    # Plane groups: pipe 0 only. Not in the first dump because a full read stalled; read them one group at a time.
+    ("hubp0", r"HUBP0_|HUBPREQ0_|HUBPRET0_|SURFACE|DCHUBP0"),
+    ("dpp0", r"CNVC_CFG0_|CNVC_CUR0_|DSCL0_|CM0_|DPP_TOP0_|CURSOR0_|DPP0_"),
 ]
+PLANE_GROUPS = ("hubp0", "dpp0")
 
 
 def main():
@@ -39,7 +43,7 @@ def main():
         for g, pat in GROUPS:
             rx = re.compile(pat)
             names = sorted((n for n in regs if rx.match(n) and n not in seen and base.get(n) is not None
-                            and not n.startswith(("DMCUB", "AZ", "HUBP", "CM", "DSC", "DWB", "MCIF", "CURSOR", "CNVC"))),
+                            and (g in PLANE_GROUPS or not n.startswith(("DMCUB", "AZ", "HUBP", "CM", "DSC", "DWB", "MCIF", "CURSOR", "CNVC")))),
                            key=lambda n: (base[n], regs[n]))
             for n in names:
                 seen.add(n)
