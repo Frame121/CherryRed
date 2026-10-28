@@ -1,0 +1,35 @@
+RedNavi third-party notices
+
+1. AMD register definitions and behaviour documented in the Linux amdgpu driver (MIT)
+
+RedNavi/dcn_reglist.h, RedNavi/dcn_replay.h (register names and offsets), tools/dcn32_reglist.txt, tools/dcn32_pipe_reglist.txt, the message numbers in RedNavi/smu13.h and the constants and structure layouts used by the probe (PSP, DMUB, SMU, DCN, VBIOS tables) come from the Linux kernel's amdgpu driver, whose files carry this licence:
+
+  Copyright (C) Advanced Micro Devices, Inc.
+
+  Permission is hereby granted, free of charge, to any person obtaining a
+  copy of this software and associated documentation files (the "Software"),
+  to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  and/or sell copies of the Software, and to permit persons to whom the
+  Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included
+  in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+  THE COPYRIGHT HOLDER(S) BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+  WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+  OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+2. GPU firmware (not part of this repository)
+
+The PSP, DMCUB and SMU firmware files come from linux-firmware (LICENSE.amdgpu, Copyright (C) 2024 Advanced Micro Devices, Inc.). That licence allows redistribution in binary form only, requires the copyright notice and permission notice to be reproduced in the documentation, and forbids reverse engineering, decompilation and disassembly. It also subjects the software to United States export laws.
+
+For that reason this repository contains no firmware, no C arrays generated from firmware, and no disassembly of it. The tools in tools/ (gen_psp_fw_header.py, gen_dmub_fw_header.py, parse_psp_fw.py) read the container headers that the Linux driver documents and turn a file the user fetched into a local, git-ignored header. Anyone who distributes a kext built with such a header is responsible for reproducing the AMD notice and permission notice (see LICENSE.amdgpu in linux-firmware) with it.
+
+3. Other projects
+
+RedNavi is not derived from NullMoth, NootedRed or LegacyRed and contains no code from them. The architecture follows the approach NullMoth shows for NVIDIA; the Linux and FreeBSD drivers were read as references for behaviour.

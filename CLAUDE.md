@@ -24,7 +24,7 @@ make test                   # host tests for the compat layer
 
 - Code, comments, docs and commit messages are in English, in plain prose.
 - Licence is BSD-3-Clause. Do not copy code from projects with other or restrictive licences (NullMoth's kexts and plugin are PolyForm Noncommercial; also do not copy from NootedRed or LegacyRed). Write from scratch; FreeBSD's drm-kmod and the Linux amdgpu driver are references for ideas and register definitions.
-- Do not commit vendor firmware, the VBIOS image or raw EDIDs (they carry serial numbers). The probe publishes them as ioreg properties; cut them out of logs before committing.
+- Do not commit vendor firmware (linux-firmware's LICENSE.amdgpu allows binary redistribution only and forbids reverse engineering and disassembly; do not disassemble it either), headers generated from it, the VBIOS image or raw EDIDs (they carry serial numbers). The probe publishes them as ioreg properties; cut them out of logs before committing.
 - Say what is verified on hardware and what is not. Mark anything read from the Linux sources but never run as unverified.
 
 ## Hard-won facts

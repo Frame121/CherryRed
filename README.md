@@ -2,6 +2,8 @@
 
 A native macOS display driver for AMD **Navi 32 (RDNA 3)** GPUs, starting with the **Radeon RX 7800 XT** (`1002:747E`).
 
+> **For developers only.** This is a research prototype, not a driver you can install and use. It needs OpenCore, SIP turned off and boot-args, it writes to the GPU from the kernel, and it can hang or crash your machine. Run it only on a system whose display does not depend on this card, with a backup EFI. Nothing here is accelerated: no Metal, no 3D.
+
 Goal: a real framebuffer on the card, driven by our own kext (DCN 3.2 display engine), with no GOP, VESA or firmware framebuffer in the way. Acceleration (Metal) comes after, and is where we need help.
 
 ## Status
@@ -80,4 +82,6 @@ Please do not copy code from projects with restrictive licences (NullMoth's kext
 
 ## License
 
-BSD-3-Clause for the code in this repository. amdgpu register definitions and behaviour documented in Linux are MIT. GPU firmware is not included and is fetched from linux-firmware.
+BSD-3-Clause for the code in this repository. Register definitions and behaviour taken from the Linux amdgpu driver are MIT, see [NOTICE](NOTICE).
+
+GPU firmware is not included. It comes from linux-firmware under `LICENSE.amdgpu`, which allows redistribution in binary form only, with AMD's notice reproduced, and forbids reverse engineering, decompilation and disassembly. That is why firmware is never committed here and each user generates local headers from files they fetch themselves.

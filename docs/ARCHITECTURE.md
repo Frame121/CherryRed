@@ -41,7 +41,7 @@ So GC is 11.0.3, not 11.0.1.
 
 ## Firmware for this card
 
-File names come from the `MODULE_FIRMWARE` lines in the Linux driver and were checked against `WHENCE` in linux-firmware. All of them exist there with the licence "Redistributable. See LICENSE.amdgpu". The licence text itself still has to be read before we decide whether the repo may ship or mirror the files; until then they are fetched at runtime.
+File names come from the `MODULE_FIRMWARE` lines in the Linux driver and were checked against `WHENCE` in linux-firmware. All of them exist there with the licence "Redistributable. See LICENSE.amdgpu". The licence text (read 2026-10-28) allows redistribution **in binary form only**, with AMD's copyright and permission notice reproduced in the documentation, and forbids reverse engineering, decompilation and disassembly; it also refers to US export laws. So the repo does not ship or mirror the files (nor C arrays generated from them): users fetch them from linux-firmware and generate local headers. See [NOTICE](../NOTICE).
 
 | Block | File in `amdgpu/` |
 |---|---|
