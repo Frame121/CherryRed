@@ -14,15 +14,13 @@ Date: 2026-10-23
 
 ## Important caveat
 
-The tag matches the kernel version family, but the installed package is `7.2.11.arch1-1` and the Git tag alone does not prove that the local package was built from that exact commit with no downstream packaging/config differences. The source checkout is being investigated separately; do not call this a verified binary-to-source match until package build metadata/PKGBUILD and source commit are reconciled.
+The complete local source checkout is at the peeled commit above. The checked-in `PKGBUILD.trunk` is for `6.3.2.arch1`, not the installed `7.2.11.arch1-1` package, so it cannot establish the build recipe for the installed kernel. The Git tag and source tree therefore still do **not** prove binary-to-source identity or exclude package-specific patches/configuration differences.
 
-Direct raw-file requests from GitHub began returning HTTP 429 during this session, so source-level symbol lookup was not completed by the initial fetch. The previously checked upstream `master` and `v7.2` mapping tables did not resolve HWIDs 282 and 286. No names are guessed.
+The exact tagged source tables have now been inspected locally. `drivers/gpu/drm/amd/include/soc15_hw_ip.h` has no named `*_HWID` constants for numeric IDs 282 or 286; `drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c` has no explicit name-table entries at indices 282 or 286. The two captured RX 7600 records therefore remain semantically unresolved in this source snapshot. No names are guessed. See `ARCH-V7.2.11-HWID-AUDIT.md`.
 
 ## Next checks
 
-1. Complete checkout of the tag's peeled commit.
-2. Inspect `drivers/gpu/drm/amd/include/soc15_hw_ip.h` and `drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c` at that commit.
-3. Compare exact Arch package recipe, config and build source revision.
-4. Inspect firmware declaration/request sites in the same source tree.
+1. Obtain the exact `7.2.11.arch1-1` package recipe/build logs or installed build metadata to compare its source revision, patches, and config with this tag.
+2. Inspect firmware declaration/request sites in the same source tree and correlate with the recorded RX 7600 boot evidence.
 
 No system packages, GPU firmware, kernel files, or boot configuration were modified by this trace.

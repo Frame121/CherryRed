@@ -25,3 +25,5 @@ runs/
 # python bytecode
 __pycache__/
 *.py[cod]
+# full Arch Linux kernel source clone (public, reproducible; ~2GB at commit 64a90897d)
+RX7600-Linux-Evidence/source-investigation/arch-linux-v7.2.11/

@@ -89,7 +89,7 @@ extents in five fixture cases, including valid v1/v2 layouts. It does not
 initialize a GPU or establish that an RX 7600 reports
 those IP Discovery versions or layouts.
 
-The tests use only synthetic values. They do not access a GPU or any device.
+The tests use synthetic fixtures, including a copied snapshot of Linux sysfs PCI resource metadata from the RX 7600. They do not access a GPU during test execution. The live metadata was collected separately using read-only sysfs access and is recorded under `RX7600-Linux-Evidence/pci-resource-survey.md`.
 Passing them verifies this research model only; it does not establish a macOS
 driver component, RX 7600 support, or functioning GPU hardware.
 
@@ -157,3 +157,18 @@ initialization was identified. Neither the reduced Windows symbol set nor the
 source review proves whether the core can link against Apple's kernel C++
 runtime. The audit explicitly states that Windows results neither perform nor
 imply a macOS compile or link.
+
+## Bring-up plan gate model (offline only)
+
+`include/Navi33BringupPlan.hpp` and `src/Navi33BringupPlan.cpp` add a compile-tested, fail-closed milestone gate model for identity, resource survey, firmware audit, memory management, interrupts, command submission, display, acceleration, and Metal. The model rejects missing/duplicate stages, unknown state values, and any request to permit hardware writes. Even when every milestone is marked validated, it does not authorize hardware writes. This is planning/control logic only; it does not probe PCI, map BARs, load firmware, touch registers, or replace a macOS kernel backend.
+
+Standalone host test command (from repository root):
+
+```sh
+g++ -std=c++17 -Wall -Wextra -Werror -pedantic -fno-exceptions -fno-rtti \
+  -Isrc/navi33-research/include \
+  src/navi33-research/src/Navi33BringupPlan.cpp \
+  src/navi33-research/tests/test_Navi33BringupPlan.cpp \
+  -o /tmp/cobalt64-bringup-plan-test
+/tmp/cobalt64-bringup-plan-test
+```

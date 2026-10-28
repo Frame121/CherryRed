@@ -37,3 +37,9 @@ This is an inventory of candidate files consistent with the observed IP versions
 1. Extract exact firmware request names from the full boot log (`amdgpu` debug messages may not print every successful request).
 2. Inspect source for the exact Arch kernel build/source commit and map each request to the source's `MODULE_FIRMWARE` / firmware-loading call sites.
 3. Separately identify macOS-native equivalents or document that no usable equivalent exists. Linux firmware presence is not a substitute for a macOS driver interface.
+
+## Static source-to-file correlation (additional audit)
+
+The checked-out Arch kernel source at commit `64a90897d3c539033f24105968e3513957e70819` was scanned for source references matching the RX 7600's observed IP/firmware versions. The focused machine-readable output is `firmware-source-correlation.json`; the readable table is `firmware-source-correlation.md`. It found 14 distinct source path references across GFX 11.0.2, SDMA 6.0.2, VCN 4.0.4, DCN 3.2.1, PSP 13.0.7, and SMU 13.0.7, each with a local filename candidate in the firmware directory.
+
+This closes a source-name-to-local-file inventory gap, not binary-to-source parity: the installed package's exact build recipe/config still needs reconciliation. Macro-based VCN/DCN references are not always `MODULE_FIRMWARE` declarations, so those rows are labelled as macro references rather than misreported as declared. No statement here proves each file was loaded. The blobs remain Linux-specific evidence and are not approved for macOS reuse.

@@ -47,14 +47,15 @@ Current research includes:
 
 - A bounded IP Discovery parser and host-side regression tests.
 - A read-only scanner for inspecting the installed Windows AMD driver file.
+- A real RX 7600 IP Discovery artifact, Linux PCI resource survey, and Linux firmware/source correlation under `RX7600-Linux-Evidence/`.
 - Evidence, provenance, and source-verification notes under [`tools/ipdisc/`](tools/ipdisc/).
-- A documented Windows-only workflow while a trusted Linux environment is unavailable.
+- Documented Windows inspection tools plus captured Linux-side RX 7600 evidence; package-to-binary source parity remains open.
 - An explicit separation between Navi 48 routing and unverified Navi 33 support.
 
 Still required before claiming RX 7600 support:
 
-1. A real-card IP Discovery artifact with reproducible provenance.
-2. Verified Navi 33 IP and firmware mapping from authoritative sources.
+1. Resolve the two still-unnamed IP Discovery HWIDs (282 and 286) and close the installed Arch kernel binary-to-source provenance gap.
+2. Review which Linux-derived hardware facts have macOS-native equivalents; Linux firmware files and interfaces are not macOS dependencies.
 3. A macOS build and review with the appropriate SDK/toolchain.
 4. Hardware validation of initialization, display output, memory handling, and Metal workloads.
 

@@ -39,8 +39,8 @@ The captured IP Discovery payload has **39 IP records across 30 unique numeric H
 | 271 | DMU | `DMU_HWID` | 0 | 3.2.1 | 1 |
 | 272 | DIO | `DIO_HWID` | 0 | 127.127.63 | 1 |
 | 274 | DAZ | `DAZ_HWID` | 0 | 127.127.63 | 1 |
-| 282 | UNRESOLVED in fetched upstream mapping | `` | 0 | 13.0.2 | 1 |
-| 286 | UNRESOLVED in fetched upstream mapping | `` | 0 | 4.0.2 | 1 |
+| 282 | UNRESOLVED in checked Arch v7.2.11 source snapshot | `` | 0 | 13.0.2 | 1 |
+| 286 | UNRESOLVED in checked Arch v7.2.11 source snapshot | `` | 0 | 4.0.2 | 1 |
 
 ## Source references
 
@@ -55,11 +55,11 @@ The captured IP Discovery payload has **39 IP records across 30 unique numeric H
 - No register addresses are reproduced here.
 - This evidence demonstrates Linux-side discovery on this RX 7600. It does **not** demonstrate macOS driver support, acceleration, or a working Cobalt64 kext.
 
-## Closure update — 2026-10-23
+## Closure update — 2026-10-24
 
-Mapping pass is complete as far as the checked source tables permit: **28/30 HWIDs have source-correlated names; 2/30 remain explicitly unresolved**. They are not silently guessed or assigned a nearby symbol.
+Mapping pass is complete as far as the checked source tables permit: **28/30 HWIDs have source-correlated names; 2/30 remain explicitly unresolved**. The complete Arch Linux `v7.2.11-arch1` source snapshot at peeled commit `64a90897d3c539033f24105968e3513957e70819` was inspected locally; it contains no named HWID constants or discovery name-table entries for 282 and 286. The available `PKGBUILD.trunk` is for 6.3.2, so the source snapshot is not proven to match the installed 7.2.11 package binary. See [`ARCH-V7.2.11-HWID-AUDIT.md`](source-investigation/ARCH-V7.2.11-HWID-AUDIT.md).
 
 - HWID `282`, instance `0`, version `13.0.2`: directly cross-checked against live sysfs at `/sys/bus/pci/devices/0000:03:00.0/ip_discovery/die/0/282/0/` (`major=13`, `minor=0`, `revision=2`). No matching named entry was found in the fetched `soc15_hw_ip.h` / `amdgpu_discovery.c` mapping tables.
 - HWID `286`, instance `0`, version `4.0.2`: directly cross-checked against live sysfs at `/sys/bus/pci/devices/0000:03:00.0/ip_discovery/die/0/286/0/` (`major=4`, `minor=0`, `revision=2`). No matching named entry was found in the fetched source mapping tables.
 
-**Status: source mapping closed with two documented unknowns, not 30/30 named.** To name these reliably, obtain the exact source commit/patch set used to build Arch's `7.2.11-arch1-1` kernel and inspect its HWID definitions. The fetched upstream `master` and `v7.2` sources do not establish those names, so inventing names would lower evidence quality.
+**Status: mapping checked against the locally available Arch source snapshot, with two documented unknowns—not 30/30 named.** The names remain unknown in this snapshot. Exact installed-binary provenance still requires the `7.2.11.arch1-1` build recipe/patch set or build records. No names are guessed.
