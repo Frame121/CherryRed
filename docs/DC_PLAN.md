@@ -71,6 +71,14 @@ Recommendation: do B as a **spike** to find out what really has to be programmed
 
 Each path also carries a bracket-layout record (connector order on the bracket) and a connector-caps record (0: no internal display). The GPIO pin table has 14 entries; two are hardware I2C pairs (`0x91`: engine 1 lane 1, `0x94`: engine 1 lane 4). The DDC ids `0x90`, `0x92`, `0x93` do not appear as hardware I2C entries, so how they resolve to AUX channels still has to be read from `bios_parser2.c` (open point). The DP outputs are the natural first target: DC handles them best and the board advertises UHBR rates. Which physical port is which still needs a monitor test.
 
+## Step 2, first half: hot-plug detect (2026-10-28)
+
+With one monitor plugged into a DisplayPort of the 7800 XT (the UHD 630 still the main display), the probe read the five `HPDn_DC_HPD_INT_STATUS` registers (`docs/logs/ioreg-rednavi-probe15-hpd.txt`): **only `HPD4` is non-zero, `0x12`** = `DC_HPD_SENSE` (bit 1) and `DC_HPD_SENSE_DELAYED` (bit 4) both set. HPD0 to HPD3 read 0. VBIOS path 0 (DisplayPort on UNIPHY2) uses HPD pin id 5, so **HPD index = pin id - 1** fits the data (inferred from one monitor; a second monitor on another port would confirm it). `DC_GPIO_HPD_Y` reads 0x04000000, the raw pin level.
+
+So the monitor is on **path 0: DisplayPort, UNIPHY2, DDC/AUX line id 0x94, HPD4**. Reading these registers needed nothing but the register map; no firmware or clock setup. The display block is clocked enough for plain register reads, as seen before.
+
+Second half of step 2, not done: read the EDID through the AUX channel of that connector. That one **writes**: it programs the AUX engine (`DP_AUX*_*` registers) to run an I2C-over-AUX read of address 0x50.
+
 ## Questions to settle before step 3
 
 - Does the VBIOS-started DMCUB, or ours, already power-sequence the display block, so that registers read sensibly? (Step 2 shows.)
