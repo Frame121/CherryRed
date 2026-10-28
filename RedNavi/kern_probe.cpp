@@ -24,6 +24,10 @@
 // (DCN 3.2, register offsets from dcn_3_2_0_offset.h, all at DMU base index 2) to see whether the
 // VBIOS left a display microcontroller running. Published as "dmcub-regs".
 //
+// Seventh-and-a-half stage (opt-in, rednavi_psp_tmr=1): GFX_CMD_ID_SETUP_TMR with the size LOAD_TOC
+// returned. For MP0 13.0.10 amdgpu sets boot_time_tmr = false, so it does send this (the Linux
+// reference dmesg on this card shows "reserve 0xa700000 from 0x83e0000000 for PSP TMR").
+//
 // Tenth stage (opt-in, writes to the GPU, rednavi_dmub_load=1 and a build with RedNavi/dmub_fw.h):
 // stops the DMCUB the VBIOS left running, builds the DMUB memory block in VRAM, backdoor-loads the
 // DAL firmware and releases the reset, mirroring dmub_srv_hw_init and the dmub_dcn32_* hooks in amdgpu.
@@ -83,6 +87,8 @@
 #define kRNPspCmdVramOffset   0x40210000ull    // 4 KB command/response buffer, 4 KB aligned
 #define kRNPspFenceVramOffset 0x40220000ull    // 4 KB fence buffer
 #define kRNMp0C2pmsg67        0x083
+#define kRNPspCmdSetupTmr     0x05u            // GFX_CMD_ID_SETUP_TMR
+#define kRNPspTmrVramOffset   0x02000000ull    // 32 MB into VRAM: inside the 256 MB CPU-visible BAR0
 #define kRNPspCmdLoadToc      0x20u            // GFX_CMD_ID_LOAD_TOC
 #define kRNPspCmdBootCfg      0x22u            // GFX_CMD_ID_BOOT_CFG
 #define kRNPspBootCfgGet      2u               // BOOTCFG_CMD_GET
@@ -199,6 +205,8 @@ class RedNaviProbe : public IOService {
     bool pspSubmit(uint32_t cmdId, const uint32_t *args, uint32_t nargs, uint32_t *resp, uint32_t nresp);
     void sendPspBootCfgGet();
     void sendPspLoadToc();
+    void sendPspSetupTmr();
+    uint32_t pspTmrSize {0};
     uint32_t pspFence {0};
     void dumpRegs(const RNMailboxReg *list, size_t count, const char *property);
 
@@ -522,6 +530,28 @@ void RedNaviProbe::sendPspBootCfgGet() {
     rnPublish(this, "psp-cmd-boot-cfg", names, vals, 3);
 }
 
+void RedNaviProbe::sendPspSetupTmr() {
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_psp_tmr", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: PSP SETUP_TMR not requested (boot-arg rednavi_psp_tmr=1)\n");
+        return;
+    }
+    if (!pspTmrSize) { IOLog("RedNavi: PSP SETUP_TMR: no TMR size from LOAD_TOC\n"); return; }
+    IODeviceMemory *bar0 = pci->getDeviceMemoryWithRegister(kIOPCIConfigBaseAddress0 + kRNVramBar * 4);
+    if (!bar0) { IOLog("RedNavi: PSP SETUP_TMR: no BAR0\n"); return; }
+    uint64_t mc = kRNVramMcBase + kRNPspTmrVramOffset;                         // GPU address
+    uint64_t pa = static_cast<uint64_t>(bar0->getPhysicalAddress()) + kRNPspTmrVramOffset;   // CPU physical address of the same bytes (amdgpu_gmc_vram_pa)
+    // cmd.cmd_setup_tmr: buf_phy_addr_lo/hi, buf_size, flags (bit 1 = virt_phy_addr), system_phy_addr_lo/hi
+    uint32_t args[6] = {static_cast<uint32_t>(mc), static_cast<uint32_t>(mc >> 32), pspTmrSize, 2u,
+                        static_cast<uint32_t>(pa), static_cast<uint32_t>(pa >> 32)};
+    uint32_t resp[1] = {};
+    bool ok = pspSubmit(kRNPspCmdSetupTmr, args, 6, resp, 1);
+    IOLog("RedNavi: PSP cmd SETUP_TMR (0x%x bytes at MC 0x%llx, PA 0x%llx): fence %s, status = 0x%08x\n", pspTmrSize, mc, pa, ok ? "ok" : "missing", resp[0]);
+    const char *names[3] = {"fence_ok", "status", "pa_lo"};
+    uint32_t vals[3] = {ok, resp[0], static_cast<uint32_t>(pa)};
+    rnPublish(this, "psp-cmd-setup-tmr", names, vals, 3);
+}
+
 void RedNaviProbe::sendPspLoadToc() {
 #ifdef RN_HAVE_PSP_FW
     uint32_t arg = 0;
@@ -546,6 +576,7 @@ void RedNaviProbe::sendPspLoadToc() {
     const char *names[3] = {"fence_ok", "status", "tmr_size"};
     uint32_t vals[3] = {ok, resp[0], resp[4]};
     rnPublish(this, "psp-cmd-load-toc", names, vals, 3);
+    if (ok && resp[0] == 0) pspTmrSize = resp[4];
 #else
     IOLog("RedNavi: built without psp_fw.h, LOAD_TOC not available\n");
 #endif
@@ -764,6 +795,7 @@ bool RedNaviProbe::start(IOService *provider) {
     if (createPspRing()) {
         sendPspBootCfgGet();
         sendPspLoadToc();
+        sendPspSetupTmr();
     }
     loadDmcub();
     registerService();
