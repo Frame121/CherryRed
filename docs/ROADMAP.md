@@ -13,6 +13,7 @@ Current goal: **M3, a native framebuffer** on the RX 7800 XT. M4 to M6 are open 
 | M6 | Metal plugin on RADV (reusing the LGPL translator) and an accelerator kext for WindowServer | Metal app renders |
 
 Notes:
+- The path from the running DMCUB to a first picture is laid out step by step in `DC_PLAN.md`.
 - PSP initialises before display and graphics; the display firmware (DMUB) is loaded through it.
 - Each milestone should leave a test log format that users can paste into an issue.
 - See `PLAN.md` for the longer reasoning and open questions, `ARCHITECTURE.md` for what was learned from NullMoth.
