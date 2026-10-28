@@ -50,13 +50,26 @@ Recommendation: do B as a **spike** to find out what really has to be programmed
 
 ## Steps (each testable, in order)
 
-1. **VBIOS objects, read-only** (`tools/`): parse the display object table of the 57856-byte VBIOS we already read. Result: which connectors exist, which encoder/DIG and DDC/HPD line each uses. Linux reported four connectors on this board (DP-2, DP-3, HDMI-A-3, HDMI-A-4); the mapping is what we need. No hardware, can start now.
+1. **VBIOS objects, read-only** (`tools/`) **[done]**: parse the display object table of the 57856-byte VBIOS we already read. Result: which connectors exist, which encoder/DIG and DDC/HPD line each uses. Linux reported four connectors on this board (DP-2, DP-3, HDMI-A-3, HDMI-A-4); the mapping is what we need. No hardware, can start now.
 2. **HPD and EDID, read-only:** with a monitor plugged into one port of the 7800 XT, read the HPD status registers; then read the EDID through the AUX/DDC engine. Needs a monitor on the card (see `TEST_MACHINES.md`); the UHD 630 stays the main display.
 3. **Display pipe bring-up without a monitor-visible effect:** DCCG, HUBBUB, DMCUB-assisted init as `dcn32_hw_init` does; confirm by registers.
 4. **Test pattern:** program one OTG/timing generator and the display pattern generator (`set_disp_pattern_generator`) on the chosen connector, with the DP link trained. Colour bars on the screen with no framebuffer involved: the first visible result.
 5. **One plane:** HUBP -> DPP -> MPC -> OPP -> OPTC reading a scanout buffer in VRAM. A solid colour or a loaded image.
 6. **`IOFramebuffer`:** publish that scanout to WindowServer (`getPixelInformation`, `getApertureRange`, `setDisplayMode`, ...), one display mode first, then EDID-driven modes.
 7. Grow into A where it pays off (clock management through the SMU, DSC, multiple outputs, hot-plug).
+
+## Step 1 result: the board's display paths (2026-10-28)
+
+`tools/parse_vbios_objects.py` reads the display object table (v1.5) and the GPIO pin table of the VBIOS we dumped from this card (not committed; the parser output is in `docs/logs/vbios-display-objects.txt`). Four paths, matching the four connectors Linux registered (DP-2, DP-3, HDMI-A-3, HDMI-A-4; the pairing by order is my inference):
+
+| Path | Connector | Encoder (PHY) | DDC/AUX line id | HPD pin | Max link rate |
+|---|---|---|---|---|---|
+| 0 (DFP1) | DisplayPort, enum 1 | UNIPHY2 (enum 1) | 0x94 | 5 | 13500 MHz (UHBR13.5) |
+| 1 (DFP2) | DisplayPort, enum 2 | UNIPHY (enum 1) | 0x93 | 4 | 13500 MHz |
+| 2 (DFP3) | HDMI type A, enum 3 | UNIPHY (enum 2) | 0x92 | 3 | 12000 MHz (HDMI FRL) |
+| 3 (DFP4) | HDMI type A, enum 4 | UNIPHY1 (enum 2) | 0x90 | 1 | 12000 MHz |
+
+Each path also carries a bracket-layout record (connector order on the bracket) and a connector-caps record (0: no internal display). The GPIO pin table has 14 entries; two are hardware I2C pairs (`0x91`: engine 1 lane 1, `0x94`: engine 1 lane 4). The DDC ids `0x90`, `0x92`, `0x93` do not appear as hardware I2C entries, so how they resolve to AUX channels still has to be read from `bios_parser2.c` (open point). The DP outputs are the natural first target: DC handles them best and the board advertises UHBR rates. Which physical port is which still needs a monitor test.
 
 ## Questions to settle before step 3
 

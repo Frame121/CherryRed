@@ -1,0 +1,55 @@
+data tables: {'gpio_pin_lut': '0x1f08', 'displayobjectinfo': '0x1fb4'}
+
+GPIO pin table v2.1, 14 entries (I2C pairs have bit 7 of gpio_id set)
+  gpio_id 0x01  GPIO                         reg 0x5db5 shift 0
+  gpio_id 0x00  GPIO                         reg 0x20808 shift 181
+  gpio_id 0x04  GPIO                         reg 0x5db5 shift 24
+  gpio_id 0x00  GPIO                         reg 0x5181a shift 145
+  gpio_id 0x91  I2C engine 1 lane mux 1      reg 0x5d95 shift 8
+  gpio_id 0x00  GPIO                         reg 0x920808 shift 157
+  gpio_id 0x94  I2C engine 1 lane mux 4      reg 0x5da1 shift 8
+  gpio_id 0x00  GPIO                         reg 0x970808 shift 137
+  gpio_id 0x09  GPIO                         reg 0x5d89 shift 8
+  gpio_id 0x00  GPIO                         reg 0xa0810 shift 137
+  gpio_id 0x0c  GPIO                         reg 0x5d89 shift 21
+  gpio_id 0x00  GPIO                         reg 0xd1416 shift 177
+  gpio_id 0x11  GPIO                         reg 0x5db1 shift 8
+  gpio_id 0x00  GPIO                         reg 0x131010 shift 177
+
+display object table v1.5: 4 paths, supported devices 0x0688
+
+path 0: device DFP1 (tag 0x0008)
+  connector: CONNECTOR DISPLAY_PORT (enum 1, id 0x3113)
+  encoder:   ENCODER UNIPHY2 (enum 1, id 0x2121)
+    record: I2C/DDC line id 0x94, slave 0x00
+    record: HPD pin id 5, plug-in state 0
+    record: connector caps 0x0000
+    record: connector max speed 13500 MHz
+    record: BRACKET_LAYOUT_V2 12 09 01 00 00 00
+
+path 1: device DFP2 (tag 0x0080)
+  connector: CONNECTOR DISPLAY_PORT (enum 2, id 0x3213)
+  encoder:   ENCODER UNIPHY (enum 1, id 0x211e)
+    record: I2C/DDC line id 0x93, slave 0x00
+    record: HPD pin id 4, plug-in state 0
+    record: connector caps 0x0000
+    record: connector max speed 13500 MHz
+    record: BRACKET_LAYOUT_V2 12 09 02 00 00 00
+
+path 2: device DFP3 (tag 0x0200)
+  connector: CONNECTOR HDMI_TYPE_A (enum 3, id 0x330c)
+  encoder:   ENCODER UNIPHY (enum 2, id 0x221e)
+    record: I2C/DDC line id 0x92, slave 0x00
+    record: HPD pin id 3, plug-in state 0
+    record: connector caps 0x0000
+    record: connector max speed 12000 MHz
+    record: BRACKET_LAYOUT_V2 0f 07 03 00 00 00
+
+path 3: device DFP4 (tag 0x0400)
+  connector: CONNECTOR HDMI_TYPE_A (enum 4, id 0x340c)
+  encoder:   ENCODER UNIPHY1 (enum 2, id 0x2220)
+    record: I2C/DDC line id 0x90, slave 0x00
+    record: HPD pin id 1, plug-in state 0
+    record: connector caps 0x0000
+    record: connector max speed 12000 MHz
+    record: BRACKET_LAYOUT_V2 0f 07 04 00 00 00
