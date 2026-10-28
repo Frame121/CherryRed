@@ -52,7 +52,7 @@ Recommendation: do B as a **spike** to find out what really has to be programmed
 
 1. **VBIOS objects, read-only** (`tools/`) **[done]**: parse the display object table of the 57856-byte VBIOS we already read. Result: which connectors exist, which encoder/DIG and DDC/HPD line each uses. Linux reported four connectors on this board (DP-2, DP-3, HDMI-A-3, HDMI-A-4); the mapping is what we need. No hardware, can start now.
 2. **HPD and EDID, read-only:** with a monitor plugged into one port of the 7800 XT, read the HPD status registers; then read the EDID through the AUX/DDC engine. Needs a monitor on the card (see `TEST_MACHINES.md`); the UHD 630 stays the main display.
-3. **Display pipe bring-up without a monitor-visible effect** (details and status in `DP_BRINGUP.md`): DCCG, HUBBUB, DMCUB-assisted init as `dcn32_hw_init` does; confirm by registers.
+3. **Display pipe bring-up without a monitor-visible effect** (link training done: see `DP_BRINGUP.md`) (details and status in `DP_BRINGUP.md`): DCCG, HUBBUB, DMCUB-assisted init as `dcn32_hw_init` does; confirm by registers.
 4. **Test pattern:** program one OTG/timing generator and the display pattern generator (`set_disp_pattern_generator`) on the chosen connector, with the DP link trained. Colour bars on the screen with no framebuffer involved: the first visible result.
 5. **One plane:** HUBP -> DPP -> MPC -> OPP -> OPTC reading a scanout buffer in VRAM. A solid colour or a loaded image.
 6. **`IOFramebuffer`:** publish that scanout to WindowServer (`getPixelInformation`, `getApertureRange`, `setDisplayMode`, ...), one display mode first, then EDID-driven modes.

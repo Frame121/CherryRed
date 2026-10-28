@@ -35,10 +35,24 @@ Steps 1, 3 (the register side), 5 and 6 are direct DCN register programming and 
 
 - `rednavi_dp_init=1`: a `DMUB_CMD__VBIOS` / `DIG1_TRANSMITTER_CONTROL` command with action INIT for path 0 (phy id 4, DP, 4 lanes, HPD 5, connector id 19). The DMCUB **consumed it** (inbox read pointer caught up), the reply slot holds the command as sent, and the AUX channel, HPD sense and EDID read still work afterwards. There is no visible side effect yet; INIT is a setup action. This proves the DMUB-VBIOS path and the plumbing (`dmubSend`) only.
 
+## DP link training succeeded (2026-10-28)
+
+`rednavi_dp_train=1` (probe stage 14) enables the transmitter and trains the link on path 0 against the monitor, over AUX4:
+
+1. DPCD: `SET_POWER` D0 (0x600), `LINK_BW_SET` 0x14 (HBR2) and `LANE_COUNT_SET` 4 with enhanced framing (0x100/0x101), no downspread, 8b/10b.
+2. Source: `DIG_MODE` = DP, `DP_UDI_LANES` = 3, scrambler advance; **transmitter ENABLE via `DMUB_CMD__VBIOS`** (phy id 4, 4 lanes, symbol clock 540000 kHz, HPD 5) - consumed by the DMCUB.
+3. Clock recovery with TPS1 (`DP4_DP_DPHY_TRAINING_PATTERN_SEL` = 0, PHY bypass off, DPCD 0x102 = 0x21), source drive set through `TRANSMITTER_CONTROL` / `SETUP_VSEMPH`, adjusting from the sink's requests (DPCD 0x206/0x207).
+4. Channel equalisation with TPS3 (sink supports it), DPCD 0x102 = 0x23.
+5. Training pattern off, `DP_LINK_TRAINING_COMPLETE` set.
+
+Result, read from the sink (`docs/logs/ioreg-rednavi-probe16-dp-training.txt`): clock recovery done after 4 tries, equalisation done after 4 tries, **DPCD 0x202/0x203 = 0x77 0x77** (all four lanes `CR_DONE`, `CHANNEL_EQ_DONE`, `SYMBOL_LOCKED`), **0x204 = 0x01** (inter-lane alignment done), 0x205 = 0x01 (receive port in sync). The sink's last drive requests (0x206/0x207) were 0x22 0x22, i.e. voltage swing level 2, pre-emphasis 0.
+
+So a real DisplayPort link at HBR2 x4 comes up from our kext: PHY, DIG back end, AUX and the training handshake are right. There is still no video on it: no stream encoder, no timing generator, no pixel data.
+
 ## Next sub-steps, each checkable without a picture
 
-1. Pixel clock and transmitter ENABLE (4 lanes, HBR2 symbol clock), check that HPD and AUX stay up.
-2. **Link training**: DPCD writes over AUX plus the source pattern and drive settings via DMUB; success is `CR_DONE`, `CHANNEL_EQ_DONE`, `SYMBOL_LOCKED` and inter-lane align in DPCD 0x202 to 0x204. This is a verifiable result of its own.
+1. Pixel clock for the stream (the PHY PLL is up at the symbol rate; the stream pixel clock is a separate DTO).
+2. **Link training [done]**, see above.
 3. Stream setup, OTG timing, DPG pattern, unblank: the picture.
 
 Open risks: the exact clock state needed for the transmitter and DPG (the clock manager and SMU are not driven yet), the DISPCLK/DPPCLK the VBIOS left, and whether the OPP/OPTC clocks are enabled without the DCCG sequence.
