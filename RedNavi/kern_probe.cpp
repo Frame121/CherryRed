@@ -14,6 +14,8 @@
 // handshake of psp_hw_start / psp_v13_0_bootloader_load_component in amdgpu. Stops at the first error.
 // Fifth stage (opt-in, rednavi_psp_ring=1): asks the running secure OS to create the kernel-mode
 // ring (psp_v13_0_ring_create). The sOS answering is the first proof that it accepts commands.
+// Sixth stage (opt-in, rednavi_psp_cmd=1): sends one harmless command through that ring, the
+// boot-config query (GFX_CMD_ID_BOOT_CFG, BOOTCFG_CMD_GET), and logs the response.
 //
 // Without that boot-arg nothing is written to the GPU except the MM_INDEX/MM_DATA window used to
 // read VRAM.
@@ -56,6 +58,11 @@
 #define kRNVramMcBase         0x8000000000ull  // MMHUB FB_LOCATION_BASE 0x8000 << 24, read by probe stage 3
 #define kRNPspBufVramOffset   0x40000000ull    // 1 GB into VRAM, 1 MB aligned, well clear of the table at the end
 #define kRNPspRingVramOffset  0x40200000ull    // 4 KB ring, 2 MB into the staging area
+#define kRNPspCmdVramOffset   0x40210000ull    // 4 KB command/response buffer, 4 KB aligned
+#define kRNPspFenceVramOffset 0x40220000ull    // 4 KB fence buffer
+#define kRNMp0C2pmsg67        0x083
+#define kRNPspCmdBootCfg      0x22u            // GFX_CMD_ID_BOOT_CFG
+#define kRNPspBootCfgGet      2u               // BOOTCFG_CMD_GET
 #define kRNPspRingSize        0x1000u
 #define kRNPspRingTypeKm      2u               // PSP_RING_TYPE__KM
 #define kRNMp0C2pmsg64        0x080
@@ -128,7 +135,8 @@ class RedNaviProbe : public IOService {
     bool ipBase(uint16_t hwId, uint32_t *base);
     bool loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version);
     void loadPspChain();
-    void createPspRing();
+    bool createPspRing();
+    void sendPspBootCfgGet();
     void dumpRegs(const RNMailboxReg *list, size_t count, const char *property);
 
 public:
@@ -324,24 +332,24 @@ void RedNaviProbe::loadPspChain() {
 #endif
 }
 
-void RedNaviProbe::createPspRing() {
+bool RedNaviProbe::createPspRing() {
     uint32_t arg = 0;
     if (!PE_parse_boot_argn("rednavi_psp_ring", &arg, sizeof(arg)) || arg != 1) {
         IOLog("RedNavi: PSP ring not requested (boot-arg rednavi_psp_ring=1)\n");
-        return;
+        return false;
     }
     uint32_t mp0 = 0;
-    if (!ipBase(kRNHwIdMp0, &mp0)) { IOLog("RedNavi: PSP ring: no MP0 base\n"); return; }
+    if (!ipBase(kRNHwIdMp0, &mp0)) { IOLog("RedNavi: PSP ring: no MP0 base\n"); return false; }
     uint32_t r64 = (mp0 + kRNMp0C2pmsg64) * 4, r69 = (mp0 + kRNMp0C2pmsg69) * 4, r70 = (mp0 + kRNMp0C2pmsg70) * 4, r71 = (mp0 + kRNMp0C2pmsg71) * 4;
     uint32_t r81 = (mp0 + kRNMp0C2pmsg81) * 4;
-    if (r81 + 4 > regs->getLength()) { IOLog("RedNavi: PSP ring: registers outside BAR\n"); return; }
-    if (rd(r81) == 0) { IOLog("RedNavi: PSP ring: sOS not alive (C2PMSG_81 = 0), skipping\n"); return; }
+    if (r81 + 4 > regs->getLength()) { IOLog("RedNavi: PSP ring: registers outside BAR\n"); return false; }
+    if (rd(r81) == 0) { IOLog("RedNavi: PSP ring: sOS not alive (C2PMSG_81 = 0), skipping\n"); return false; }
 
     // Wait for the sOS to be ready for ring creation.
     uint32_t st = 0;
     for (int i = 0; i < 2000; i++) { st = rd(r64); if ((st & kRNPspMboxMask) == 0x80000000u) break; IOSleep(1); }
     IOLog("RedNavi: PSP ring: C2PMSG_64 before = 0x%08x\n", st);
-    if ((st & kRNPspMboxMask) != 0x80000000u) { IOLog("RedNavi: PSP ring: sOS not ready for ring creation\n"); return; }
+    if ((st & kRNPspMboxMask) != 0x80000000u) { IOLog("RedNavi: PSP ring: sOS not ready for ring creation\n"); return false; }
 
     for (uint32_t off = 0; off < kRNPspRingSize; off += 4) vramWrite(kRNPspRingVramOffset + off, 0);
     uint64_t mc = kRNVramMcBase + kRNPspRingVramOffset;
@@ -354,6 +362,57 @@ void RedNaviProbe::createPspRing() {
     IOLog("RedNavi: PSP ring: C2PMSG_64 after = 0x%08x (0x80000000 = created), ring at MC 0x%llx\n", st, mc);
     OSNumber *n = OSNumber::withNumber(static_cast<uint64_t>(st), 64);
     if (n) { setProperty("psp-ring-status", n); n->release(); }
+    return (st & kRNPspMboxMask) == 0x80000000u;
+}
+
+// Submit one frame to the kernel ring: command buffer + fence, then bump the write pointer
+// (psp_ring_cmd_submit and psp_cmd_submit_buf in amdgpu_psp.c).
+void RedNaviProbe::sendPspBootCfgGet() {
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_psp_cmd", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: PSP command not requested (boot-arg rednavi_psp_cmd=1)\n");
+        return;
+    }
+    uint32_t mp0 = 0;
+    if (!ipBase(kRNHwIdMp0, &mp0)) return;
+    uint32_t r67 = (mp0 + kRNMp0C2pmsg67) * 4;
+
+    for (uint32_t off = 0; off < 0x1000; off += 4) {
+        vramWrite(kRNPspCmdVramOffset + off, 0);
+        vramWrite(kRNPspFenceVramOffset + off, 0);
+    }
+    vramWrite(kRNPspCmdVramOffset + 8, kRNPspCmdBootCfg);    // psp_gfx_cmd_resp.cmd_id
+    vramWrite(kRNPspCmdVramOffset + 32, kRNPspBootCfgGet);   // cmd.boot_cfg.sub_cmd
+
+    uint32_t wptr = rd(r67);                                  // in dwords; a frame is 16 dwords
+    uint32_t ringDw = kRNPspRingSize / 4;
+    if (wptr % 16 != 0 || wptr >= ringDw) { IOLog("RedNavi: PSP cmd: odd write pointer 0x%x, not sending\n", wptr); return; }
+    uint64_t frame = kRNPspRingVramOffset + static_cast<uint64_t>(wptr) * 4;
+    uint64_t cmdMc = kRNVramMcBase + kRNPspCmdVramOffset, fenceMc = kRNVramMcBase + kRNPspFenceVramOffset;
+    for (uint32_t off = 0; off < 64; off += 4) vramWrite(frame + off, 0);
+    vramWrite(frame + 0, static_cast<uint32_t>(cmdMc));
+    vramWrite(frame + 4, static_cast<uint32_t>(cmdMc >> 32));
+    vramWrite(frame + 12, static_cast<uint32_t>(fenceMc));
+    vramWrite(frame + 16, static_cast<uint32_t>(fenceMc >> 32));
+    vramWrite(frame + 20, 1);                                 // fence value
+    wr(r67, (wptr + 16) % ringDw);
+
+    uint32_t fence = 0;
+    for (int i = 0; i < 2000; i++) { fence = vramRead(kRNPspFenceVramOffset); if (fence == 1) break; IOSleep(1); }
+    // psp_gfx_cmd_resp.resp starts at +864: status, session_id, ...; uresp (boot_cfg) at +864+64.
+    uint32_t status = vramRead(kRNPspCmdVramOffset + 864);
+    uint32_t bootCfg = vramRead(kRNPspCmdVramOffset + 864 + 64);
+    IOLog("RedNavi: PSP cmd BOOT_CFG_GET: fence = %u (expect 1), status = 0x%08x, boot_cfg = 0x%08x\n", fence, status, bootCfg);
+    OSDictionary *out = OSDictionary::withCapacity(4);
+    if (!out) return;
+    uint32_t vals[3] = {fence, status, bootCfg};
+    const char *names[3] = {"fence", "status", "boot_cfg"};
+    for (int i = 0; i < 3; i++) {
+        OSNumber *n = OSNumber::withNumber(static_cast<uint64_t>(vals[i]), 64);
+        if (n) { out->setObject(names[i], n); n->release(); }
+    }
+    setProperty("psp-cmd-boot-cfg", out);
+    out->release();
 }
 
 bool RedNaviProbe::start(IOService *provider) {
@@ -375,7 +434,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
     loadPspChain();
-    createPspRing();
+    if (createPspRing()) sendPspBootCfgGet();
     registerService();
     return true;
 }
