@@ -6,19 +6,23 @@ Goal: a real framebuffer on the card, driven by our own kext (DCN 3.2 display en
 
 ## Status
 
-**Pre-alpha, first pictures on 2026-10-28:** the kext drives a 1080p60 DisplayPort test pattern and then an image it wrote into VRAM and scans out through a display plane, on a real RX 7800 XT. There is no framebuffer for macOS yet. The probe kext brings up the card's PSP and our own DMCUB display firmware, but nothing drives a display yet. There is no release. What exists today:
+**Pre-alpha, 2026-10-28:** the macOS Sequoia desktop is shown on a real RX 7800 XT, over DisplayPort, through our own kext. The kext loads the card's PSP firmware chain and our own DMCUB display firmware, trains the DisplayPort link, lights a 1920x1080 at 60 Hz pipe and scans out a linear framebuffer in VRAM that WindowServer draws into. No GOP, VESA or firmware framebuffer is involved: without the kext the card's output stays dark.
+
+What this is **not**: there is no acceleration and no Metal. WindowServer renders on the CPU (expect fans spinning during animations). The mode is fixed at 1080p60, not taken from the EDID. There is no cursor plane, clock or power management (SMU), hot-plug, audio or HDMI, and only one DisplayPort connector has been tested. Running it needs SIP off and an OpenCore setup, and it can hang the machine. There is no release.
 
 | Milestone | What | State |
 |---|---|---|
 | M0 | Repo, CI (macOS runner), build scripts | Done, CI green (Debug and Release) |
 | M1 | Probe kext: matches `1002:747E`, maps the register BAR, reads the IP discovery table | Done: ran on a real RX 7800 XT, versions recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | M1.5 | Probe stage 2: read-only PSP and SMU mailbox registers | Done: PSP bootloader ready, sOS not running, SMU alive |
-| M2a | PSP bring-up and DMCUB load, as opt-in probe stages (PSP firmware chain, secure OS, command ring, `LOAD_TOC`, `SETUP_TMR`, DMCUB via the PSP) | Done on a real RX 7800 XT: the secure OS answers commands, and our DMCUB firmware runs and answers a mailbox command (see [docs/PSP_BRINGUP.md](docs/PSP_BRINGUP.md), [docs/DMUB_BRINGUP.md](docs/DMUB_BRINGUP.md)) |
+| M2a | PSP bring-up and DMCUB load, as opt-in probe stages (PSP firmware chain, secure OS, command ring, `LOAD_TOC`, `SETUP_TMR`, DMCUB via the PSP) | Done on a real RX 7800 XT: the secure OS answers commands, and our DMCUB firmware runs and answers mailbox commands (see [docs/PSP_BRINGUP.md](docs/PSP_BRINGUP.md), [docs/DMUB_BRINGUP.md](docs/DMUB_BRINGUP.md)) |
 | M2b | SMU 13 bring-up, and the LinuxKPI-style compatibility layer that replaces the probe's hand-written register code | Not started |
-| M3 | Native framebuffer: port of amdgpu DC (DCN 3.2) + `IOFramebuffer` | Not started |
+| M3 | Native framebuffer: DCN 3.2 display engine + `IOFramebuffer` | Works for one fixed mode on one DisplayPort connector: DP link training, a pipe state replayed from a Linux capture, `RedNaviFB` for WindowServer (see [docs/DC_PLAN.md](docs/DC_PLAN.md), [docs/DP_BRINGUP.md](docs/DP_BRINGUP.md)). Missing: modes from the EDID, more connectors, a real DC port instead of a replay |
 | M4 | GFX11, MES, SDMA 6, GPU VM, IH ring, user client | Not started |
 | M5 | RADV (Mesa) running on macOS through a libdrm_amdgpu shim | Not started |
 | M6 | Metal plugin on top of RADV + accelerator kext for WindowServer | Not started |
+
+M4 and M5 give you compute and Vulkan on the card but do not change how the desktop feels; a smooth, GPU-composited desktop needs M6.
 
 ## Why not Apple's drivers (like CarrizoRed does)?
 
@@ -41,7 +45,7 @@ sh scripts/bootstrap.sh
 make DEBUG=1
 ```
 
-## Trying the probe
+## Trying it
 
 Load `RedNavi.kext` on a machine where the 7800 XT is **not** the display you depend on. By default the probe only reads:
 
@@ -52,7 +56,11 @@ python3 tools/decode_discovery.py probe.txt
 
 It publishes the IP discovery table (`ip-discovery`), PSP/SMU registers (`mailbox-regs`), MMHUB and DMCUB registers and the VBIOS read from the PCI ROM as properties. `IOLog` output may not show up in `log show` (cause unknown), so read the properties.
 
-The stages that **write to the GPU** (PSP load, ring, TMR, DMCUB load) are off unless enabled with `rednavi_*` boot-args, and need firmware headers generated locally from linux-firmware (`tools/gen_psp_fw_header.py`, `tools/gen_dmub_fw_header.py`); firmware is not redistributed here. The boot-args are listed in [docs/PSP_BRINGUP.md](docs/PSP_BRINGUP.md) and [docs/DMUB_BRINGUP.md](docs/DMUB_BRINGUP.md). They can hang the machine: use a system whose display does not depend on this card, with a USB copy of your EFI.
+The stages that **write to the GPU** (PSP load, ring, TMR, DMCUB load, DisplayPort training, the display replay) are off unless enabled with `rednavi_*` boot-args, and need firmware headers generated locally from linux-firmware (`tools/gen_psp_fw_header.py`, `tools/gen_dmub_fw_header.py`); firmware is not redistributed here. The boot-args are listed in [docs/PSP_BRINGUP.md](docs/PSP_BRINGUP.md), [docs/DMUB_BRINGUP.md](docs/DMUB_BRINGUP.md) and [docs/DP_BRINGUP.md](docs/DP_BRINGUP.md). They can hang the machine: use a system whose display does not depend on this card, with a USB copy of your EFI.
+
+### The framebuffer
+
+With `rednavi_fb=1` (and `rednavi_dcn_replay=14`) the probe publishes where the scanout surface is, and a second kext, `RedNaviFB.kext`, hands it to WindowServer. It is a separate kext because it links against IOGraphicsFamily, which lives in the system kernel collection, so OpenCore cannot inject it. Install it through the auxiliary kernel collection (SIP off, `codesign -f -s -`, `kmutil load -p`), as described in [docs/DP_BRINGUP.md](docs/DP_BRINGUP.md). If macOS also shows a second, nameless display, that is the stock firmware boot framebuffer, not a second output. Boot-arg `-wegnoigpu` (WhateverGreen) switches the Intel iGPU off so the card is the only display.
 
 Please post decoded output in an issue, together with your board and BIOS settings (Above 4G Decoding, Resizable BAR).
 
@@ -62,8 +70,10 @@ We want contributors. Good first areas, each of which will get an issue:
 
 - LinuxKPI-style compatibility layer for XNU (memory, locks, workqueues, dma-fence, firmware loading)
 - PSP 13 / SMU 13 bring-up
-- DMUB firmware load and DCN 3.2 modeset
-- `IOFramebuffer` glue
+- DCN 3.2 modeset from the EDID and more connectors (HDMI, second DisplayPort)
+- SMU 13 clock and power management
+- Cursor plane, vertical blank interrupts, hot-plug
+- GFX11 / SDMA bring-up (M4)
 - Decoding the IP discovery dump (`tools/`)
 
 Please do not copy code from projects with restrictive licences (NullMoth's kexts and plugin are PolyForm Noncommercial). The Metal translator in that project is LGPL-3.0 and may be reused as a separate component.

@@ -1299,6 +1299,16 @@ bool RedNaviProbe::start(IOService *provider) {
     }
     IOLog("RedNavi: registers mapped, %llu KB\n", (uint64_t)regs->getLength() >> 10);
 
+    // System Information reads the GPU name and VRAM size from these properties of the PCI node.
+    {
+        static const char kName[] = "AMD Radeon RX 7800 XT";
+        uint32_t vramMb = 16384;
+        OSData *m = OSData::withBytes(kName, sizeof(kName));
+        OSData *v = OSData::withBytes(&vramMb, sizeof(vramMb));
+        if (m) { pci->setProperty("model", m); m->release(); }
+        if (v) { pci->setProperty("VRAM,totalMB", v); v->release(); }
+    }
+
     dumpDiscovery();
     dumpVbios();
     dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");

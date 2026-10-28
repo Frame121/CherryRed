@@ -92,3 +92,29 @@ With `rednavi_dcn_replay=14` the monitor shows the **test image the probe wrote 
 How it was built: the register state of Linux's text console (linear `XR24`, `docs/logs/linux-reference/dcn_plane_linux_linear.txt`) replayed in five more groups on top of the pattern pipe: 10 DCHUBBUB watermarks and the VRAM aperture, 11 DPP clock and conversion blocks, 12 the MPCC0 tree, 13 the HUBP surface (the primary surface address replaced by ours), 14 pattern generator off. The tiled and DCC-compressed capture from GNOME was not usable for this; a linear surface needed its own capture. Boot-arg: `rednavi_dcn_replay=14`. Note the kext takes longer to load with the image fill (a few seconds), so the desktop needs a few minutes before SSH answers.
 
 Still not a framebuffer: the image is a fixed test image, the mode is the replayed 1080p60, and nothing here is visible to WindowServer.
+
+## IOFramebuffer (RedNaviFB)
+
+Result (2026-10-28): the macOS desktop is drawn on the Samsung monitor through our scanout, with the Intel iGPU switched off (`-wegnoigpu`). With the iGPU on, macOS lists the AMD display as an extra display at x = -1920 but WindowServer does not draw into it (only the in-kernel software cursor lands in the buffer), so the simplest working setup is the card as the only display.
+
+How it works:
+
+- The scanout surface sits at VRAM offset `0x08000000`, inside the 256 MB macOS maps through BAR0, so the kernel and WindowServer can write it with the CPU. The replay table in `RedNavi/dcn_replay.h` points the display plane at MC address `0x8008000000`.
+- `RedNaviProbe` sets `fb-scanout-phys` (CPU physical address, BAR0 + offset) and then `rednavi-fb-ready` on its own node, with boot-args `rednavi_fb=1` and `rednavi_dcn_replay=14`.
+- `RedNaviFB` (`RedNaviFB/kern_fb.cpp`) is an `IOFramebuffer` subclass that matches that property: one mode, 1920x1080 at 60 Hz, XRGB8888, pitch 7680, the surface as aperture (write-combined), the EDID the probe read through AUX (`edid` property) via `getDDCBlock`.
+- It is a separate kext because IOGraphicsFamily is in the system kernel collection and OpenCore only links injected kexts against the boot collection (`Prelinked injection ... - Invalid Parameter` in the OpenCore log).
+
+Installing `RedNaviFB.kext` (sibling of the probe, not injected by OpenCore):
+
+1. SIP off: `csr-active-config` `FF0F0000` in OpenCore's `config.plist` (and not in `NVRAM > Delete`).
+2. `sudo cp -R RedNaviFB.kext /Library/Extensions/ && sudo chown -R root:wheel /Library/Extensions/RedNaviFB.kext`
+3. `sudo codesign -f -s - /Library/Extensions/RedNaviFB.kext` (without it: "Bad code signature")
+4. `sudo kmutil load -p /Library/Extensions/RedNaviFB.kext`, then reboot. (`kmutil install --update-all` fails without a KDK.)
+
+Lessons:
+
+- `IODisplay::readFramebufferEDID` calls `getAttributeForConnection` with a NULL value pointer; writing through it panics inside WindowServer's open call.
+- A faulty kext in the auxiliary collection hangs the boot; recover from a backup EFI stick and delete `/Library/Extensions/RedNaviFB.kext`.
+- The stock `IONDRVFramebuffer` on `GFX0/.Display_boot` (from the firmware boot framebuffer) shows up in System Information as a second, nameless "Display" with the same serial number.
+- System Information takes the GPU name and VRAM size from the `model` and `VRAM,totalMB` properties of the PCI node, which the probe now sets.
+- The `fb-diag` property of the `RedNaviFB` node shows WindowServer's calls and sampled scanout pixels.
