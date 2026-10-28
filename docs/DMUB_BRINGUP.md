@@ -113,6 +113,12 @@ What it took, in order: LOAD_TOC, **SETUP_TMR** (status 0), `LOAD_IP_FW` of the 
 
 Not yet done: send a DMUB command through the inbox and read the reply, to prove the mailbox works end to end; the SMU was not initialised by us (Linux does that before the DMUB init and it did not matter here).
 
+## First DMUB command (2026-10-28)
+
+With `rednavi_dmub_cmd=1` the probe wrote one 64-byte command into inbox1 at the write pointer (header `0x0E000006`: type `DMUB_CMD__QUERY_FEATURE_CAPS` (6), payload 14 bytes) and moved `DMCUB_INBOX1_WPTR` from 0 to 0x40. The firmware **consumed it within the first millisecond**: `DMCUB_INBOX1_RPTR` reached 0x40, and the command slot now holds the reply: `slot0` 0x0E000006 (header), `slot1` 0x00100102, `slot2` 0x00010000, `slot3` 0, `slot4` 1 (the `dmub_feature_caps` bytes, not decoded yet). Dump: `docs/logs/ioreg-rednavi-probe14-dmub-cmd.txt`.
+
+So the mailbox works end to end: our driver and our DMCUB firmware talk, with the block in VRAM and the TMR where the PSP wants it. The remaining distance to a picture is the display core itself (DC): clocks and DCCG, HUBBUB/HUBP/DPP/MPC/OPP/OPTC/DIO programming for one stream, link training on a connector, and an `IOFramebuffer` on top.
+
 ## Next code step
 
-Send a first DMUB command through inbox1 and read the response (for instance `DMUB_CMD__REG_SEQ_READ_MODIFY_WRITE`-free ones such as the firmware boot options or a no-op), then look at what DC needs to program a mode on one connector.
+Decode the feature caps. Then plan the DC part: list which `dc/dcn32` and `dc/dcn30` functions a single-stream, single-connector mode set needs, and how much of DC can be taken as is.

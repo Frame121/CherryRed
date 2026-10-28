@@ -13,7 +13,7 @@ Goal: a real framebuffer on the card, driven by our own kext (DCN 3.2 display en
 | M0 | Repo, CI (macOS runner), build scripts | Done, CI green (Debug and Release) |
 | M1 | Probe kext: matches `1002:747E`, maps the register BAR, reads the IP discovery table | Done: ran on a real RX 7800 XT, versions recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | M1.5 | Probe stage 2: read-only PSP and SMU mailbox registers | Done: PSP bootloader ready, sOS not running, SMU alive |
-| M2 | Compatibility layer (LinuxKPI-style), PSP 13 + SMU 13 + DMUB firmware bring-up | Started: the probe loads the PSP firmware chain and the secure OS comes up and creates its command ring, answers commands and runs our own DMCUB display firmware on a real RX 7800 XT (see [docs/PSP_BRINGUP.md](docs/PSP_BRINGUP.md)); commands, SMU and DMUB not done |
+| M2 | Compatibility layer (LinuxKPI-style), PSP 13 + SMU 13 + DMUB firmware bring-up | Started: the probe loads the PSP firmware chain and the secure OS comes up and creates its command ring, answers commands and runs our own DMCUB display firmware and talks to it through its mailbox on a real RX 7800 XT (see [docs/PSP_BRINGUP.md](docs/PSP_BRINGUP.md)); commands, SMU and DMUB not done |
 | M3 | Native framebuffer: port of amdgpu DC (DCN 3.2) + `IOFramebuffer` | Not started |
 | M4 | GFX11, MES, SDMA 6, GPU VM, IH ring, user client | Not started |
 | M5 | RADV (Mesa) running on macOS through a libdrm_amdgpu shim | Not started |
