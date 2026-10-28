@@ -32,6 +32,11 @@
 // bit 1 = DC_HPD_SENSE, bit 4 = SENSE_DELAYED, and the raw pin levels in DC_GPIO_HPD_Y) to see which
 // connectors have a monitor. Published as "hpd-regs".
 //
+// Twelfth stage (opt-in, rednavi_edid=1, writes the DCN AUX engines): runs a native DPCD read (16 bytes at
+// 0x000) on each of the five AUX engines, as dce_aux.c does, to find the one wired to the monitor; on the
+// first engine that ACKs it then reads the EDID with I2C-over-AUX at address 0x50. Published as
+// "aux-probe" (per-engine status), "dpcd" and "edid" (tools/decode_edid.py).
+//
 // Tenth stage (opt-in, writes to the GPU, rednavi_dmub_load=1 and a build with RedNavi/dmub_fw.h):
 // stops the DMCUB the VBIOS left running, builds the DMUB memory block in VRAM, backdoor-loads the
 // DAL firmware and releases the reset, mirroring dmub_srv_hw_init and the dmub_dcn32_* hooks in amdgpu.
@@ -213,6 +218,8 @@ class RedNaviProbe : public IOService {
     void dumpDiscovery();
     void dumpVbios();
     void loadDmcub();
+    void probeAux();
+    bool auxTransfer(uint32_t eng, uint32_t action, uint32_t addr, uint8_t *data, uint32_t len, uint32_t *status, uint32_t *reply);
     void dmcubSnapshot(const char *property);
     bool ipBase(uint16_t hwId, uint32_t *base, uint32_t idx = 0);
     bool loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version);
@@ -383,6 +390,117 @@ void RedNaviProbe::dumpVbios() {
     }
     map->release();
     pci->configWrite32(0x30, romReg);                        // leave the ROM decode as we found it
+}
+
+// One AUX transaction on engine `eng`, mirroring acquire_engine / submit_channel_request / read_channel_reply in dce_aux.c.
+// action is the command nibble already shifted left by 4 (DP read 0x90, I2C write+MOT 0x40, I2C read 0x10, I2C read+MOT 0x50).
+bool RedNaviProbe::auxTransfer(uint32_t eng, uint32_t action, uint32_t addr, uint8_t *data, uint32_t len, uint32_t *status, uint32_t *reply) {
+    uint32_t dmu = 0;
+    if (!ipBase(kRNHwIdDmu, &dmu, 2)) return false;
+    uint32_t base = dmu + 0x1f50 + eng * 0x1c;           // DP_AUXn_AUX_CONTROL
+    auto R = [&](uint32_t d) { return rd((base + d) * 4); };
+    auto W = [&](uint32_t d, uint32_t v) { wr((base + d) * 4, v); };
+    const uint32_t CONTROL = 0, SWCTL = 1, ARB = 2, INTC = 3, STAT = 4, DATA = 6;
+    bool isWrite = (action == 0x80) || (action == 0x00) || (action == 0x40);
+    *status = 0; *reply = 0xFF;
+
+    if (!(R(CONTROL) & 1)) W(CONTROL, R(CONTROL) | 1);                    // AUX_EN
+    W(ARB, R(ARB) | (1u << 16));                                           // AUX_SW_USE_AUX_REG_REQ
+    if (((R(ARB) >> 2) & 3) != 1) { *status = R(ARB); W(ARB, (R(ARB) & ~(1u << 16)) | (1u << 17)); return false; }   // SW_CAN_ACCESS_AUX
+
+    W(INTC, R(INTC) | (1u << 1));                                          // AUX_SW_DONE_ACK
+    for (int i = 0; i < 100 && (R(STAT) & 1); i++) IODelay(100);
+
+    uint32_t wr_bytes = (len ? 4 : 3) + (isWrite ? len : 0);
+    W(SWCTL, (R(SWCTL) & ~((0xFu << 4) | (0xFFFFu << 16))) | (0u << 4) | (wr_bytes << 16));
+    // AUX_SW_INDEX 0, AUX_SW_DATA_RW 0, autoincrement disabled for the first byte only
+    uint32_t v = (1u << 31) | ((action | ((addr >> 16) & 0xF)) << 8);
+    W(DATA, v);
+    v &= ~(1u << 31);
+    W(DATA, (v & 0xFFFF00FFu) | (((addr >> 8) & 0xFF) << 8));
+    W(DATA, (v & 0xFFFF00FFu) | ((addr & 0xFF) << 8));
+    if (len) W(DATA, (v & 0xFFFF00FFu) | (((len - 1) & 0xFF) << 8));
+    if (isWrite) for (uint32_t i = 0; i < len; i++) W(DATA, (v & 0xFFFF00FFu) | (static_cast<uint32_t>(data[i]) << 8));
+    W(SWCTL, R(SWCTL) | 1);                                                // AUX_SW_GO
+
+    uint32_t st = 0;
+    bool done = false;
+    for (int i = 0; i < 2000; i++) { st = R(STAT); if (st & 1) { done = true; break; } IODelay(100); }
+    *status = st;
+    bool ok = false;
+    uint32_t count = (st >> 24) & 0x1F;
+    const uint32_t bad = (1u << 7) | (7u << 4) | (1u << 9) | (1u << 14) | (1u << 20) | (1u << 22) | (1u << 23);   // timeouts, HPD disconnect, invalid reply bits
+    if (done && !(st & bad) && count) {
+        W(DATA, 0);                                                        // AUX_SW_INDEX = 0
+        W(DATA, 1u << 31);                                                 // AUX_SW_AUTOINCREMENT_DISABLE
+        W(DATA, (1u << 31) | 1u);                                          // AUX_SW_DATA_RW = 1
+        uint32_t first = (R(DATA) >> 8) & 0xFF;
+        *reply = first >> 4;
+        if (*reply == 0) {
+            uint32_t n = count - 1;
+            for (uint32_t i = 0; i < n && i < len; i++) data[i] = (R(DATA) >> 8) & 0xFF;
+            ok = true;
+        }
+    }
+    W(ARB, (R(ARB) & ~(1u << 16)) | (1u << 17));                           // release: DONE_USING_AUX_REG, clear USE request
+    return ok;
+}
+
+void RedNaviProbe::probeAux() {
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_edid", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: AUX/EDID read not requested (boot-arg rednavi_edid=1)\n");
+        return;
+    }
+    OSDictionary *out = OSDictionary::withCapacity(20);
+    if (!out) return;
+    int found = -1;
+    uint8_t dpcd[16] = {};
+    for (uint32_t eng = 0; eng < 5; eng++) {
+        uint8_t buf[16] = {};
+        uint32_t st = 0, rep = 0;
+        bool ok = auxTransfer(eng, 0x90, 0x000, buf, 16, &st, &rep);
+        IOLog("RedNavi: AUX%u DPCD read: %s, SW_STATUS=0x%08x, reply=0x%x, first bytes %02x %02x %02x %02x\n", eng, ok ? "ACK" : "no", st, rep, buf[0], buf[1], buf[2], buf[3]);
+        char name[24];
+        snprintf(name, sizeof(name), "aux%u_status", eng);
+        OSNumber *n = OSNumber::withNumber(static_cast<uint64_t>(st), 64);
+        if (n) { out->setObject(name, n); n->release(); }
+        snprintf(name, sizeof(name), "aux%u_reply", eng);
+        n = OSNumber::withNumber(static_cast<uint64_t>(rep), 64);
+        if (n) { out->setObject(name, n); n->release(); }
+        if (ok && found < 0) { found = static_cast<int>(eng); memcpy(dpcd, buf, 16); }
+    }
+    OSNumber *fn = OSNumber::withNumber(static_cast<uint64_t>(found < 0 ? 0xFF : found), 64);
+    if (fn) { out->setObject("engine", fn); fn->release(); }
+    setProperty("aux-probe", out);
+    out->release();
+    if (found < 0) { IOLog("RedNavi: no AUX engine answered\n"); return; }
+    OSData *d = OSData::withBytes(dpcd, 16);
+    if (d) { setProperty("dpcd", d); d->release(); }
+
+    // EDID: set the offset to 0 (I2C write with MOT), then read 16 byte chunks (MOT until the last one).
+    uint8_t edid[256] = {};
+    uint32_t total = 128, got = 0;
+    uint8_t zero = 0;
+    uint32_t st = 0, rep = 0;
+    if (!auxTransfer(static_cast<uint32_t>(found), 0x40, 0x50, &zero, 1, &st, &rep)) {
+        IOLog("RedNavi: EDID: offset write failed, SW_STATUS=0x%08x reply=0x%x\n", st, rep);
+        return;
+    }
+    while (got < total) {
+        bool last = got + 16 >= total;
+        if (!auxTransfer(static_cast<uint32_t>(found), last ? 0x10 : 0x50, 0x50, edid + got, 16, &st, &rep)) {
+            IOLog("RedNavi: EDID: read at %u failed, SW_STATUS=0x%08x reply=0x%x\n", got, st, rep);
+            break;
+        }
+        got += 16;
+        if (got == 128 && edid[126] && total == 128) total = 256;            // one extension block
+    }
+    IOLog("RedNavi: EDID: %u bytes read from AUX%d\n", got, found);
+    if (got) {
+        OSData *e = OSData::withBytes(edid, got);
+        if (e) { setProperty("edid", e); e->release(); }
+    }
 }
 
 bool RedNaviProbe::loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version) {
@@ -838,6 +956,7 @@ bool RedNaviProbe::start(IOService *provider) {
         sendPspSetupTmr();
     }
     loadDmcub();
+    probeAux();
     registerService();
     return true;
 }
