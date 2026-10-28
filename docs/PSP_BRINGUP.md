@@ -52,8 +52,14 @@ With `rednavi_psp_load=1` the probe loaded KDB, SYS_DRV, SOC_DRV, INTF_DRV, DBG_
 
 So the PSP bootloader accepts our staging buffer and the card runs the secure OS. What this does not show yet: that the sOS accepts commands. That needs the GPCOM ring (`C2PMSG_64`, `_67`, `_69`, `_70`, `_71`) and the first ring command (TMR setup), which in turn needs more of the memory controller than we have touched.
 
-The state lives on the card: a warm reboot may keep the sOS running, in which case the probe reports "sOS already alive" and skips the load. A full power-off resets it.
+A normal macOS reboot resets the card: after the next reboot `C2PMSG_81` was 0 again and the whole chain loaded a second time (the sign-of-life value differs between boots: `0x0136947c`, then `0x01434...`, so it is not a fixed constant). The test is therefore repeatable without a power-off.
+
+## Result of the ring (probe stage 5, 2026-10-28)
+
+With `rednavi_psp_ring=1` the probe waited for `C2PMSG_64` to show the ready flag, wrote a 4 KB ring at VRAM +0x40200000 (MC `0x8040200000`) to `C2PMSG_69`/`_70`/`_71`, and sent the create command (`PSP_RING_TYPE__KM << 16`) to `C2PMSG_64`. The response was `0x80C20000`: bit 31 (response) set and the status field (low 16 bits) zero, which is the success test amdgpu uses (`mask 0x8000FFFF`). The bits in between are not used by amdgpu and we do not interpret them. Dump: `docs/logs/ioreg-rednavi-probe6-ring.txt`.
+
+So the secure OS accepts commands. The ring is left allocated at that address when the kext stops; the card forgets it at the next reset.
 
 ## Next code step
 
-Create the PSP ring and send the first command, then decide what the display path needs from the PSP (DMUB firmware load).
+Send the first real command through the ring (a ring frame carrying a `psp_gfx_cmd_resp`), starting with a harmless one, then decide what the display path needs from the PSP (DMUB firmware load). This needs a fence buffer and a command buffer in VRAM and the write-pointer protocol (`C2PMSG_67`).
