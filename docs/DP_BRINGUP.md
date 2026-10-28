@@ -72,3 +72,5 @@ Reading registers of blocks that are clock- or power-gated (unused pipes, DSC, D
 - Groups 1 to 3 (clocks, OPTC clocks, OTG timing) and 1 to 6 (plus OPP, MPC and the DIG/DP stream setup) ran without a stall.
 - All nine groups ran: the OTG is enabled and counting (`OTG_CONTROL` 0x11201, position changes between reads), `DP_VID_STREAM_CNTL` 0x10001 (stream enabled and reporting active), DP link still trained (`DP_LINK_CNTL` 0x110).
 - Read-back differences are status or hardware-owned bits (`OTG_CLOCK_CONTROL` bit 16, `FMT_CONTROL`, `MPC_OUT0_CSC_MODE` bit 7, `DIG_FIFO_CTRL0/1`, `OTG_CONTROL` bit 16) except `DP4_DP_VID_M`, which stays 0 (Linux reads 0x7595): the hardware has not measured a stream clock against the link clock, so the picture may not be reaching the sink yet.
+
+**Result: the monitor shows the colour-square test pattern** (confirmed by eye on the Samsung F24G3xTF, DisplayPort input, 1920x1080@60). `DP4_DP_VID_M` still reads 0 in our run, so it is not a reliable indicator that the stream is flowing; the picture is. This is the first image produced by the RedNavi kext.

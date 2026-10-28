@@ -53,7 +53,7 @@ Recommendation: do B as a **spike** to find out what really has to be programmed
 1. **VBIOS objects, read-only** (`tools/`) **[done]**: parse the display object table of the 57856-byte VBIOS we already read. Result: which connectors exist, which encoder/DIG and DDC/HPD line each uses. Linux reported four connectors on this board (DP-2, DP-3, HDMI-A-3, HDMI-A-4); the mapping is what we need. No hardware, can start now.
 2. **HPD and EDID, read-only:** with a monitor plugged into one port of the 7800 XT, read the HPD status registers; then read the EDID through the AUX/DDC engine. Needs a monitor on the card (see `TEST_MACHINES.md`); the UHD 630 stays the main display.
 3. **Display pipe bring-up without a monitor-visible effect** (link training done: see `DP_BRINGUP.md`) (details and status in `DP_BRINGUP.md`): DCCG, HUBBUB, DMCUB-assisted init as `dcn32_hw_init` does; confirm by registers.
-4. **Test pattern:** program one OTG/timing generator and the display pattern generator (`set_disp_pattern_generator`) on the chosen connector, with the DP link trained. Colour bars on the screen with no framebuffer involved: the first visible result.
+4. **Test pattern [done 2026-10-28, see `DP_BRINGUP.md`]:** program one OTG/timing generator and the display pattern generator (`set_disp_pattern_generator`) on the chosen connector, with the DP link trained. Colour bars on the screen with no framebuffer involved: the first visible result.
 5. **One plane:** HUBP -> DPP -> MPC -> OPP -> OPTC reading a scanout buffer in VRAM. A solid colour or a loaded image.
 6. **`IOFramebuffer`:** publish that scanout to WindowServer (`getPixelInformation`, `getApertureRange`, `setDisplayMode`, ...), one display mode first, then EDID-driven modes.
 7. Grow into A where it pays off (clock management through the SMU, DSC, multiple outputs, hot-plug).
@@ -85,3 +85,7 @@ Second half of step 2, not done: read the EDID through the AUX channel of that c
 - FP/SSE inside a macOS kext: allowed state and cost.
 - Is the ATOM interpreter needed for PHY power-up on DCN 3.2, or does DMUB (`DMUB_CMD__DPIA`, `DMUB_CMD__ENABLE_DISP_POWER`-style commands) cover it?
 - Which output to use first: DP is better documented in DC; HDMI 2.1 FRL needs the HPO encoders.
+
+## First picture (2026-10-28)
+
+Steps 1 to 4 are done: the VBIOS display objects were parsed, HPD and EDID read, the DP link trained and a **colour-square test pattern is visible on the Samsung monitor** on path 0 (DisplayPort, UNIPHY2/DIG4, AUX4, HPD4), driven by our own kext at 1920x1080@60 over HBR2 x4. It was done as the planned "strategy B" spike: the display register state of a lit pipe was captured from Linux and replayed (`tools/gen_dcn_replay.py`, `rednavi_dcn_replay=9`), with the PHY and link training done through the DMCUB (VBIOS command tables) and AUX. Remaining distance to a usable desktop: a plane (HUBP/DPP reading a scanout buffer in VRAM), mode setting from the EDID instead of a replayed 1080p60 state, clock management through the SMU, hot-plug, the other connectors, and the `IOFramebuffer` layer.
