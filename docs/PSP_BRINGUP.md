@@ -46,6 +46,14 @@ With `rednavi_psp_kdb=1` the probe copied the 7488-byte KDB (version 0x2003200) 
 
 Caveat: Linux accepts the same signal, but `0x80000000` is also the value before the command, so this alone does not prove the bootloader consumed the image. The probe should read `C2PMSG_35` and `_36` again a few milliseconds later, and the next component (SYS_DRV) will show whether the chain advances.
 
+## Result of the full chain (probe 4 extended, 2026-10-28)
+
+With `rednavi_psp_load=1` the probe loaded KDB, SYS_DRV, SOC_DRV, INTF_DRV, DBG_DRV, RAS_DRV and SOS in that order. All **7 of 7 components were accepted** (`psp-chain-done` = 7), with no error bits in `C2PMSG_35` and no hang. After the SOS step `C2PMSG_81` (the sOS sign-of-life register, 0 before) read `0x0136947c`. Linux treats any non-zero value as "sOS alive". Dump: `docs/logs/ioreg-rednavi-probe5-chain.txt`. The `mailbox-regs` property in that dump was read before the load, so it still shows 0 there.
+
+So the PSP bootloader accepts our staging buffer and the card runs the secure OS. What this does not show yet: that the sOS accepts commands. That needs the GPCOM ring (`C2PMSG_64`, `_67`, `_69`, `_70`, `_71`) and the first ring command (TMR setup), which in turn needs more of the memory controller than we have touched.
+
+The state lives on the card: a warm reboot may keep the sOS running, in which case the probe reports "sOS already alive" and skips the load. A full power-off resets it.
+
 ## Next code step
 
-Extend the opt-in loader to the rest of the chain (SYS_DRV, SOC_DRV, INTF_DRV, DBG_DRV, RAS_DRV, then SOS), logging `C2PMSG_35`, `_36` and `_81` after each step, and stop at the first error.
+Create the PSP ring and send the first command, then decide what the display path needs from the PSP (DMUB firmware load).
