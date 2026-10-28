@@ -52,7 +52,7 @@ With `rednavi_psp_load=1` the probe loaded KDB, SYS_DRV, SOC_DRV, INTF_DRV, DBG_
 
 So the PSP bootloader accepts our staging buffer and the card runs the secure OS. What this does not show yet: that the sOS accepts commands. That needs the GPCOM ring (`C2PMSG_64`, `_67`, `_69`, `_70`, `_71`) and the first ring command (TMR setup), which in turn needs more of the memory controller than we have touched.
 
-A normal macOS reboot resets the card: after the next reboot `C2PMSG_81` was 0 again and the whole chain loaded a second time (the sign-of-life value differs between boots: `0x0136947c`, then `0x01434...`, so it is not a fixed constant). The test is therefore repeatable without a power-off.
+A normal macOS reboot resets the card: after the next reboot `C2PMSG_81` was 0 again and the whole chain loaded a second time (the sign-of-life value differs between boots: `0x0136947c`, then `0x01433e66`, so it is not a fixed constant). The test is therefore repeatable without a power-off.
 
 ## Result of the ring (probe stage 5, 2026-10-28)
 
