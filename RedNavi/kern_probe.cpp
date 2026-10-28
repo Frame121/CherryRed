@@ -215,7 +215,7 @@ class RedNaviProbe : public IOService {
     OSData *vbiosCopy {nullptr};   // VBIOS image read from the PCI ROM
     bool dmubUp {false};           // our DMCUB is running and its mailbox is set up
     uint32_t dmubDmu {0};          // DMU base index 2
-    uint64_t dmubBlock {0};        // VRAM offset of the DMUB memory block
+    uint64_t dmubMailbox {0};      // VRAM offset of the DMUB mailbox window (inbox1 ring)
 
     uint32_t rd(uint32_t off) { return *reinterpret_cast<volatile uint32_t *>(regs->getVirtualAddress() + off); }
     void wr(uint32_t off, uint32_t v) { *reinterpret_cast<volatile uint32_t *>(regs->getVirtualAddress() + off) = v; }
@@ -477,7 +477,7 @@ bool RedNaviProbe::dmubSend(const uint8_t *cmd, uint32_t len, uint32_t reply[16]
     if (!dmubUp || len > 64) return false;
     const uint32_t IN_WP = 0x1d6, IN_RP = 0x1d7;
     uint32_t wp = rd((dmubDmu + IN_WP) * 4), slot = wp % kRNDmubRbSize;
-    uint64_t slotAddr = dmubBlock + kRNDmubWin_MAILBOX_Off + slot;
+    uint64_t slotAddr = dmubMailbox + slot;
     for (uint32_t i = 0; i < 64; i += 4) {
         uint32_t v = 0;
         for (uint32_t k = 0; k < 4; k++) if (i + k < len) v |= static_cast<uint32_t>(cmd[i + k]) << (8 * k);
@@ -1078,7 +1078,7 @@ void RedNaviProbe::loadDmcub() {
     for (; ms < 3000; ms++) { st = R(S0); if ((st & 3) == 3) break; IOSleep(1); }
     IOLog("RedNavi: DMUB: after %u ms SCRATCH0=0x%08x (bit0 dal_fw, bit1 mailbox_rdy) CNTL=0x%08x CNTL2=0x%08x SEC=0x%08x\n", ms, st, R(CNTL), R(CNTL2), R(SEC));
     if ((st & 3) == 3) {
-        dmubUp = true; dmubDmu = dmu; dmubBlock = blockOff;
+        dmubUp = true; dmubDmu = dmu; dmubMailbox = blockOff + kRNDmubWin_MAILBOX_Off;
         uint32_t cmdArg = 0;
         PE_parse_boot_argn("rednavi_dmub_cmd", &cmdArg, sizeof(cmdArg));
         if (cmdArg == 1) {
