@@ -49,6 +49,11 @@
 // enable. N limits how many groups are applied (1 to 9), so the pipe can be brought up step by step. Needs
 // the DP link trained first (rednavi_dp_train=1). Every group is logged and read back.
 //
+// Groups 10 to 14 of the replay add a plane: the probe writes a 1920x1080 XRGB8888 test image into VRAM
+// (kRNScanoutVramOff, linear, pitch 7680 as the Linux text console uses), then replays the DCHUBBUB
+// watermarks, DPP, MPC tree and HUBP configuration captured on Linux for that linear surface, points the
+// primary surface address at the image and finally switches the pattern generator off.
+//
 // Fourteenth stage (UNSAFE, rednavi_dcn_dump_unsafe=1): reading every DCN 3.2 register of the list from macOS
 // HANGS THE MACHINE (found on 2026-10-28; the console freezes with stale lines on screen). Kept only as a
 // record; use tools/linux_dcn_dump.py, which reads the same list safely on Linux. Reads every DCN 3.2 register of tools/dcn32_reglist.txt
@@ -133,6 +138,7 @@
 #define kRNMp0C2pmsg70        0x086
 #define kRNMp0C2pmsg71        0x087
 #define kRNPspMboxMask        0x8000FFFFu      // response flag plus status bits
+#define kRNScanoutVramOff     0x60000000ull    // 1.5 GB into VRAM: MC address 0x8060000000, the value in dcn_replay.h
 #define kRNPspBufSize         (1u << 20)
 #define kRNHwIdMp1            1
 #define kRNHwIdMmhub          34
@@ -261,6 +267,7 @@ class RedNaviProbe : public IOService {
     void dpTrain();
     void dcnDump();
     void dcnReplay();
+    void fillScanout();
     bool dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k);
     bool dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n);
     bool dpcdRead(uint32_t eng, uint32_t addr, uint8_t *d, uint32_t n);
@@ -661,22 +668,41 @@ void RedNaviProbe::dpTrain() {
     rnPublish(this, "dp-train", n, v, 9);
 }
 
+// A recognisable 1920x1080 XRGB8888 image: red/green gradient, a checker in blue, a white frame and
+// eight colour bars along the bottom, so a wrong pitch, offset or format is obvious on screen.
+void RedNaviProbe::fillScanout() {
+    static const uint32_t bars[8] = {0xFFFFFF, 0xFFFF00, 0x00FFFF, 0x00FF00, 0xFF00FF, 0xFF0000, 0x0000FF, 0x000000};
+    for (uint32_t y = 0; y < 1080; y++) {
+        for (uint32_t x = 0; x < 1920; x++) {
+            uint32_t v;
+            if (x < 8 || x >= 1912 || y < 8 || y >= 1072) v = 0xFFFFFF;
+            else if (y >= 880) v = bars[x / 240];
+            else {
+                uint32_t r = (x * 17) >> 7, g = (y * 242) >> 10, b = (((x >> 4) + (y >> 4)) & 1) ? 200 : 60;
+                v = (r << 16) | (g << 8) | b;
+            }
+            vramWrite(kRNScanoutVramOff + (static_cast<uint64_t>(y) * 1920 + x) * 4, v);
+        }
+        if ((y & 63) == 0) IOSleep(1);
+    }
+}
+
 void RedNaviProbe::dcnReplay() {
     uint32_t maxGroup = 0;
     if (!PE_parse_boot_argn("rednavi_dcn_replay", &maxGroup, sizeof(maxGroup)) || maxGroup == 0) return;
-    if (maxGroup > 9) maxGroup = 9;
+    if (maxGroup > 14) maxGroup = 14;
     uint32_t base[4] = {};
     for (uint32_t i = 0; i < 4; i++) if (!ipBase(kRNHwIdDmu, &base[i], i)) { IOLog("RedNavi: replay: no DMU base %u\n", i); return; }
     uint32_t regLen = static_cast<uint32_t>(regs->getLength());
     // State found before we touch anything (the VBIOS may have lit the pipe already), then quiesce it:
     // DC assumes the display is disabled before it programs the timing.
     {
-        const uint32_t pre[10][2] = {{2, 0x1b41}, {2, 0x1b2a}, {2, 0x1b2f}, {2, 0x250c}, {2, 0x248b}, {2, 0x24b1}, {2, 0x24b2}, {2, 0x2511}, {2, 0x2512}, {1, 0x81}};
-        const char *pn[10] = {"otg_control", "h_total", "v_total", "vid_stream_cntl", "fe_cntl", "be_cntl", "be_en", "vid_n", "vid_m", "dp_dto0_phase"};
-        uint32_t pv[10];
-        for (int i = 0; i < 10; i++) pv[i] = rd((base[pre[i][0]] + pre[i][1]) * 4);
+        const uint32_t pre[16][2] = {{2, 0x1b41}, {2, 0x1b2a}, {2, 0x1b2f}, {2, 0x250c}, {2, 0x248b}, {2, 0x24b1}, {2, 0x24b2}, {2, 0x2511}, {2, 0x2512}, {1, 0x81}, {1, 0x64}, {1, 0x99}, {1, 0xb6}, {2, 0x475}, {2, 0x476}, {2, 0x46f}};
+        const char *pn[16] = {"otg_control", "h_total", "v_total", "vid_stream_cntl", "fe_cntl", "be_cntl", "be_en", "vid_n", "vid_m", "dp_dto0_phase", "dentist_dispclk", "dppclk0_dto", "dppclk_dto_ctrl", "vm_fb_base", "vm_fb_top", "sdpif_cfg0"};
+        uint32_t pv[16];
+        for (int i = 0; i < 16; i++) pv[i] = rd((base[pre[i][0]] + pre[i][1]) * 4);
         RN_STEP("RedNavi: replay before: OTG_CONTROL=0x%08x H_TOTAL=0x%x V_TOTAL=0x%x VID_STREAM=0x%08x FE=0x%08x BE=0x%08x BE_EN=0x%08x VID_N=0x%x VID_M=0x%x DTO0=0x%08x\n", pv[0], pv[1], pv[2], pv[3], pv[4], pv[5], pv[6], pv[7], pv[8], pv[9]);
-        rnPublish(this, "dcn-replay-pre", pn, pv, 10);
+        rnPublish(this, "dcn-replay-pre", pn, pv, 16);
         uint32_t vidReg = (base[2] + 0x250c) * 4, otgReg = (base[2] + 0x1b41) * 4;
         if (maxGroup >= 3) {
             if (rd(vidReg) & 1) {                                           // stop the DP video stream first
@@ -691,11 +717,12 @@ void RedNaviProbe::dcnReplay() {
             }
         }
     }
-    static const char *const names[10] = {"", "clocks", "optc clocks", "otg timing", "opp", "mpc", "dig/dp stream", "otg enable", "test pattern", "dp stream enable"};
+    static const char *const names[15] = {"", "clocks", "optc clocks", "otg timing", "opp", "mpc", "dig/dp stream", "otg enable", "test pattern", "dp stream enable", "hubbub", "dpp and clocks", "mpc tree", "hubp surface", "pattern off"};
     uint32_t mismatches = 0;
     OSDictionary *mm = OSDictionary::withCapacity(16);
     for (uint32_t g = 1; g <= maxGroup; g++) {
         RN_STEP("RedNavi: replay group %u: %s\n", g, names[g]);
+        if (g == 13) { RN_STEP("RedNavi: replay: writing the scanout image to VRAM\n"); fillScanout(); RN_STEP("RedNavi: replay: scanout image written\n"); }
         for (const RNReplayReg &r : kRNReplay) {
             if (r.group != g) continue;
             uint32_t off = (base[r.baseIdx] + r.dword) * 4;
