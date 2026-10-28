@@ -43,6 +43,12 @@
 // The result is the sink's own verdict: DPCD 0x202-0x204 (CR_DONE, CHANNEL_EQ_DONE, SYMBOL_LOCKED, align).
 // Published as "dp-train".
 //
+// Fifteenth stage (opt-in, rednavi_dcn_replay=N, writes the DCN pipe): replays the register state of a lit
+// pipe captured on Linux (RedNavi/dcn_replay.h, tools/gen_dcn_replay.py) in nine groups: pixel clock DTO,
+// OPTC clocks, OTG timing, OPP/FMT, MPC output, DIG/DP stream setup, OTG enable, test pattern, DP stream
+// enable. N limits how many groups are applied (1 to 9), so the pipe can be brought up step by step. Needs
+// the DP link trained first (rednavi_dp_train=1). Every group is logged and read back.
+//
 // Fourteenth stage (UNSAFE, rednavi_dcn_dump_unsafe=1): reading every DCN 3.2 register of the list from macOS
 // HANGS THE MACHINE (found on 2026-10-28; the console freezes with stale lines on screen). Kept only as a
 // record; use tools/linux_dcn_dump.py, which reads the same list safely on Linux. Reads every DCN 3.2 register of tools/dcn32_reglist.txt
@@ -71,6 +77,7 @@
 #include <IOKit/pci/IOPCIDevice.h>
 #include <pexpert/pexpert.h>
 #include "dcn_reglist.h"
+#include "dcn_replay.h"
 
 #ifdef RN_HAVE_PSP_FW
 #include "psp_fw.h"
@@ -253,6 +260,7 @@ class RedNaviProbe : public IOService {
     void dpInit();
     void dpTrain();
     void dcnDump();
+    void dcnReplay();
     bool dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k);
     bool dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n);
     bool dpcdRead(uint32_t eng, uint32_t addr, uint8_t *d, uint32_t n);
@@ -647,6 +655,52 @@ void RedNaviProbe::dpTrain() {
     const char *n[9] = {"tx_ok", "cr_ok", "eq_ok", "cr_tries", "eq_tries", "status_202_203", "status_204_205", "adjust_206_207", "tps3"};
     uint32_t v[9] = {txOk, crOk, eqOk, crTries, eqTries, static_cast<uint32_t>(st[0] | (st[1] << 8)), static_cast<uint32_t>(st[2] | (st[3] << 8)), static_cast<uint32_t>(st[4] | (st[5] << 8)), tps3};
     rnPublish(this, "dp-train", n, v, 9);
+}
+
+void RedNaviProbe::dcnReplay() {
+    uint32_t maxGroup = 0;
+    if (!PE_parse_boot_argn("rednavi_dcn_replay", &maxGroup, sizeof(maxGroup)) || maxGroup == 0) return;
+    if (maxGroup > 9) maxGroup = 9;
+    uint32_t base[4] = {};
+    for (uint32_t i = 0; i < 4; i++) if (!ipBase(kRNHwIdDmu, &base[i], i)) { IOLog("RedNavi: replay: no DMU base %u\n", i); return; }
+    uint32_t regLen = static_cast<uint32_t>(regs->getLength());
+    static const char *const names[10] = {"", "clocks", "optc clocks", "otg timing", "opp", "mpc", "dig/dp stream", "otg enable", "test pattern", "dp stream enable"};
+    uint32_t mismatches = 0;
+    for (uint32_t g = 1; g <= maxGroup; g++) {
+        RN_STEP("RedNavi: replay group %u: %s\n", g, names[g]);
+        for (const RNReplayReg &r : kRNReplay) {
+            if (r.group != g) continue;
+            uint32_t off = (base[r.baseIdx] + r.dword) * 4;
+            if (off + 4 > regLen) { IOLog("RedNavi: replay: %s outside the BAR\n", r.name); continue; }
+            wr(off, r.value);
+        }
+        if (g == 7) {                                                       // wait for the OTG to report enabled
+            uint32_t ctl = (base[2] + 0x1b41) * 4, ms = 0;
+            for (; ms < 200; ms++) { if (rd(ctl) & (1u << 16)) break; IOSleep(1); }
+            RN_STEP("RedNavi: replay: OTG_CONTROL = 0x%08x after %u ms\n", rd(ctl), ms);
+        }
+        for (const RNReplayReg &r : kRNReplay) {                            // read back, ignoring status bits
+            if (r.group != g) continue;
+            uint32_t v = rd((base[r.baseIdx] + r.dword) * 4);
+            if (v != r.value) {
+                mismatches++;
+                if (mismatches <= 24) IOLog("RedNavi: replay: %s wrote 0x%08x read 0x%08x\n", r.name, r.value, v);
+            }
+        }
+        IOSleep(40);
+    }
+    // Status after the replay: is the OTG counting, is the stream flowing?
+    uint32_t pos0 = rd((base[2] + 0x1b4a) * 4);
+    IOSleep(2);
+    uint32_t pos1 = rd((base[2] + 0x1b4a) * 4);
+    uint32_t otgCtl = rd((base[2] + 0x1b41) * 4), otgStatus = rd((base[2] + 0x1b49) * 4);
+    uint32_t vid = rd((base[2] + 0x250c) * 4), dpg = rd((base[2] + 0x185b) * 4), link = rd((base[2] + 0x2508) * 4);
+    uint32_t beEn = rd((base[2] + 0x24b2) * 4), fe = rd((base[2] + 0x248b) * 4);
+    IOLog("RedNavi: replay done: %u mismatches; OTG_CONTROL=0x%08x STATUS=0x%08x POS 0x%08x -> 0x%08x; DP_VID_STREAM_CNTL=0x%08x DPG_STATUS=0x%08x DP_LINK_CNTL=0x%08x BE_EN=0x%08x FE=0x%08x\n",
+          mismatches, otgCtl, otgStatus, pos0, pos1, vid, dpg, link, beEn, fe);
+    const char *n[12] = {"groups", "mismatches", "otg_control", "otg_status", "pos0", "pos1", "vid_stream_cntl", "dpg_status", "dp_link_cntl", "be_en", "fe_cntl", "otg_moving"};
+    uint32_t v[12] = {maxGroup, mismatches, otgCtl, otgStatus, pos0, pos1, vid, dpg, link, beEn, fe, pos0 != pos1};
+    rnPublish(this, "dcn-replay", n, v, 12);
 }
 
 void RedNaviProbe::dcnDump() {
@@ -1177,6 +1231,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dpInit();
     probeAux();
     dpTrain();
+    dcnReplay();
     dcnDump();
     registerService();
     return true;
