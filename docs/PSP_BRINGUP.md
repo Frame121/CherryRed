@@ -71,12 +71,16 @@ So the whole round trip works: the sOS read our frame from VRAM, executed it and
 - After the ring, `psp_hw_start` calls `psp_tmr_init` (which sends **LOAD_TOC** to learn the TMR size) and `psp_tmr_load` (**SETUP_TMR**). `psp_early_init` leaves `autoload_supported` and `boot_time_tmr` both true for MP0 13.0.10, and then `psp_skip_tmr()` returns true: **Linux does not send SETUP_TMR on this PSP**. The TMR is set up by the firmware at boot. Only LOAD_TOC is sent.
 - The display firmware does not need the PSP. `amdgpu_dm_dmub.c` has two paths. With `load_type == AMDGPU_FW_LOAD_PSP` the PSP loads the DMCUB `inst_const` part (`AMDGPU_UCODE_ID_DMCUB`, via `LOAD_IP_FW`). Otherwise the driver copies it into the DMUB framebuffer window itself ("backdoor load", `hw_params.load_inst_const = true`). For a native framebuffer the backdoor path avoids `LOAD_IP_FW` and the TMR bookkeeping entirely.
 - Confirmed: the DMCUB file for DCN 3.2.0 is `amdgpu/dcn_3_2_0_dmcub.bin` (`FIRMWARE_DCN_V3_2_0_DMCUB`).
-- The DMUB window setup also copies the card's **VBIOS image** into the framebuffer (`DMUB_WINDOW_3_VBIOS`, from `adev->bios`). We will need the VBIOS bytes: from the PCI expansion ROM, the ACPI VFCT table, or VRAM.
+- The DMUB window setup also copies the card's **VBIOS image** (obtained, see below) into the framebuffer (`DMUB_WINDOW_3_VBIOS`, from `adev->bios`). We will need the VBIOS bytes: from the PCI expansion ROM, the ACPI VFCT table, or VRAM.
 
 ## Result of LOAD_TOC (probe stage 7, 2026-10-28)
 
 With `rednavi_psp_toc=1` the probe copied the 2304-byte TOC component to the staging buffer and sent `GFX_CMD_ID_LOAD_TOC`. Response (`docs/logs/ioreg-rednavi-probe8-toc.txt`): fence ok, `status` = 0, `tmr_size` = `0xA700000` (167 MiB). The PSP parsed the TOC and accepted it.
 
+## VBIOS image (probe stage 8, 2026-10-28)
+
+The PCI expansion ROM is readable: the probe enables the ROM decode bit, maps it and publishes the first (legacy x86) image as the `vbios` property. Result: **57856 bytes**, signature `0xaa55`, PCIR structure with vendor `1002` / device `747e`, ATOM header present, byte checksum 0. `tools/check_vbios.py` checks a dump. The image is vendor firmware, so it is **not committed**; `docs/logs/ioreg-rednavi-probe9-vbios.txt` has the property cut out. This is the same source as `amdgpu_read_bios`.
+
 ## Next code step
 
-The PSP side needed for a display is probably done. Next is the display path: obtain the VBIOS image, parse `dcn_3_2_0_dmcub.bin`, lay out the DMUB framebuffer windows and start the DMCUB by the backdoor path. Check what the DMCUB needs from the SMU/clocks first. Optional PSP follow-ups: `FB_FW_RESERV_ADDR` query, SMU firmware load (`psp_load_smu_fw`).
+The PSP side needed for a display is probably done and the VBIOS is available. Next is the display path: lay out the DMUB framebuffer windows and start the DMCUB by the backdoor path. Check what the DMCUB needs from the SMU/clocks first. Optional PSP follow-ups: `FB_FW_RESERV_ADDR` query, SMU firmware load (`psp_load_smu_fw`).
