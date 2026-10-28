@@ -61,6 +61,23 @@ Reading: the **VBIOS already started a DMCUB** and it is idle and healthy. Its m
 
 Consequences: reading DCN registers is safe on this card (no hang). amdgpu would reset this DMCUB and load the DAL firmware over it; we can do the same, or first try to talk to the running one. Loading ours needs the reset-and-backdoor sequence below, which writes to the card.
 
+## First attempts to load our DMCUB (probe stage 10, 2026-10-28)
+
+`rednavi_dmub_load=1` runs the Linux sequence: STOP_FW to the running DMCUB, soft reset, build the 1184 KiB block in VRAM at +0x50000000 (code and VBIOS copied, readback of the code verified), program windows CW0/CW1 and CW3 to CW6, the REGION5 alias, inbox/outbox and outbox0, release reset, wait for `SCRATCH0` bits `dal_fw` and `mailbox_rdy`. The register offsets and field positions are from `dcn_3_2_0_offset.h` / `_sh_mask.h`.
+
+| Attempt | Outcome |
+|---|---|
+| Backdoor load (CW0/CW1 programmed by the driver) | The old DMCUB came back as before: `SCRATCH0` = 2 (mailbox ready, **not** `dal_fw`), `SCRATCH1` = 0x07008748, `CNTL` = 0x1900c6. Our code did not run; the instruction memory is evidently not loadable from the host on this ASIC (it is PSP-owned, which is why amdgpu uses `AMDGPU_FW_LOAD_PSP` here). |
+| `rednavi_dmub_psp=1`: signed image (PSP header + code + footer, 284176 bytes) to the sOS with `GFX_CMD_ID_LOAD_IP_FW`, type `GFX_FW_TYPE_DMUB` (51), then the Linux hw_init without the backdoor load | **The sOS accepted it**: fence ok, `status` 0, `fw_addr` `0xfee00000` (inside the TMR). After release: `CNTL` = 0x900c6 (enabled), `SCRATCH0` = 0, `DMCUB_TIMER_CURRENT` = 0, `DMCUB_UNDEFINED_ADDRESS_FAULT_ADDR` = 0xfffffff0, no mailbox traffic. The DMCUB is enabled but not executing. |
+| Same with `rednavi_dmub_mode=1` (data windows addressed by VRAM offset instead of MC address) | Identical result. |
+
+Logs: `docs/logs/ioreg-rednavi-probe11-dmub-load.txt`. The desktop is not harmed (UHD 630 is the display, a reboot resets the card); the DMCUB just ends up halted.
+
+Reading: the fault address 0xfffffff0 and the stopped timer say the core faulted at its reset vector, i.e. no instruction window was mapped when it started. In PSP mode amdgpu never programs CW0/CW1 itself (that is only done in `backdoor_load`), so either the PSP sets them during `LOAD_IP_FW` and our reset sequence or ordering undoes it, or the PSP load must target a different place or happen after some step we skipped. Open questions for the next session:
+- Does amdgpu send `LOAD_IP_FW` for the DMCUB before or after the display hw_init resets the block, and is the TMR copy reached through CW0 with some register we have not set (for example `DMCUB_REGION3_TMR_AXI_SPACE`, 0x21a, default 3 = FB physical)?
+- Read the CW0/CW1 and `DMCUB_SEC_CNTL` registers right after `LOAD_IP_FW`, before our reset, to see what the PSP programmed.
+- Read `amdgpu_dm_dmub.c`'s hw_init caller and `dmub_dcn32_*` for any step in PSP mode that this probe still skips.
+
 ## Next code step
 
-Done (see above). Next, a first write step: build the 1184 KiB block in VRAM, put the running DMCUB in reset, backdoor load our firmware, release reset and watch `SCRATCH0` for `dal_fw` and `mailbox_rdy`. Before that, read the exact write sequence in `dmub_dcn31.c` / `dmub_dcn32.c` and the register field layouts.
+Debug why the PSP-loaded DMCUB does not start (see the questions above). Add reads of the CW0/CW1/SEC registers after `LOAD_IP_FW` and before the reset.

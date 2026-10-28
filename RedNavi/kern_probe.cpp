@@ -686,9 +686,9 @@ void RedNaviProbe::loadDmcub() {
     uint32_t st = 0, ms = 0;
     for (; ms < 3000; ms++) { st = R(S0); if ((st & 3) == 3) break; IOSleep(1); }
     IOLog("RedNavi: DMUB: after %u ms SCRATCH0=0x%08x (bit0 dal_fw, bit1 mailbox_rdy) CNTL=0x%08x CNTL2=0x%08x SEC=0x%08x\n", ms, st, R(CNTL), R(CNTL2), R(SEC));
-    const char *names[8] = {"scratch0", "scratch1", "scratch2", "cntl", "cntl2", "inbox_wptr", "inbox_rptr", "mode"};
-    uint32_t vals[8] = {st, R(0x1e4), R(0x1e5), R(CNTL), R(CNTL2), R(IN_WP), R(IN_RP), mode};
-    rnPublish(this, "dmub-load", names, vals, 8);
+    const char *names[12] = {"scratch0", "scratch1", "scratch2", "cntl", "cntl2", "inbox_wptr", "inbox_rptr", "mode", "sec_cntl", "fault_addr", "timer", "scratch14"};
+    uint32_t vals[12] = {st, R(0x1e4), R(0x1e5), R(CNTL), R(CNTL2), R(IN_WP), R(IN_RP), mode, R(SEC), R(0x1fa), R(0x1fd), R(S14)};
+    rnPublish(this, "dmub-load", names, vals, 12);
 #else
     IOLog("RedNavi: built without dmub_fw.h, DMUB load not available\n");
 #endif
