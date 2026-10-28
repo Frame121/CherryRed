@@ -191,6 +191,7 @@ class RedNaviProbe : public IOService {
     void dumpDiscovery();
     void dumpVbios();
     void loadDmcub();
+    void dmcubSnapshot(const char *property);
     bool ipBase(uint16_t hwId, uint32_t *base, uint32_t idx = 0);
     bool loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version);
     void loadPspChain();
@@ -550,6 +551,35 @@ void RedNaviProbe::sendPspLoadToc() {
 #endif
 }
 
+// Dump the DMCUB window, security and control registers into one property (all at DMU base index 2).
+void RedNaviProbe::dmcubSnapshot(const char *property) {
+    uint32_t dmu = 0;
+    if (!ipBase(kRNHwIdDmu, &dmu, 2)) return;
+    if ((dmu + 0x21a) * 4 + 4 > regs->getLength()) return;
+    OSDictionary *out = OSDictionary::withCapacity(64);
+    if (!out) return;
+    auto put = [&](const char *name, uint32_t dword) {
+        OSNumber *n = OSNumber::withNumber(static_cast<uint64_t>(rd((dmu + dword) * 4)), 64);
+        if (n) { out->setObject(name, n); n->release(); }
+    };
+    static const char *const base[8] = {"CW0_BASE", "CW1_BASE", "CW2_BASE", "CW3_BASE", "CW4_BASE", "CW5_BASE", "CW6_BASE", "CW7_BASE"};
+    static const char *const top[8] = {"CW0_TOP", "CW1_TOP", "CW2_TOP", "CW3_TOP", "CW4_TOP", "CW5_TOP", "CW6_TOP", "CW7_TOP"};
+    static const char *const off[8] = {"CW0_OFFSET", "CW1_OFFSET", "CW2_OFFSET", "CW3_OFFSET", "CW4_OFFSET", "CW5_OFFSET", "CW6_OFFSET", "CW7_OFFSET"};
+    static const char *const offHi[8] = {"CW0_OFFSET_HI", "CW1_OFFSET_HI", "CW2_OFFSET_HI", "CW3_OFFSET_HI", "CW4_OFFSET_HI", "CW5_OFFSET_HI", "CW6_OFFSET_HI", "CW7_OFFSET_HI"};
+    for (uint32_t n = 0; n < 8; n++) {
+        put(base[n], 0x1a5 + n);
+        put(top[n], 0x1ad + n);
+        put(off[n], 0x1b5 + 2 * n);
+        put(offHi[n], 0x1b6 + 2 * n);
+    }
+    put("REGION5_OFFSET", 0x198); put("REGION5_OFFSET_HI", 0x199); put("REGION5_TOP", 0x1a2);
+    put("TMR_AXI_SPACE", 0x21a); put("SEC_CNTL", 0x1ce); put("MEM_CNTL", 0x1cf);
+    put("CNTL", 0x1f6); put("CNTL2", 0x200); put("SCRATCH0", 0x1e3); put("SCRATCH1", 0x1e4);
+    put("FAULT_ADDR", 0x1fa); put("TIMER", 0x1fd);
+    setProperty(property, out);
+    out->release();
+}
+
 void RedNaviProbe::loadDmcub() {
 #ifdef RN_HAVE_DMUB_FW
     uint32_t arg = 0;
@@ -577,6 +607,7 @@ void RedNaviProbe::loadDmcub() {
         const char *pn[4] = {"fence_ok", "status", "fw_addr_lo", "fw_addr_hi"};
         uint32_t pv[4] = {ok, resp[0], resp[2], resp[3]};
         rnPublish(this, "psp-load-dmub", pn, pv, 4);
+        dmcubSnapshot("dmcub-snap-after-psp");
         if (!ok || resp[0] != 0) return;
     }
     uint32_t dmu = 0;
@@ -689,6 +720,7 @@ void RedNaviProbe::loadDmcub() {
     const char *names[12] = {"scratch0", "scratch1", "scratch2", "cntl", "cntl2", "inbox_wptr", "inbox_rptr", "mode", "sec_cntl", "fault_addr", "timer", "scratch14"};
     uint32_t vals[12] = {st, R(0x1e4), R(0x1e5), R(CNTL), R(CNTL2), R(IN_WP), R(IN_RP), mode, R(SEC), R(0x1fa), R(0x1fd), R(S14)};
     rnPublish(this, "dmub-load", names, vals, 12);
+    dmcubSnapshot("dmcub-snap-end");
 #else
     IOLog("RedNavi: built without dmub_fw.h, DMUB load not available\n");
 #endif
@@ -714,6 +746,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
     dumpRegs(kRNDmcubRegs, sizeof(kRNDmcubRegs) / sizeof(kRNDmcubRegs[0]), "dmcub-regs");
+    dmcubSnapshot("dmcub-snap-boot");
     loadPspChain();
     if (createPspRing()) {
         sendPspBootCfgGet();
