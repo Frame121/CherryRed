@@ -12,6 +12,8 @@
 // has RedNavi/psp_fw.h (see tools/gen_psp_fw_header.py), copies each PSP component (KDB, system
 // driver, ..., secure OS) into VRAM and hands it to the PSP bootloader, in the order and with the
 // handshake of psp_hw_start / psp_v13_0_bootloader_load_component in amdgpu. Stops at the first error.
+// Fifth stage (opt-in, rednavi_psp_ring=1): asks the running secure OS to create the kernel-mode
+// ring (psp_v13_0_ring_create). The sOS answering is the first proof that it accepts commands.
 //
 // Without that boot-arg nothing is written to the GPU except the MM_INDEX/MM_DATA window used to
 // read VRAM.
@@ -53,6 +55,14 @@
 #define kRNPspBlReady         0x80000000u
 #define kRNVramMcBase         0x8000000000ull  // MMHUB FB_LOCATION_BASE 0x8000 << 24, read by probe stage 3
 #define kRNPspBufVramOffset   0x40000000ull    // 1 GB into VRAM, 1 MB aligned, well clear of the table at the end
+#define kRNPspRingVramOffset  0x40200000ull    // 4 KB ring, 2 MB into the staging area
+#define kRNPspRingSize        0x1000u
+#define kRNPspRingTypeKm      2u               // PSP_RING_TYPE__KM
+#define kRNMp0C2pmsg64        0x080
+#define kRNMp0C2pmsg69        0x085
+#define kRNMp0C2pmsg70        0x086
+#define kRNMp0C2pmsg71        0x087
+#define kRNPspMboxMask        0x8000FFFFu      // response flag plus status bits
 #define kRNPspBufSize         (1u << 20)
 #define kRNHwIdMp1            1
 #define kRNHwIdMmhub          34
@@ -118,6 +128,7 @@ class RedNaviProbe : public IOService {
     bool ipBase(uint16_t hwId, uint32_t *base);
     bool loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version);
     void loadPspChain();
+    void createPspRing();
     void dumpRegs(const RNMailboxReg *list, size_t count, const char *property);
 
 public:
@@ -313,6 +324,38 @@ void RedNaviProbe::loadPspChain() {
 #endif
 }
 
+void RedNaviProbe::createPspRing() {
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_psp_ring", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: PSP ring not requested (boot-arg rednavi_psp_ring=1)\n");
+        return;
+    }
+    uint32_t mp0 = 0;
+    if (!ipBase(kRNHwIdMp0, &mp0)) { IOLog("RedNavi: PSP ring: no MP0 base\n"); return; }
+    uint32_t r64 = (mp0 + kRNMp0C2pmsg64) * 4, r69 = (mp0 + kRNMp0C2pmsg69) * 4, r70 = (mp0 + kRNMp0C2pmsg70) * 4, r71 = (mp0 + kRNMp0C2pmsg71) * 4;
+    uint32_t r81 = (mp0 + kRNMp0C2pmsg81) * 4;
+    if (r81 + 4 > regs->getLength()) { IOLog("RedNavi: PSP ring: registers outside BAR\n"); return; }
+    if (rd(r81) == 0) { IOLog("RedNavi: PSP ring: sOS not alive (C2PMSG_81 = 0), skipping\n"); return; }
+
+    // Wait for the sOS to be ready for ring creation.
+    uint32_t st = 0;
+    for (int i = 0; i < 2000; i++) { st = rd(r64); if ((st & kRNPspMboxMask) == 0x80000000u) break; IOSleep(1); }
+    IOLog("RedNavi: PSP ring: C2PMSG_64 before = 0x%08x\n", st);
+    if ((st & kRNPspMboxMask) != 0x80000000u) { IOLog("RedNavi: PSP ring: sOS not ready for ring creation\n"); return; }
+
+    for (uint32_t off = 0; off < kRNPspRingSize; off += 4) vramWrite(kRNPspRingVramOffset + off, 0);
+    uint64_t mc = kRNVramMcBase + kRNPspRingVramOffset;
+    wr(r69, static_cast<uint32_t>(mc));
+    wr(r70, static_cast<uint32_t>(mc >> 32));
+    wr(r71, kRNPspRingSize);
+    wr(r64, kRNPspRingTypeKm << 16);
+    IOSleep(20);
+    for (int i = 0; i < 2000; i++) { st = rd(r64); if ((st & kRNPspMboxMask) == 0x80000000u) break; IOSleep(1); }
+    IOLog("RedNavi: PSP ring: C2PMSG_64 after = 0x%08x (0x80000000 = created), ring at MC 0x%llx\n", st, mc);
+    OSNumber *n = OSNumber::withNumber(static_cast<uint64_t>(st), 64);
+    if (n) { setProperty("psp-ring-status", n); n->release(); }
+}
+
 bool RedNaviProbe::start(IOService *provider) {
     if (!IOService::start(provider)) return false;
     pci = OSDynamicCast(IOPCIDevice, provider);
@@ -332,6 +375,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
     loadPspChain();
+    createPspRing();
     registerService();
     return true;
 }
