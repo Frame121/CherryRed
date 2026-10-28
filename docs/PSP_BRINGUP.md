@@ -60,6 +60,12 @@ With `rednavi_psp_ring=1` the probe waited for `C2PMSG_64` to show the ready fla
 
 So the secure OS accepts commands. The ring is left allocated at that address when the kext stops; the card forgets it at the next reset.
 
+## Result of the first command (probe stage 6, 2026-10-28)
+
+With `rednavi_psp_cmd=1` the probe put one frame in the ring: a `psp_gfx_cmd_resp` with `GFX_CMD_ID_BOOT_CFG` and `BOOTCFG_CMD_GET`, a 4 KB command buffer at VRAM +0x40210000 and a fence buffer at +0x40220000, then moved the write pointer (`C2PMSG_67`) from 0 to 16. Result (`docs/logs/ioreg-rednavi-probe7-cmd.txt`): the **fence reached 1** and the response `status` was `0xFFFF000A` (`TEE_ERROR_NOT_SUPPORTED`), `boot_cfg` 0.
+
+So the whole round trip works: the sOS read our frame from VRAM, executed it and wrote the fence back. The boot-config query itself is simply not supported by this PSP, which is harmless (amdgpu only uses it for GECC on some ASICs). We have a working command channel.
+
 ## Next code step
 
-Send the first real command through the ring (a ring frame carrying a `psp_gfx_cmd_resp`), starting with a harmless one, then decide what the display path needs from the PSP (DMUB firmware load). This needs a fence buffer and a command buffer in VRAM and the write-pointer protocol (`C2PMSG_67`).
+Use the channel for what amdgpu does next: `GFX_CMD_ID_LOAD_TOC` with the TOC component of the SOS file (2304 bytes, gives the TMR size), then `GFX_CMD_ID_SETUP_TMR`, then load the DMCUB firmware through the PSP or directly, as the display path requires. Before that, check in `amdgpu_psp.c` which of these steps DCN 3.2 really needs for a native framebuffer.
