@@ -31,6 +31,8 @@
 // Tenth stage (opt-in, writes to the GPU, rednavi_dmub_load=1 and a build with RedNavi/dmub_fw.h):
 // stops the DMCUB the VBIOS left running, builds the DMUB memory block in VRAM, backdoor-loads the
 // DAL firmware and releases the reset, mirroring dmub_srv_hw_init and the dmub_dcn32_* hooks in amdgpu.
+// rednavi_dmub_cmd=1 then sends DMUB_CMD__QUERY_FEATURE_CAPS through inbox1 and reads the reply from
+// the command slot (the mailbox ring is a 8 KiB array of 64 byte commands in the DMUB block).
 // rednavi_dmub_psp=1 first hands the signed image to the PSP (GFX_CMD_ID_LOAD_IP_FW, type DMUB) and
 // skips the backdoor load, which is how amdgpu loads it when load_type is PSP.
 // rednavi_dmub_mode=1 programs VRAM offsets instead of MC addresses for the data windows.
@@ -762,6 +764,28 @@ void RedNaviProbe::loadDmcub() {
     uint32_t st = 0, ms = 0;
     for (; ms < 3000; ms++) { st = R(S0); if ((st & 3) == 3) break; IOSleep(1); }
     IOLog("RedNavi: DMUB: after %u ms SCRATCH0=0x%08x (bit0 dal_fw, bit1 mailbox_rdy) CNTL=0x%08x CNTL2=0x%08x SEC=0x%08x\n", ms, st, R(CNTL), R(CNTL2), R(SEC));
+    if ((st & 3) == 3) {
+        uint32_t cmdArg = 0;
+        PE_parse_boot_argn("rednavi_dmub_cmd", &cmdArg, sizeof(cmdArg));
+        if (cmdArg == 1) {
+            // dmub_srv_fb_cmd_queue + dmub_srv_fb_cmd_execute: copy the command into the ring at the
+            // write pointer, then move the write pointer; the firmware advances the read pointer.
+            uint32_t wp = R(IN_WP), slot = wp % kRNDmubRbSize;
+            uint64_t slotAddr = blockOff + kRNDmubWin_MAILBOX_Off + slot;
+            for (uint32_t i = 0; i < 64; i += 4) vramWrite(slotAddr + i, 0);
+            vramWrite(slotAddr, 6u | (14u << 24));    // header: type QUERY_FEATURE_CAPS (6), payload 14 bytes
+            uint32_t newWp = (wp + 64) % kRNDmubRbSize;
+            W(IN_WP, newWp);
+            uint32_t rp = 0, waited = 0;
+            for (; waited < 1000; waited++) { rp = R(IN_RP); if (rp == newWp) break; IOSleep(1); }
+            uint32_t reply[5];
+            for (uint32_t i = 0; i < 5; i++) reply[i] = vramRead(slotAddr + i * 4);
+            IOLog("RedNavi: DMUB cmd QUERY_FEATURE_CAPS: wptr 0x%x -> 0x%x, rptr 0x%x after %u ms, slot %08x %08x %08x %08x %08x\n", wp, newWp, rp, waited, reply[0], reply[1], reply[2], reply[3], reply[4]);
+            const char *cn[9] = {"rptr_reached", "wptr", "rptr", "slot0", "slot1", "slot2", "slot3", "slot4", "outbox1_wptr"};
+            uint32_t cv[9] = {rp == newWp, newWp, rp, reply[0], reply[1], reply[2], reply[3], reply[4], R(O1_WP)};
+            rnPublish(this, "dmub-cmd", cn, cv, 9);
+        }
+    }
     const char *names[12] = {"scratch0", "scratch1", "scratch2", "cntl", "cntl2", "inbox_wptr", "inbox_rptr", "mode", "sec_cntl", "fault_addr", "timer", "scratch14"};
     uint32_t vals[12] = {st, R(0x1e4), R(0x1e5), R(CNTL), R(CNTL2), R(IN_WP), R(IN_RP), mode, R(SEC), R(0x1fa), R(0x1fd), R(S14)};
     rnPublish(this, "dmub-load", names, vals, 12);
