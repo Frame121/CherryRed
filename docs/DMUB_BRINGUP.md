@@ -44,6 +44,23 @@ The register addresses are `regDMCUB_*` in the DCN 3.2 register headers, offset 
 - Which clocks and power domains must be up before releasing reset; the VBIOS left some running, but it is not known how much (the SMU is alive, see ARCHITECTURE.md).
 - Whether the DMCUB can reach VRAM at `0x8000000000 + offset` without our setting up the MMHUB/GART context (the PSP did, but the DMCUB uses its own VMID 0 view).
 
+## Result of the DMCUB register read (probe stage 9, 2026-10-28)
+
+Read-only, `docs/logs/ioreg-rednavi-probe10-dmcub.txt` (registers at DMU base index 2):
+
+| Register | Value |
+|---|---|
+| `DMCUB_CNTL` | 0x001900c6 |
+| `DMCUB_SEC_CNTL` | 0x0 (`DMCUB_SEC_RESET` clear: not held in reset) |
+| `DMCUB_SCRATCH0` (boot status) | 0x2: `mailbox_rdy` set, `dal_fw` **clear** |
+| `DMCUB_SCRATCH1` | 0x07008748 |
+| `DMCUB_INBOX1_WPTR` / `_RPTR` | 0x440 / 0x440 |
+| `DMCUB_OUTBOX1_WPTR`, `_CNTL2`, `_SCRATCH2`, `_GPINT_DATAOUT`, `_REGION3_CW0_OFFSET` | 0 |
+
+Reading: the **VBIOS already started a DMCUB** and it is idle and healthy. Its mailbox is ready, and the inbox read and write pointers are equal at 0x440, i.e. 17 commands of 64 bytes were consumed. `dal_fw` is clear, so it is the boot-time firmware and not the DAL firmware that amdgpu loads; `dmub_dcn31_is_hw_init` would say "not initialised" because it requires \`dal_fw\`. \`SCRATCH1\` (0x07008748) is a version-like value newer than the file we have (0x07003600), which fits a firmware shipped with the card's IFWI. The \`DMCUB_CNTL\` field layout was not decoded.
+
+Consequences: reading DCN registers is safe on this card (no hang). amdgpu would reset this DMCUB and load the DAL firmware over it; we can do the same, or first try to talk to the running one. Loading ours needs the reset-and-backdoor sequence below, which writes to the card.
+
 ## Next code step
 
-Probe stage 9, read-only: read the `DMCUB_*` status registers (reset state, firmware-ready flag, scratch registers) to see whether the VBIOS already started a DMCUB. Then a first write step: build the 1184 KiB block in VRAM, backdoor load, release reset, and watch the ready flag.
+Done (see above). Next, a first write step: build the 1184 KiB block in VRAM, put the running DMCUB in reset, backdoor load our firmware, release reset and watch `SCRATCH0` for `dal_fw` and `mailbox_rdy`. Before that, read the exact write sequence in `dmub_dcn31.c` / `dmub_dcn32.c` and the register field layouts.
