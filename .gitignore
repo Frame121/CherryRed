@@ -1,3 +1,4 @@
 MacKernelSDK/
 build/
 RedNavi/psp_*.h
+RedNavi/dmub_*.h

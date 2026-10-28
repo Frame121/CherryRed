@@ -24,6 +24,11 @@
 // (DCN 3.2, register offsets from dcn_3_2_0_offset.h, all at DMU base index 2) to see whether the
 // VBIOS left a display microcontroller running. Published as "dmcub-regs".
 //
+// Tenth stage (opt-in, writes to the GPU, rednavi_dmub_load=1 and a build with RedNavi/dmub_fw.h):
+// stops the DMCUB the VBIOS left running, builds the DMUB memory block in VRAM, backdoor-loads the
+// DAL firmware and releases the reset, mirroring dmub_srv_hw_init and the dmub_dcn32_* hooks in amdgpu.
+// rednavi_dmub_mode=1 programs VRAM offsets instead of MC addresses for the data windows.
+//
 // Eighth stage (read-only, always on): reads the VBIOS image from the PCI expansion ROM, which the
 // DMUB framebuffer window needs (amdgpu_dm_dmub.c copies adev->bios into DMUB_WINDOW_3_VBIOS).
 // Published as the "vbios" property (decode with tools/check_vbios.py). Enabling the ROM decode
@@ -39,6 +44,9 @@
 
 #ifdef RN_HAVE_PSP_FW
 #include "psp_fw.h"
+#endif
+#ifdef RN_HAVE_DMUB_FW
+#include "dmub_fw.h"
 #endif
 
 #define kRNRegBar          5          // MMIO registers (512 KB on Navi 3x)
@@ -87,6 +95,18 @@
 #define kRNHwIdMp1            1
 #define kRNHwIdMmhub          34
 #define kRNHwIdDmu            271
+#define kRNDmubBlockVramOff   0x50000000ull    // 1.25 GB into VRAM
+#define kRNDmubGpintStopFw    0x10020000u      // status 1, command DMUB_GPINT__STOP_FW (2)
+#define kRNDmubStopResponse   0xDEADDEADu
+#define kRNDmubCw0Base        0x60000000u
+#define kRNDmubCw1Base        0x61000000u
+#define kRNDmubCw3Base        0x63000000u
+#define kRNDmubCw4Base        0x64000000u
+#define kRNDmubCw5Base        0x65000000u
+#define kRNDmubCw6Base        0x66000000u
+#define kRNDmubRegion5Base    0xA0000000u
+#define kRNDmubRbSize         8192u
+#define kRNDmubTraceEntryOff  16u
 #define kRNHwIdMp0            255
 
 // Mailbox registers: dword offsets from the IP base address, taken from mp_13_0_0_offset.h
@@ -144,6 +164,7 @@ class RedNaviProbe : public IOService {
     IOPCIDevice *pci {nullptr};
     IOMemoryMap *regs {nullptr};
     OSData *disc {nullptr};   // copy of the IP discovery table
+    OSData *vbiosCopy {nullptr};   // VBIOS image read from the PCI ROM
 
     uint32_t rd(uint32_t off) { return *reinterpret_cast<volatile uint32_t *>(regs->getVirtualAddress() + off); }
     void wr(uint32_t off, uint32_t v) { *reinterpret_cast<volatile uint32_t *>(regs->getVirtualAddress() + off) = v; }
@@ -165,6 +186,7 @@ class RedNaviProbe : public IOService {
     void dumpPci();
     void dumpDiscovery();
     void dumpVbios();
+    void loadDmcub();
     bool ipBase(uint16_t hwId, uint32_t *base, uint32_t idx = 0);
     bool loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version);
     void loadPspChain();
@@ -326,7 +348,7 @@ void RedNaviProbe::dumpVbios() {
         if (blob) {
             for (uint32_t i = 0; i < size; i++) { uint8_t b = p[i]; blob->appendBytes(&b, 1); }
             setProperty("vbios", blob);
-            blob->release();
+            vbiosCopy = blob;
             IOLog("RedNavi: VBIOS image of %u bytes published\n", size);
         }
     }
@@ -524,6 +546,128 @@ void RedNaviProbe::sendPspLoadToc() {
 #endif
 }
 
+void RedNaviProbe::loadDmcub() {
+#ifdef RN_HAVE_DMUB_FW
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_dmub_load", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: DMUB load not requested (boot-arg rednavi_dmub_load=1)\n");
+        return;
+    }
+    uint32_t mode = 0;
+    PE_parse_boot_argn("rednavi_dmub_mode", &mode, sizeof(mode));
+    uint32_t dmu = 0;
+    if (!ipBase(kRNHwIdDmu, &dmu, 2)) { IOLog("RedNavi: DMUB: no DMU base 2\n"); return; }
+    if (!vbiosCopy || vbiosCopy->getLength() != kRNDmubVbiosSize) { IOLog("RedNavi: DMUB: VBIOS size does not match the firmware header\n"); return; }
+    uint32_t regLen = static_cast<uint32_t>(regs->getLength());
+    if ((dmu + 0x21a) * 4 + 4 > regLen) { IOLog("RedNavi: DMUB: registers outside BAR\n"); return; }
+
+    auto R = [&](uint32_t dword) { return rd((dmu + dword) * 4); };
+    auto W = [&](uint32_t dword, uint32_t v) { wr((dmu + dword) * 4, v); };
+    auto U = [&](uint32_t dword, uint32_t mask, uint32_t v) { W(dword, (R(dword) & ~mask) | (v & mask)); };
+    // dword offsets from dcn_3_2_0_offset.h, all at DMU base index 2
+    const uint32_t CNTL = 0x1f6, CNTL2 = 0x200, SEC = 0x1ce, S0 = 0x1e3, S7 = 0x1ea, S14 = 0x1f1, S15 = 0x1f2;
+    const uint32_t GPINT1 = 0x1f8, RST = 0x342;
+    const uint32_t IN_BASE = 0x1d4, IN_SIZE = 0x1d5, IN_WP = 0x1d6, IN_RP = 0x1d7;
+    const uint32_t O0_BASE = 0x1d8, O0_SIZE = 0x1d9, O0_WP = 0x1da, O0_RP = 0x1db;
+    const uint32_t O1_BASE = 0x1dc, O1_SIZE = 0x1dd, O1_WP = 0x1de, O1_RP = 0x1df;
+    auto CWOFF = [](uint32_t n) { return 0x1b5 + 2 * n; };   // REGIONx_CWn_OFFSET (+1 is _HIGH)
+    auto CWBASE = [](uint32_t n) { return 0x1a5 + n; };
+    auto CWTOP = [](uint32_t n) { return 0x1ad + n; };
+    const uint32_t EN = 0x80000000u, ADDR_MASK = 0x1FFFFFFFu;
+
+    IOLog("RedNavi: DMUB: before: CNTL=0x%08x CNTL2=0x%08x SEC=0x%08x SCRATCH0=0x%08x\n", R(CNTL), R(CNTL2), R(SEC), R(S0));
+
+    // dmub_dcn32_reset: ask the running firmware to stop, then hold the DMCUB in reset.
+    bool enabled = (R(CNTL) >> 16) & 1, inReset = R(CNTL2) & 1;
+    if (enabled && !inReset) {
+        W(GPINT1, kRNDmubGpintStopFw);
+        uint32_t i = 0;
+        for (; i < 1000; i++) { if (R(S7) == kRNDmubStopResponse) break; IOSleep(1); }
+        IOLog("RedNavi: DMUB: STOP_FW response %s after %u ms (SCRATCH7=0x%08x)\n", R(S7) == kRNDmubStopResponse ? "received" : "NOT received", i, R(S7));
+        for (; i < 1000; i++) { if ((R(CNTL) >> 20) & 1) break; IOSleep(1); }
+    }
+    if (enabled) {
+        U(CNTL2, 1, 1);
+        IODelay(1);
+        U(CNTL, 1u << 16, 0);
+    }
+    for (uint32_t n = 2; n <= 7; n++) U(CWTOP(n), EN, 0);
+    W(IN_RP, 0); W(IN_WP, 0); W(O1_RP, 0); W(O1_WP, 0); W(O0_RP, 0); W(O0_WP, 0);
+    W(S0, 0);
+    W(GPINT1, 0);
+
+    // Build the memory block (the windows of tools/dmub_layout.py) in VRAM.
+    const uint64_t blockOff = kRNDmubBlockVramOff;
+    for (uint32_t off = 0; off < kRNDmubBlockSize; off += 4) vramWrite(blockOff + off, 0);
+    for (uint32_t off = 0; off < kRNDmubInstSize; off += 4) {
+        uint32_t v = 0;
+        for (uint32_t k = 0; k < 4 && off + k < kRNDmubInstSize; k++) v |= static_cast<uint32_t>(kRNDmubInst[off + k]) << (8 * k);
+        vramWrite(blockOff + kRNDmubWin_INST_CONST_Off + off, v);
+    }
+    const uint8_t *vb = static_cast<const uint8_t *>(vbiosCopy->getBytesNoCopy());
+    for (uint32_t off = 0; off < kRNDmubVbiosSize; off += 4) {
+        uint32_t v = 0;
+        for (uint32_t k = 0; k < 4 && off + k < kRNDmubVbiosSize; k++) v |= static_cast<uint32_t>(vb[off + k]) << (8 * k);
+        vramWrite(blockOff + kRNDmubWin_VBIOS_Off + off, v);
+    }
+    uint32_t bad = 0;
+    for (uint32_t off = 0; off < kRNDmubInstSize; off += 4) {
+        uint32_t v = 0;
+        for (uint32_t k = 0; k < 4 && off + k < kRNDmubInstSize; k++) v |= static_cast<uint32_t>(kRNDmubInst[off + k]) << (8 * k);
+        if (vramRead(blockOff + kRNDmubWin_INST_CONST_Off + off) != v) bad++;
+    }
+    IOLog("RedNavi: DMUB: block of %u bytes built at VRAM +0x%llx, %u mismatching code dwords\n", kRNDmubBlockSize, blockOff, bad);
+    if (bad) return;
+
+    auto addr = [&](uint32_t winOff) -> uint64_t { return mode ? blockOff + winOff : kRNVramMcBase + blockOff + winOff; };
+    auto window = [&](uint32_t n, uint64_t offset, uint32_t base, uint32_t top) {
+        W(CWOFF(n), static_cast<uint32_t>(offset));
+        W(CWOFF(n) + 1, static_cast<uint32_t>(offset >> 32));
+        W(CWBASE(n), base & ADDR_MASK);
+        W(CWTOP(n), (top & ADDR_MASK) | EN);
+    };
+
+    // dmub_dcn32_backdoor_load: code and stack windows, addressed as VRAM offsets (fb_base removed).
+    U(SEC, 1u << 16, 1u << 16);                 // DMCUB_SEC_RESET = 1
+    U(CNTL, 1u << 16, 0);
+    window(0, blockOff + kRNDmubWin_INST_CONST_Off, kRNDmubCw0Base, kRNDmubCw0Base + kRNDmubWin_INST_CONST_Size - 1);
+    window(1, blockOff + kRNDmubWin_STACK_Off, kRNDmubCw1Base, kRNDmubCw1Base + kRNDmubWin_STACK_Size - 1);
+    U(SEC, (1u << 16) | (0xFFu << 8), 0x20u << 8);   // DMCUB_SEC_RESET = 0, DMCUB_MEM_UNIT_ID = 0x20
+
+    // dmub_dcn32_enable_dmub_boot_options and setup_windows: VBIOS, mailbox, trace, firmware state.
+    W(S14, 0);
+    window(3, addr(kRNDmubWin_VBIOS_Off), kRNDmubCw3Base, kRNDmubCw3Base + kRNDmubWin_VBIOS_Size);
+    window(4, addr(kRNDmubWin_MAILBOX_Off), kRNDmubCw4Base, kRNDmubCw4Base + kRNDmubWin_MAILBOX_Size);
+    window(5, addr(kRNDmubWin_TRACEBUFF_Off), kRNDmubCw5Base, kRNDmubCw5Base + kRNDmubWin_TRACEBUFF_Size);
+    uint64_t t = addr(kRNDmubWin_TRACEBUFF_Off);   // REGION5 aliases the trace buffer
+    W(0x198, static_cast<uint32_t>(t));
+    W(0x199, static_cast<uint32_t>(t >> 32));
+    W(0x1a2, ((kRNDmubWin_TRACEBUFF_Size - 1) & ADDR_MASK) | EN);
+    window(6, addr(kRNDmubWin_FW_STATE_Off), kRNDmubCw6Base, kRNDmubCw6Base + kRNDmubWin_FW_STATE_Size);
+    W(O0_BASE, kRNDmubRegion5Base + kRNDmubTraceEntryOff);
+    W(O0_SIZE, kRNDmubWin_TRACEBUFF_Size - kRNDmubTraceEntryOff);
+    W(IN_BASE, kRNDmubCw4Base);
+    W(IN_SIZE, kRNDmubRbSize);
+    W(O1_BASE, kRNDmubCw4Base + kRNDmubRbSize);
+    W(O1_SIZE, kRNDmubRbSize);
+
+    // dmub_dcn32_reset_release
+    U(RST, 1u << 8, 0);                         // DMUIF_SOFT_RESET = 0
+    W(S15, 0);
+    U(CNTL, (1u << 16) | (1u << 19), (1u << 16) | (1u << 19));   // DMCUB_ENABLE, DMCUB_TRACEPORT_EN
+    U(CNTL2, 1, 0);                             // DMCUB_SOFT_RESET = 0
+
+    uint32_t st = 0, ms = 0;
+    for (; ms < 3000; ms++) { st = R(S0); if ((st & 3) == 3) break; IOSleep(1); }
+    IOLog("RedNavi: DMUB: after %u ms SCRATCH0=0x%08x (bit0 dal_fw, bit1 mailbox_rdy) CNTL=0x%08x CNTL2=0x%08x SEC=0x%08x\n", ms, st, R(CNTL), R(CNTL2), R(SEC));
+    const char *names[8] = {"scratch0", "scratch1", "scratch2", "cntl", "cntl2", "inbox_wptr", "inbox_rptr", "mode"};
+    uint32_t vals[8] = {st, R(0x1e4), R(0x1e5), R(CNTL), R(CNTL2), R(IN_WP), R(IN_RP), mode};
+    rnPublish(this, "dmub-load", names, vals, 8);
+#else
+    IOLog("RedNavi: built without dmub_fw.h, DMUB load not available\n");
+#endif
+}
+
 bool RedNaviProbe::start(IOService *provider) {
     if (!IOService::start(provider)) return false;
     pci = OSDynamicCast(IOPCIDevice, provider);
@@ -545,6 +689,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
     dumpRegs(kRNDmcubRegs, sizeof(kRNDmcubRegs) / sizeof(kRNDmcubRegs[0]), "dmcub-regs");
     loadPspChain();
+    loadDmcub();
     if (createPspRing()) {
         sendPspBootCfgGet();
         sendPspLoadToc();
@@ -555,6 +700,7 @@ bool RedNaviProbe::start(IOService *provider) {
 
 void RedNaviProbe::stop(IOService *provider) {
     if (disc) { disc->release(); disc = nullptr; }
+    if (vbiosCopy) { vbiosCopy->release(); vbiosCopy = nullptr; }
     if (regs) { regs->release(); regs = nullptr; }
     IOService::stop(provider);
 }

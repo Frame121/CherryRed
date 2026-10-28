@@ -50,32 +50,41 @@ def find_meta(inst):
     return None
 
 
-def main():
-    if len(sys.argv) != 3:
-        sys.exit(__doc__)
-    b = open(sys.argv[1], "rb").read()
-    uoff, = struct.unpack_from("<I", b, 24)
-    inst_bytes, bss_bytes = struct.unpack_from("<II", b, 32)
-    inst_all = b[uoff + PSP_HEADER:uoff + inst_bytes]
-    vbios = int(sys.argv[2])
+def layout(fw, vbios):
+    """Return (meta, inst_bytes, windows, total) for a DMCUB firmware image and a VBIOS size.
+
+    windows is a list of (name, base, size) with size already rounded to 64 bytes."""
+    uoff, = struct.unpack_from("<I", fw, 24)
+    inst_bytes, bss_bytes = struct.unpack_from("<II", fw, 32)
+    inst_all = fw[uoff + PSP_HEADER:uoff + inst_bytes]
     meta = find_meta(inst_all)
     if not meta:
-        sys.exit("firmware meta block not found")
-    print(f"firmware version 0x{meta['fw_version']:08x}, inst_const {meta['inst_size']} bytes "
-          f"(footer {meta['footer']}), fw_region {meta['fw_region_size']}, trace {meta['trace_buffer_size']}, "
-          f"shared state {meta['shared_state_size']}")
-
+        raise ValueError("firmware meta block not found")
     sizes = [meta["inst_size"], STACK + CONTEXT, bss_bytes, vbios, MAILBOX, meta["trace_buffer_size"],
              meta["fw_region_size"], align(SCRATCH, 64), align(IB_MEM, 64),
              max(SHARED_STATE_HDR, meta["shared_state_size"]), LSDMA, align(CURSOR_OFFLOAD, 64)]
+    windows = []
     top = 0
-    print(f"{'window':<16}{'offset':>10}{'size':>10}")
     for name, size in zip(NAMES, sizes):
         base = align(top, 256)
         end = base + align(size, 64)
-        print(f"{name:<16}{base:>#10x}{end - base:>10}")
+        windows.append((name, base, end - base))
         top = end
-    print(f"total {align(top, 4096)} bytes ({align(top, 4096) / 1024:.0f} KiB)")
+    return meta, inst_all[:meta["inst_size"]], windows, align(top, 4096)
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    fw = open(sys.argv[1], "rb").read()
+    meta, _inst, windows, total = layout(fw, int(sys.argv[2]))
+    print(f"firmware version 0x{meta['fw_version']:08x}, inst_const {meta['inst_size']} bytes "
+          f"(footer {meta['footer']}), fw_region {meta['fw_region_size']}, trace {meta['trace_buffer_size']}, "
+          f"shared state {meta['shared_state_size']}")
+    print(f"{'window':<16}{'offset':>10}{'size':>10}")
+    for name, base, size in windows:
+        print(f"{name:<16}{base:>#10x}{size:>10}")
+    print(f"total {total} bytes ({total / 1024:.0f} KiB)")
 
 
 if __name__ == "__main__":
