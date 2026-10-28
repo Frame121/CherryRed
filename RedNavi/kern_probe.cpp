@@ -20,6 +20,11 @@
 // PSP firmware file; the response carries the TMR size. amdgpu does not send SETUP_TMR on this PSP
 // (boot_time_tmr and autoload are both set for MP0 13.0.10, see docs/PSP_BRINGUP.md).
 //
+// Eighth stage (read-only, always on): reads the VBIOS image from the PCI expansion ROM, which the
+// DMUB framebuffer window needs (amdgpu_dm_dmub.c copies adev->bios into DMUB_WINDOW_3_VBIOS).
+// Published as the "vbios" property (decode with tools/check_vbios.py). Enabling the ROM decode
+// bit in config space is the only write.
+//
 // Without that boot-arg nothing is written to the GPU except the MM_INDEX/MM_DATA window used to
 // read VRAM.
 
@@ -136,6 +141,7 @@ class RedNaviProbe : public IOService {
 
     void dumpPci();
     void dumpDiscovery();
+    void dumpVbios();
     bool ipBase(uint16_t hwId, uint32_t *base);
     bool loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version);
     void loadPspChain();
@@ -274,6 +280,36 @@ void RedNaviProbe::dumpRegs(const RNMailboxReg *list, size_t count, const char *
 }
 
 // Copy one component into the VRAM staging buffer and run the bootloader handshake.
+// Read the legacy x86 image of the PCI expansion ROM (amdgpu_read_bios / amdgpu_read_platform_bios).
+void RedNaviProbe::dumpVbios() {
+    uint32_t romReg = pci->configRead32(0x30);
+    IODeviceMemory *rom = pci->getDeviceMemoryWithRegister(0x30);
+    IOLog("RedNavi: ROM BAR register = 0x%08x, device memory %s\n", romReg, rom ? "present" : "absent");
+    if (!rom) return;
+    IOLog("RedNavi: ROM phys 0x%llx size 0x%llx\n", (uint64_t)rom->getPhysicalAddress(), (uint64_t)rom->getLength());
+
+    pci->configWrite32(0x30, romReg | 1);                    // expansion ROM enable
+    IOMemoryMap *map = pci->mapDeviceMemoryWithRegister(0x30);
+    if (!map) { IOLog("RedNavi: could not map the expansion ROM\n"); pci->configWrite32(0x30, romReg); return; }
+
+    const volatile uint8_t *p = reinterpret_cast<const volatile uint8_t *>(map->getVirtualAddress());
+    uint32_t mapLen = static_cast<uint32_t>(map->getLength());
+    uint32_t sig = static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8);
+    uint32_t size = static_cast<uint32_t>(p[2]) * 512;       // legacy image size in 512 byte units
+    IOLog("RedNavi: ROM signature 0x%04x (expect 0xaa55), first image %u bytes, mapping %u bytes\n", sig, size, mapLen);
+    if (sig == 0xAA55 && size && size <= mapLen && size <= (1u << 20)) {
+        OSData *blob = OSData::withCapacity(size);
+        if (blob) {
+            for (uint32_t i = 0; i < size; i++) { uint8_t b = p[i]; blob->appendBytes(&b, 1); }
+            setProperty("vbios", blob);
+            blob->release();
+            IOLog("RedNavi: VBIOS image of %u bytes published\n", size);
+        }
+    }
+    map->release();
+    pci->configWrite32(0x30, romReg);                        // leave the ROM decode as we found it
+}
+
 bool RedNaviProbe::loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version) {
     uint32_t r35 = (mp0 + kRNMp0C2pmsg35) * 4, r36 = (mp0 + kRNMp0C2pmsg36) * 4, r58 = (mp0 + kRNMp0C2pmsg58) * 4, r81 = (mp0 + kRNMp0C2pmsg81) * 4;
 
@@ -480,6 +516,7 @@ bool RedNaviProbe::start(IOService *provider) {
     IOLog("RedNavi: registers mapped, %llu KB\n", (uint64_t)regs->getLength() >> 10);
 
     dumpDiscovery();
+    dumpVbios();
     dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
     loadPspChain();
