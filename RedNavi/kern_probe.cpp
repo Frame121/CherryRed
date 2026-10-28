@@ -3,8 +3,10 @@
 // and the IP discovery table (the authoritative list of IP block versions).
 //
 // Second stage: reads the PSP (MP0) and SMU (MP1) mailbox registers, using the base addresses
-// found in that table, to show what the VBIOS left running. Results are logged and published
-// as the "ip-discovery" and "mailbox-regs" properties (ioreg -rn RedNaviProbe -l -x).
+// found in that table, to show what the VBIOS left running. Third stage: reads the MMHUB
+// framebuffer location registers, which give the VRAM address as the GPU itself sees it (needed
+// to hand buffers to the PSP bootloader). Results are logged and published as the
+// "ip-discovery", "mailbox-regs" and "mmhub-regs" properties (ioreg -rn RedNaviProbe -l -x).
 //
 // Nothing is written to the GPU except the MM_INDEX/MM_DATA window used to read VRAM.
 
@@ -33,6 +35,7 @@
 
 // Hardware IDs in the discovery table (soc15_hw_ip.h).
 #define kRNHwIdMp1            1
+#define kRNHwIdMmhub          34
 #define kRNHwIdMp0            255
 
 // Mailbox registers: dword offsets from the IP base address, taken from mp_13_0_0_offset.h
@@ -53,6 +56,17 @@ static const RNMailboxReg kRNMailboxRegs[] = {
     {"MP1_C2PMSG_66", kRNHwIdMp1, 0x282},  // SMU message
     {"MP1_C2PMSG_82", kRNHwIdMp1, 0x292},  // SMU argument
     {"MP1_C2PMSG_90", kRNHwIdMp1, 0x29a},  // SMU response, 1 means OK
+};
+
+// MMHUB 3.0 registers (mmhub_3_0_0_offset.h). FB_BASE, FB_TOP and FB_OFFSET are 24-bit values in
+// units of 16 MB (mmhub_v3_0_get_fb_location and _get_mc_fb_offset shift them left by 24).
+static const RNMailboxReg kRNMmhubRegs[] = {
+    {"MMHUB_FB_LOCATION_BASE", kRNHwIdMmhub, 0x8ec},
+    {"MMHUB_FB_LOCATION_TOP",  kRNHwIdMmhub, 0x8ed},
+    {"MMHUB_FB_OFFSET",        kRNHwIdMmhub, 0x8d7},
+    {"MMHUB_AGP_BASE",         kRNHwIdMmhub, 0x8f0},
+    {"MMHUB_AGP_BOT",          kRNHwIdMmhub, 0x8ef},
+    {"MMHUB_AGP_TOP",          kRNHwIdMmhub, 0x8ee},
 };
 
 class RedNaviProbe : public IOService {
@@ -76,7 +90,7 @@ class RedNaviProbe : public IOService {
     void dumpPci();
     void dumpDiscovery();
     bool ipBase(uint16_t hwId, uint32_t *base);
-    void dumpMailboxes();
+    void dumpRegs(const RNMailboxReg *list, size_t count, const char *property);
 
 public:
     bool start(IOService *provider) override;
@@ -179,12 +193,13 @@ bool RedNaviProbe::ipBase(uint16_t hwId, uint32_t *base) {
     return false;
 }
 
-void RedNaviProbe::dumpMailboxes() {
+void RedNaviProbe::dumpRegs(const RNMailboxReg *list, size_t count, const char *property) {
     OSDictionary *out = OSDictionary::withCapacity(16);
     if (!out) return;
     uint32_t regLen = static_cast<uint32_t>(regs->getLength());
 
-    for (const RNMailboxReg &r : kRNMailboxRegs) {
+    for (size_t i = 0; i < count; i++) {
+        const RNMailboxReg &r = list[i];
         uint32_t base = 0;
         if (!ipBase(r.hwId, &base)) {
             IOLog("RedNavi: %s: hardware ID %u not in discovery table\n", r.name, r.hwId);
@@ -197,10 +212,10 @@ void RedNaviProbe::dumpMailboxes() {
         }
         uint32_t v = rd(off);
         IOLog("RedNavi: %s @0x%05x = 0x%08x\n", r.name, off, v);
-        OSNumber *n = OSNumber::withNumber(v, 32);
+        OSNumber *n = OSNumber::withNumber(static_cast<uint64_t>(v), 64);
         if (n) { out->setObject(r.name, n); n->release(); }
     }
-    setProperty("mailbox-regs", out);
+    setProperty(property, out);
     out->release();
 }
 
@@ -220,7 +235,8 @@ bool RedNaviProbe::start(IOService *provider) {
     IOLog("RedNavi: registers mapped, %llu KB\n", (uint64_t)regs->getLength() >> 10);
 
     dumpDiscovery();
-    dumpMailboxes();
+    dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");
+    dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
     registerService();
     return true;
 }

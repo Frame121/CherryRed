@@ -30,9 +30,13 @@ For each component in this order: KDB, SPL (the KDB image again, command `LOAD_T
 
 Afterwards the driver creates the GPCOM ring (`C2PMSG_64`, `_67`, `_69`, `_70`, `_71`) and sends TMR setup, which needs more of the memory controller than the probe has touched.
 
+## Values now known
+
+- Bootloader commands (`amdgpu_psp.h`): `LOAD_SYSDRV` 0x10000, `LOAD_SOSDRV` 0x20000, `LOAD_KEY_DATABASE` 0x80000, `LOAD_SOCDRV` 0xB0000, `LOAD_DBGDRV` 0xC0000, `LOAD_INTFDRV` 0xD0000, `LOAD_RASDRV` 0xE0000, `LOAD_TOS_SPL_TABLE` 0x10000000, `LOAD_SPDMDRV` 0x20000000.
+- VRAM as the GPU sees it (probe stage 3, `docs/logs/ioreg-rednavi-probe3.txt`): `MMHUB_FB_LOCATION_BASE` = 0x8000, `_TOP` = 0x83FF, `FB_OFFSET` = 0, in units of 16 MB. So the MC address of VRAM starts at `0x8000 << 24` = 0x80_0000_0000 and spans 16 GB, matching the VRAM size. A buffer at VRAM offset `X` has MC address `0x8000000000 + X`, and `C2PMSG_36` takes that value `>> 20`. AGP is unused (all zero).
+
 ## What is still unknown
 
-- The `PSP_BL__*` command values and the MC address of VRAM (framebuffer base from the MMHUB registers). Both must be read from the amdgpu headers before any write.
 - Whether the card accepts this sequence from a cold VBIOS state without the TMR and the rest of the driver init that Linux does first. Linux does ASIC init (`atom` tables) before PSP; we have not.
 - This is the first step that **writes** to the GPU and can hang it. Run only with the UHD 630 as the display.
 
