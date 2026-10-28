@@ -45,6 +45,13 @@ def main():
         for name, cmd, ver, n in entries:
             f.write(f'    {{"{name}", 0x{cmd:x}, 0x{ver:x}, kRnFw_{name}, {n}}},\n')
         f.write("};\n")
+        if "TOC" in found:
+            ver, data = found["TOC"]
+            f.write("static const unsigned char kRNPspToc[] = {\n")
+            for j in range(0, len(data), 16):
+                f.write("    " + ", ".join(f"0x{x:02x}" for x in data[j:j + 16]) + ",\n")
+            f.write("};\n")
+            print(f"TOC: {len(data)} bytes, version 0x{ver:x} (LOAD_TOC)")
 
 
 if __name__ == "__main__":
