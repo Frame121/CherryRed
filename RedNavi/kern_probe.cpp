@@ -37,6 +37,12 @@
 // first engine that ACKs it then reads the EDID with I2C-over-AUX at address 0x50. Published as
 // "aux-probe" (per-engine status), "dpcd" and "edid" (tools/decode_edid.py).
 //
+// Thirteenth stage (opt-in, rednavi_dp_train=1, writes DCN and the sink): enables the DisplayPort transmitter
+// of path 0 through the VBIOS command table (via DMUB) and runs the DP link training (clock recovery with
+// TPS1, channel equalisation with TPS3 or TPS2) against the monitor over AUX4, the way link_dp_training.c does.
+// The result is the sink's own verdict: DPCD 0x202-0x204 (CR_DONE, CHANNEL_EQ_DONE, SYMBOL_LOCKED, align).
+// Published as "dp-train".
+//
 // Tenth stage (opt-in, writes to the GPU, rednavi_dmub_load=1 and a build with RedNavi/dmub_fw.h):
 // stops the DMCUB the VBIOS left running, builds the DMUB memory block in VRAM, backdoor-loads the
 // DAL firmware and releases the reset, mirroring dmub_srv_hw_init and the dmub_dcn32_* hooks in amdgpu.
@@ -235,6 +241,10 @@ class RedNaviProbe : public IOService {
     void probeAux();
     bool dmubSend(const uint8_t *cmd, uint32_t len, uint32_t reply[16]);
     void dpInit();
+    void dpTrain();
+    bool dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k);
+    bool dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n);
+    bool dpcdRead(uint32_t eng, uint32_t addr, uint8_t *d, uint32_t n);
     bool auxTransfer(uint32_t eng, uint32_t action, uint32_t addr, uint8_t *data, uint32_t len, uint32_t *status, uint32_t *reply);
     void dmcubSnapshot(const char *property);
     bool ipBase(uint16_t hwId, uint32_t *base, uint32_t idx = 0);
@@ -508,6 +518,124 @@ void RedNaviProbe::dpInit() {
     const char *n[3] = {"consumed", "slot0", "slot1"};
     uint32_t v[3] = {ok, reply[0], reply[1]};
     rnPublish(this, "dp-init", n, v, 3);
+}
+
+bool RedNaviProbe::dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n) {
+    uint8_t buf[16];
+    if (n > 16) return false;
+    memcpy(buf, d, n);
+    uint32_t st, rep;
+    return auxTransfer(eng, 0x80, addr, buf, n, &st, &rep);
+}
+
+bool RedNaviProbe::dpcdRead(uint32_t eng, uint32_t addr, uint8_t *d, uint32_t n) {
+    uint32_t st, rep;
+    return auxTransfer(eng, 0x90, addr, d, n, &st, &rep);
+}
+
+// DIG1_TRANSMITTER_CONTROL for path 0 (phy id 4, HPD 5, connector id 19) through the DMCUB.
+bool RedNaviProbe::dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k) {
+    uint8_t cmd[64] = {};
+    cmd[0] = 128; cmd[1] = 1; cmd[3] = 16;
+    cmd[4 + 0] = 4; cmd[4 + 1] = action; cmd[4 + 2] = modeOrLane; cmd[4 + 3] = lanes;
+    memcpy(cmd + 4 + 4, &symclk10k, 4);
+    cmd[4 + 8] = 5; cmd[4 + 9] = 0; cmd[4 + 10] = 19;
+    uint32_t reply[16];
+    return dmubSend(cmd, 20, reply);
+}
+
+void RedNaviProbe::dpTrain() {
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_dp_train", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: DP link training not requested (boot-arg rednavi_dp_train=1)\n");
+        return;
+    }
+    if (!dmubUp) { IOLog("RedNavi: DP training: DMCUB not running\n"); return; }
+    const uint32_t aux = 4, lanes = 4, rateCode = 0x14, symclk10k = rateCode * 27000 / 10;   // HBR2, 540000 kHz symbol clock
+    uint32_t dmu = dmubDmu;
+    // DP4 back end and DIG4 registers (dcn_3_2_0_offset.h, base index 2)
+    const uint32_t DP_CONFIG = 0x250b, DP_LINK_CNTL = 0x2508, DP_DPHY_CNTL = 0x2517, DP_PATTERN_SEL = 0x2518, DP_SCRAM = 0x251e;
+    const uint32_t DIG_BE_CNTL = 0x24b1;
+    auto R = [&](uint32_t d) { return rd((dmu + d) * 4); };
+    auto W = [&](uint32_t d, uint32_t v) { wr((dmu + d) * 4, v); };
+    auto U = [&](uint32_t d, uint32_t mask, uint32_t v) { W(d, (R(d) & ~mask) | (v & mask)); };
+
+    uint8_t caps[16] = {};
+    if (!dpcdRead(aux, 0, caps, 16)) { IOLog("RedNavi: DP training: no DPCD\n"); return; }
+    bool tps3 = (caps[2] & 0x40) != 0, enhanced = (caps[2] & 0x80) != 0;
+
+    // Sink and source setup (dp_enable_link_phy, enc1_configure_encoder, dcn10_link_encoder_setup)
+    uint8_t d0 = 1;
+    dpcdWrite(aux, 0x600, &d0, 1);                                          // SET_POWER: D0
+    U(DIG_BE_CNTL, 0xFu << 16, 0);                                          // DIG_MODE = DP
+    U(DP_CONFIG, 3, lanes - 1);                                             // DP_UDI_LANES
+    U(DP_SCRAM, 1u << 4, 1u << 4);                                          // DPHY_SCRAMBLER_ADVANCE
+    uint8_t link[2] = {static_cast<uint8_t>(rateCode), static_cast<uint8_t>(lanes | (enhanced ? 0x80 : 0))};
+    dpcdWrite(aux, 0x100, link, 2);                                         // LINK_BW_SET, LANE_COUNT_SET
+    uint8_t ds = 0; dpcdWrite(aux, 0x107, &ds, 1);                          // no downspread
+    uint8_t enc = 1; dpcdWrite(aux, 0x108, &enc, 1);                        // 8b/10b
+    bool txOk = dpTx(1, 0, static_cast<uint8_t>(lanes), symclk10k);          // ATOM_TRANSMITTER_ACTION_ENABLE
+    IOLog("RedNavi: DP training: transmitter ENABLE %s, DIG4 BE_CNTL=0x%08x, link %02x %02x\n", txOk ? "consumed" : "NOT consumed", R(DIG_BE_CNTL), link[0], link[1]);
+
+    uint8_t vs[4] = {0, 0, 0, 0}, pe[4] = {0, 0, 0, 0};
+    uint8_t st[6] = {};
+    bool crOk = false, eqOk = false;
+    uint32_t crTries = 0, eqTries = 0;
+    auto laneSet = [&](uint32_t i) -> uint8_t { return static_cast<uint8_t>(vs[i] | (pe[i] << 3) | (vs[i] == 3 ? 4 : 0) | (pe[i] == 3 ? 0x20 : 0)); };
+    auto applyDrive = [&](void) {
+        for (uint32_t i = 0; i < lanes; i++) dpTx(11, laneSet(i), static_cast<uint8_t>(lanes), symclk10k);   // SETUP_VSEMPH
+    };
+    auto readStatus = [&]() { dpcdRead(aux, 0x202, st, 6); };
+    auto adjust = [&]() {
+        for (uint32_t i = 0; i < lanes; i++) {
+            uint8_t req = st[4 + i / 2];
+            uint8_t sh = (i & 1) ? 4 : 0;
+            vs[i] = (req >> sh) & 3;
+            pe[i] = (req >> (sh + 2)) & 3;
+            if (vs[i] + pe[i] > 3) pe[i] = 3 - vs[i];
+        }
+    };
+
+    // Clock recovery: TPS1
+    U(DP_PATTERN_SEL, 3, 0);
+    U(DP_LINK_CNTL, 1u << 4, 0);                                            // training not complete
+    U(DP_DPHY_CNTL, 1u << 16, 0);                                           // PHY bypass off: send the training pattern
+    for (crTries = 1; crTries <= 8 && !crOk; crTries++) {
+        applyDrive();
+        uint8_t tr[5] = {0x21, laneSet(0), laneSet(1), laneSet(2), laneSet(3)};   // TPS1, scrambling disabled, lane drive
+        dpcdWrite(aux, 0x102, tr, 5);
+        IOSleep(1);                                                         // TRAINING_AUX_RD_INTERVAL: 100 us minimum
+        readStatus();
+        crOk = (st[0] & 1) && (st[0] & 0x10) && (st[1] & 1) && (st[1] & 0x10);
+        if (!crOk) adjust();
+    }
+    if (crOk) {
+        // Channel equalisation: TPS3 when the sink has it (HBR2), else TPS2
+        U(DP_PATTERN_SEL, 3, tps3 ? 2 : 1);
+        uint8_t pat = tps3 ? 0x23 : 0x22;
+        for (eqTries = 1; eqTries <= 6 && !eqOk; eqTries++) {
+            applyDrive();
+            uint8_t tr[5] = {pat, laneSet(0), laneSet(1), laneSet(2), laneSet(3)};
+            dpcdWrite(aux, 0x102, tr, 5);
+            IOSleep(1);                                                     // 400 us default interval
+            readStatus();
+            bool cr = (st[0] & 1) && (st[0] & 0x10) && (st[1] & 1) && (st[1] & 0x10);
+            bool eq = (st[0] & 2) && (st[0] & 0x20) && (st[1] & 2) && (st[1] & 0x20);
+            bool sl = (st[0] & 4) && (st[0] & 0x40) && (st[1] & 4) && (st[1] & 0x40);
+            eqOk = cr && eq && sl && (st[2] & 1);
+            if (!eqOk) adjust();
+        }
+    }
+    uint8_t off = 0;
+    dpcdWrite(aux, 0x102, &off, 1);                                         // training pattern off
+    if (crOk && eqOk) U(DP_LINK_CNTL, 1u << 4, 1u << 4);                    // DP_LINK_TRAINING_COMPLETE
+    readStatus();
+    IOLog("RedNavi: DP training: CR %s after %u tries, EQ %s after %u tries; DPCD 202..207 = %02x %02x %02x %02x %02x %02x; drive vs %u%u%u%u pe %u%u%u%u\n",
+          crOk ? "done" : "FAILED", crTries, eqOk ? "done" : "FAILED", eqTries, st[0], st[1], st[2], st[3], st[4], st[5],
+          vs[0], vs[1], vs[2], vs[3], pe[0], pe[1], pe[2], pe[3]);
+    const char *n[9] = {"tx_ok", "cr_ok", "eq_ok", "cr_tries", "eq_tries", "status_202_203", "status_204_205", "adjust_206_207", "tps3"};
+    uint32_t v[9] = {txOk, crOk, eqOk, crTries, eqTries, static_cast<uint32_t>(st[0] | (st[1] << 8)), static_cast<uint32_t>(st[2] | (st[3] << 8)), static_cast<uint32_t>(st[4] | (st[5] << 8)), tps3};
+    rnPublish(this, "dp-train", n, v, 9);
 }
 
 void RedNaviProbe::probeAux() {
@@ -1012,6 +1140,7 @@ bool RedNaviProbe::start(IOService *provider) {
     loadDmcub();
     dpInit();
     probeAux();
+    dpTrain();
     registerService();
     return true;
 }
