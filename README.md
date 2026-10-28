@@ -6,7 +6,7 @@ Goal: a real framebuffer on the card, driven by our own kext (DCN 3.2 display en
 
 ## Status
 
-**Pre-alpha, first picture on 2026-10-28:** the kext drives a 1080p60 DisplayPort test pattern (colour squares) on a real RX 7800 XT. There is no framebuffer for macOS yet. The probe kext brings up the card's PSP and our own DMCUB display firmware, but nothing drives a display yet. There is no release. What exists today:
+**Pre-alpha, first pictures on 2026-10-28:** the kext drives a 1080p60 DisplayPort test pattern and then an image it wrote into VRAM and scans out through a display plane, on a real RX 7800 XT. There is no framebuffer for macOS yet. The probe kext brings up the card's PSP and our own DMCUB display firmware, but nothing drives a display yet. There is no release. What exists today:
 
 | Milestone | What | State |
 |---|---|---|

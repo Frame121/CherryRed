@@ -84,3 +84,11 @@ Reading registers of blocks that are clock- or power-gated (unused pipes, DSC, D
 - **Clocks while a 1080p60 plane runs** (`dtn_log_tiled.txt`): DISPCLK 150.877 MHz, DPPCLK 149.565 MHz, DCFCLK 199 MHz, FCLK 601 MHz. DSC and HPO (128b/132b) are off, MPCC0 uses DPP0/OPP0 in mode 2, watermarks as in the HUBBUB regs.
 - **The VRAM aperture registers are missing from the dump:** `HUBPREQ0_DCN_VM_SYSTEM_APERTURE_*` read 0 and the framebuffer location is in `DCN_VM_FB_LOCATION_BASE/TOP/OFFSET` (offset 0x475 and following), which the list did not contain. It now has a `dcnvm` group.
 - **BAR0 is 16 GB under Linux (Resizable BAR on) and 256 MB under macOS.** Everything the macOS probe does in VRAM uses `MM_INDEX`/`MM_DATA`, which does not depend on it; a CPU-written scanout buffer must sit inside the first 256 MB unless the BAR is resized.
+
+## A plane reads an image from VRAM (2026-10-28)
+
+With `rednavi_dcn_replay=14` the monitor shows the **test image the probe wrote into VRAM** (red/green gradient with a blue checker, white 8 pixel frame, eight colour bars along the bottom): a linear XRGB8888 1920x1080 surface at VRAM `0x60000000` (MC `0x8060000000`), pitch 7680, scanned out by HUBP0 -> DPP0 -> MPCC0 -> OPP0 -> OTG0 -> DIG4 -> the DisplayPort link trained at RBR x4. It is the first picture whose pixels come from memory the kext filled, not from the pattern generator. Dump: `docs/logs/ioreg-rednavi-probe17-plane.txt`.
+
+How it was built: the register state of Linux's text console (linear `XR24`, `docs/logs/linux-reference/dcn_plane_linux_linear.txt`) replayed in five more groups on top of the pattern pipe: 10 DCHUBBUB watermarks and the VRAM aperture, 11 DPP clock and conversion blocks, 12 the MPCC0 tree, 13 the HUBP surface (the primary surface address replaced by ours), 14 pattern generator off. The tiled and DCC-compressed capture from GNOME was not usable for this; a linear surface needed its own capture. Boot-arg: `rednavi_dcn_replay=14`. Note the kext takes longer to load with the image fill (a few seconds), so the desktop needs a few minutes before SSH answers.
+
+Still not a framebuffer: the image is a fixed test image, the mode is the replayed 1080p60, and nothing here is visible to WindowServer.
