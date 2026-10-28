@@ -43,7 +43,9 @@
 // The result is the sink's own verdict: DPCD 0x202-0x204 (CR_DONE, CHANNEL_EQ_DONE, SYMBOL_LOCKED, align).
 // Published as "dp-train".
 //
-// Fourteenth stage (read-only, rednavi_dcn_dump=1): reads every DCN 3.2 register of tools/dcn32_reglist.txt
+// Fourteenth stage (UNSAFE, rednavi_dcn_dump_unsafe=1): reading every DCN 3.2 register of the list from macOS
+// HANGS THE MACHINE (found on 2026-10-28; the console freezes with stale lines on screen). Kept only as a
+// record; use tools/linux_dcn_dump.py, which reads the same list safely on Linux. Reads every DCN 3.2 register of tools/dcn32_reglist.txt
 // (4366 registers) after everything else has run and publishes the values, in list order, as the "dcn-dump"
 // property. tools/linux_dcn_dump.py produces the same list on Linux, so the two states can be diffed.
 //
@@ -649,7 +651,7 @@ void RedNaviProbe::dpTrain() {
 
 void RedNaviProbe::dcnDump() {
     uint32_t arg = 0;
-    if (!PE_parse_boot_argn("rednavi_dcn_dump", &arg, sizeof(arg)) || arg != 1) return;
+    if (!PE_parse_boot_argn("rednavi_dcn_dump_unsafe", &arg, sizeof(arg)) || arg != 1) return;
     uint32_t dmu = 0;
     if (!ipBase(kRNHwIdDmu, &dmu, 2)) return;
     uint32_t regLen = static_cast<uint32_t>(regs->getLength());

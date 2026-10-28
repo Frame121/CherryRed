@@ -56,3 +56,9 @@ So a real DisplayPort link at HBR2 x4 comes up from our kext: PHY, DIG back end,
 3. Stream setup, OTG timing, DPG pattern, unblank: the picture.
 
 Open risks: the exact clock state needed for the transmitter and DPG (the clock manager and SMU are not driven yet), the DISPCLK/DPPCLK the VBIOS left, and whether the OPP/OPTC clocks are enabled without the DCCG sequence.
+
+## Lesson: do not read the whole DCN register list from macOS (2026-10-28)
+
+`rednavi_dcn_dump=1` (probe stage 14) read all 4366 registers of `tools/dcn32_reglist.txt` after link training. **The machine froze** (the verbose console stopped with old lines on screen, then partial scrolling). The two following boots showed the log stopping at `RedNavi: DMUB: before ...`, which looked like a hang in the DMUB stage; it was not. The console lags the kernel, so the last visible line was stale. After removing the `rednavi_*` boot-args and re-enabling the stages one by one (PSP only, then DMUB, then EDID and link training) everything worked again, including link training (`dp-train`: CR/EQ done, DPCD 0x202/0x203 = 0x77 0x77).
+
+Reading registers of blocks that are clock- or power-gated (unused pipes, DSC, DWB, parts of the hub) can lock the bus. The dump stage now needs `rednavi_dcn_dump_unsafe=1`. Linux powers those blocks, so `tools/linux_dcn_dump.py` is the safe way to capture the reference state. From macOS, read only registers of blocks that are known to be live (the pipe in use, DIG/DP 4, DCCG), and log per step with a pause so the last line is believable.
