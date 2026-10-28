@@ -24,6 +24,13 @@ def main():
         f.write(f"#define kRNDmubFwVersion 0x{meta['fw_version']:x}u\n")
         for name, base, size in windows:
             f.write(f"#define kRNDmubWin_{name}_Off 0x{base:x}u\n#define kRNDmubWin_{name}_Size {size}u\n")
+        uoff = int.from_bytes(fw[24:28], "little")
+        full = fw[uoff:uoff + int.from_bytes(fw[32:36], "little")]   # PSP header, code, PSP footer: what LOAD_IP_FW takes
+        f.write(f"#define kRNDmubSignedSize {len(full)}u\n")
+        f.write("static const unsigned char kRNDmubSigned[] = {\n")
+        for j in range(0, len(full), 16):
+            f.write("    " + ", ".join(f"0x{x:02x}" for x in full[j:j + 16]) + ",\n")
+        f.write("};\n")
         f.write("static const unsigned char kRNDmubInst[] = {\n")
         for j in range(0, len(inst), 16):
             f.write("    " + ", ".join(f"0x{x:02x}" for x in inst[j:j + 16]) + ",\n")

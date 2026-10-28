@@ -27,6 +27,8 @@
 // Tenth stage (opt-in, writes to the GPU, rednavi_dmub_load=1 and a build with RedNavi/dmub_fw.h):
 // stops the DMCUB the VBIOS left running, builds the DMUB memory block in VRAM, backdoor-loads the
 // DAL firmware and releases the reset, mirroring dmub_srv_hw_init and the dmub_dcn32_* hooks in amdgpu.
+// rednavi_dmub_psp=1 first hands the signed image to the PSP (GFX_CMD_ID_LOAD_IP_FW, type DMUB) and
+// skips the backdoor load, which is how amdgpu loads it when load_type is PSP.
 // rednavi_dmub_mode=1 programs VRAM offsets instead of MC addresses for the data windows.
 //
 // Eighth stage (read-only, always on): reads the VBIOS image from the PCI expansion ROM, which the
@@ -96,6 +98,8 @@
 #define kRNHwIdMmhub          34
 #define kRNHwIdDmu            271
 #define kRNDmubBlockVramOff   0x50000000ull    // 1.25 GB into VRAM
+#define kRNPspCmdLoadIpFw     0x06u            // GFX_CMD_ID_LOAD_IP_FW
+#define kRNPspFwTypeDmub      51u              // GFX_FW_TYPE_DMUB
 #define kRNDmubGpintStopFw    0x10020000u      // status 1, command DMUB_GPINT__STOP_FW (2)
 #define kRNDmubStopResponse   0xDEADDEADu
 #define kRNDmubCw0Base        0x60000000u
@@ -555,6 +559,26 @@ void RedNaviProbe::loadDmcub() {
     }
     uint32_t mode = 0;
     PE_parse_boot_argn("rednavi_dmub_mode", &mode, sizeof(mode));
+    uint32_t viaPsp = 0;
+    PE_parse_boot_argn("rednavi_dmub_psp", &viaPsp, sizeof(viaPsp));
+    if (viaPsp) {
+        // psp_load_non_psp_fw: stage the signed image in the 1 MB buffer and ask the sOS to load it.
+        for (uint32_t off = 0; off < kRNPspBufSize; off += 4) vramWrite(kRNPspBufVramOffset + off, 0);
+        for (uint32_t off = 0; off < kRNDmubSignedSize; off += 4) {
+            uint32_t v = 0;
+            for (uint32_t k = 0; k < 4 && off + k < kRNDmubSignedSize; k++) v |= static_cast<uint32_t>(kRNDmubSigned[off + k]) << (8 * k);
+            vramWrite(kRNPspBufVramOffset + off, v);
+        }
+        uint64_t mc = kRNVramMcBase + kRNPspBufVramOffset;
+        uint32_t args[4] = {static_cast<uint32_t>(mc), static_cast<uint32_t>(mc >> 32), kRNDmubSignedSize, kRNPspFwTypeDmub};
+        uint32_t resp[4] = {};
+        bool ok = pspSubmit(kRNPspCmdLoadIpFw, args, 4, resp, 4);
+        IOLog("RedNavi: PSP LOAD_IP_FW DMUB (%u bytes): fence %s, status = 0x%08x, fw_addr = 0x%08x%08x\n", kRNDmubSignedSize, ok ? "ok" : "missing", resp[0], resp[3], resp[2]);
+        const char *pn[4] = {"fence_ok", "status", "fw_addr_lo", "fw_addr_hi"};
+        uint32_t pv[4] = {ok, resp[0], resp[2], resp[3]};
+        rnPublish(this, "psp-load-dmub", pn, pv, 4);
+        if (!ok || resp[0] != 0) return;
+    }
     uint32_t dmu = 0;
     if (!ipBase(kRNHwIdDmu, &dmu, 2)) { IOLog("RedNavi: DMUB: no DMU base 2\n"); return; }
     if (!vbiosCopy || vbiosCopy->getLength() != kRNDmubVbiosSize) { IOLog("RedNavi: DMUB: VBIOS size does not match the firmware header\n"); return; }
@@ -628,11 +652,13 @@ void RedNaviProbe::loadDmcub() {
     };
 
     // dmub_dcn32_backdoor_load: code and stack windows, addressed as VRAM offsets (fb_base removed).
+    if (!viaPsp) {
     U(SEC, 1u << 16, 1u << 16);                 // DMCUB_SEC_RESET = 1
     U(CNTL, 1u << 16, 0);
     window(0, blockOff + kRNDmubWin_INST_CONST_Off, kRNDmubCw0Base, kRNDmubCw0Base + kRNDmubWin_INST_CONST_Size - 1);
     window(1, blockOff + kRNDmubWin_STACK_Off, kRNDmubCw1Base, kRNDmubCw1Base + kRNDmubWin_STACK_Size - 1);
     U(SEC, (1u << 16) | (0xFFu << 8), 0x20u << 8);   // DMCUB_SEC_RESET = 0, DMCUB_MEM_UNIT_ID = 0x20
+    }
 
     // dmub_dcn32_enable_dmub_boot_options and setup_windows: VBIOS, mailbox, trace, firmware state.
     W(S14, 0);
@@ -689,11 +715,11 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
     dumpRegs(kRNDmcubRegs, sizeof(kRNDmcubRegs) / sizeof(kRNDmcubRegs[0]), "dmcub-regs");
     loadPspChain();
-    loadDmcub();
     if (createPspRing()) {
         sendPspBootCfgGet();
         sendPspLoadToc();
     }
+    loadDmcub();
     registerService();
     return true;
 }
