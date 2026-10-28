@@ -78,6 +78,18 @@ Reading: the fault address 0xfffffff0 and the stopped timer say the core faulted
 - Read the CW0/CW1 and `DMCUB_SEC_CNTL` registers right after `LOAD_IP_FW`, before our reset, to see what the PSP programmed.
 - Read `amdgpu_dm_dmub.c`'s hw_init caller and `dmub_dcn32_*` for any step in PSP mode that this probe still skips.
 
+## Snapshots of the DMCUB windows (probe, 2026-10-28)
+
+`docs/logs/ioreg-rednavi-probe12-dmcub-snapshots.txt` has three snapshots of the window, security and control registers: at boot (VBIOS DMCUB running), right after `LOAD_IP_FW`, and at the end of our sequence.
+
+- **At boot, with the VBIOS DMCUB running:** `CW0` and `CW1` (base, top, offset) all read **0**. `CW3` to `CW6` are programmed with full MC addresses near the top of VRAM (`CW3_OFFSET` 0x83fec20000, CW4 `...fec40000`, CW5 `...fec50000`, CW6 `...fec60000`, tops `0x8301ffff`/`0x8400ffff`/`0x8500ffff`/`0x8600ffff`), i.e. a firmware-owned area of about 1 MB. `TMR_AXI_SPACE` reads 0, `SEC_CNTL` 0, `TIMER` is ticking. So the running firmware does not fetch code through CW0.
+- **After `LOAD_IP_FW`:** the PSP stopped the DMCUB: `CNTL` 0x800c6 (`DMCUB_ENABLE` clear), `CNTL2` 1 (soft reset asserted), `TIMER` 0. CW0/CW1 still read 0 (they may be PSP-protected and read as zero for us).
+- **After releasing the reset, with or without our window programming** (`rednavi_dmub_min=1` releases only): `CNTL` 0x900c6, `CNTL2` 0, but `TIMER` stays 0, `SCRATCH0` never changes and `DMCUB_UNDEFINED_ADDRESS_FAULT_ADDR` reads **0xfffffff0**. So the core is released but faults on its first instruction fetch, and our window programming is not the cause.
+
+The unanswered question is therefore what makes the PSP-loaded code reachable at the reset vector. Candidates, none tested: a PSP step Linux performs earlier that we skip (the full `psp_load_non_psp_fw` list, `SETUP_TMR`-equivalent state, `psp_update_fw_reservation`); a register in `DMCUB_SEC_CNTL` (`MEM_SEC_LVL`, `MEM_UNIT_ID`) or `MEM_CNTL` that the PSP expects the driver to set; clocks (`DMCUBCLK`, DCCG) that the SMU/DC init in amdgpu brings up before this point. A clean way to narrow it down is a trace of the same sequence on Linux (`umr` register dump of `DMCUB_*` right after `dm_dmub_hw_init`) on the machine's Windows/Linux side, or a read of the SMU-side clock state.
+
+The probe boot-args for this stage (`rednavi_dmub_load`, `rednavi_dmub_psp`, `rednavi_dmub_mode`, `rednavi_dmub_min`) have been removed from the desktop; the PSP stages stay enabled.
+
 ## Next code step
 
 Debug why the PSP-loaded DMCUB does not start (see the questions above). Add reads of the CW0/CW1/SEC registers after `LOAD_IP_FW` and before the reset.

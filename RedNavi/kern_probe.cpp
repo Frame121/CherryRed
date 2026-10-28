@@ -632,6 +632,19 @@ void RedNaviProbe::loadDmcub() {
 
     IOLog("RedNavi: DMUB: before: CNTL=0x%08x CNTL2=0x%08x SEC=0x%08x SCRATCH0=0x%08x\n", R(CNTL), R(CNTL2), R(SEC), R(S0));
 
+    uint32_t minimal = 0;                       // rednavi_dmub_min=1: after the PSP load, only release the reset
+    PE_parse_boot_argn("rednavi_dmub_min", &minimal, sizeof(minimal));
+    if (viaPsp && minimal) {
+        U(RST, 1u << 8, 0);
+        U(CNTL, (1u << 16) | (1u << 19), (1u << 16) | (1u << 19));
+        U(CNTL2, 1, 0);
+        uint32_t st = 0, ms = 0;
+        for (; ms < 3000; ms++) { st = R(S0); if ((st & 3) == 3) break; IOSleep(1); }
+        IOLog("RedNavi: DMUB minimal release: after %u ms SCRATCH0=0x%08x\n", ms, st);
+        dmcubSnapshot("dmcub-snap-end");
+        return;
+    }
+
     // dmub_dcn32_reset: ask the running firmware to stop, then hold the DMCUB in reset.
     bool enabled = (R(CNTL) >> 16) & 1, inReset = R(CNTL2) & 1;
     if (enabled && !inReset) {
