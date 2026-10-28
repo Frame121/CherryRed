@@ -664,8 +664,32 @@ void RedNaviProbe::dcnReplay() {
     uint32_t base[4] = {};
     for (uint32_t i = 0; i < 4; i++) if (!ipBase(kRNHwIdDmu, &base[i], i)) { IOLog("RedNavi: replay: no DMU base %u\n", i); return; }
     uint32_t regLen = static_cast<uint32_t>(regs->getLength());
+    // State found before we touch anything (the VBIOS may have lit the pipe already), then quiesce it:
+    // DC assumes the display is disabled before it programs the timing.
+    {
+        const uint32_t pre[10][2] = {{2, 0x1b41}, {2, 0x1b2a}, {2, 0x1b2f}, {2, 0x250c}, {2, 0x248b}, {2, 0x24b1}, {2, 0x24b2}, {2, 0x2511}, {2, 0x2512}, {1, 0x81}};
+        const char *pn[10] = {"otg_control", "h_total", "v_total", "vid_stream_cntl", "fe_cntl", "be_cntl", "be_en", "vid_n", "vid_m", "dp_dto0_phase"};
+        uint32_t pv[10];
+        for (int i = 0; i < 10; i++) pv[i] = rd((base[pre[i][0]] + pre[i][1]) * 4);
+        RN_STEP("RedNavi: replay before: OTG_CONTROL=0x%08x H_TOTAL=0x%x V_TOTAL=0x%x VID_STREAM=0x%08x FE=0x%08x BE=0x%08x BE_EN=0x%08x VID_N=0x%x VID_M=0x%x DTO0=0x%08x\n", pv[0], pv[1], pv[2], pv[3], pv[4], pv[5], pv[6], pv[7], pv[8], pv[9]);
+        rnPublish(this, "dcn-replay-pre", pn, pv, 10);
+        uint32_t vidReg = (base[2] + 0x250c) * 4, otgReg = (base[2] + 0x1b41) * 4;
+        if (maxGroup >= 3) {
+            if (rd(vidReg) & 1) {                                           // stop the DP video stream first
+                wr(vidReg, rd(vidReg) & ~1u);
+                for (int i = 0; i < 100 && (rd(vidReg) & (1u << 16)); i++) IOSleep(1);
+                RN_STEP("RedNavi: replay: DP video stream stopped, VID_STREAM=0x%08x\n", rd(vidReg));
+            }
+            if (rd(otgReg) & 1) {                                           // optc1_disable_crtc
+                wr(otgReg, rd(otgReg) & ~1u);
+                for (int i = 0; i < 200 && (rd(otgReg) & (1u << 16)); i++) IOSleep(1);
+                RN_STEP("RedNavi: replay: OTG disabled, OTG_CONTROL=0x%08x\n", rd(otgReg));
+            }
+        }
+    }
     static const char *const names[10] = {"", "clocks", "optc clocks", "otg timing", "opp", "mpc", "dig/dp stream", "otg enable", "test pattern", "dp stream enable"};
     uint32_t mismatches = 0;
+    OSDictionary *mm = OSDictionary::withCapacity(16);
     for (uint32_t g = 1; g <= maxGroup; g++) {
         RN_STEP("RedNavi: replay group %u: %s\n", g, names[g]);
         for (const RNReplayReg &r : kRNReplay) {
@@ -685,6 +709,12 @@ void RedNaviProbe::dcnReplay() {
             if (v != r.value) {
                 mismatches++;
                 if (mismatches <= 24) IOLog("RedNavi: replay: %s wrote 0x%08x read 0x%08x\n", r.name, r.value, v);
+                if (mm && mismatches <= 16) {
+                    char txt[40];
+                    snprintf(txt, sizeof(txt), "wrote 0x%08x read 0x%08x", r.value, v);
+                    OSString *str = OSString::withCString(txt);
+                    if (str) { mm->setObject(r.name, str); str->release(); }
+                }
             }
         }
         IOSleep(40);
@@ -701,6 +731,7 @@ void RedNaviProbe::dcnReplay() {
     const char *n[12] = {"groups", "mismatches", "otg_control", "otg_status", "pos0", "pos1", "vid_stream_cntl", "dpg_status", "dp_link_cntl", "be_en", "fe_cntl", "otg_moving"};
     uint32_t v[12] = {maxGroup, mismatches, otgCtl, otgStatus, pos0, pos1, vid, dpg, link, beEn, fe, pos0 != pos1};
     rnPublish(this, "dcn-replay", n, v, 12);
+    if (mm) { setProperty("dcn-replay-mismatch", mm); mm->release(); }
 }
 
 void RedNaviProbe::dcnDump() {
