@@ -1,0 +1,80 @@
+plane[202]: plane-3
+	crtc=crtc-0
+	fb=417
+		allocated by = gnome-shell
+		refcount=2
+		format=XR30 little-endian (0x30335258)
+		modifier=0x200000020867b04
+		size=1920x1080
+		layers:
+			size[0]=1920x1080
+			pitch[0]=7680
+			offset[0]=0
+			obj[0]:
+				name=0
+				refcount=5
+				start=00105f32
+				size=8945664
+				imported=no
+			size[1]=1920x1080
+			pitch[1]=2048
+			offset[1]=8847360
+			obj[1]:
+				name=0
+				refcount=5
+				start=00105f32
+				size=8945664
+				imported=no
+			size[2]=1920x1080
+			pitch[2]=2048
+			offset[2]=8896512
+			obj[2]:
+				name=0
+				refcount=5
+				start=00105f32
+				size=8945664
+				imported=no
+	crtc-pos=1920x1080+0+0
+	src-pos=1920.000000x1080.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=0
+	color-encoding=ITU-R BT.709 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+crtc[364]: crtc-0
+	enable=1
+	active=1
+	self_refresh_active=0
+	planes_changed=1
+	mode_changed=0
+	active_changed=0
+	connectors_changed=0
+	color_mgmt_changed=0
+	plane_mask=8
+	connector_mask=1
+	encoder_mask=1
+	mode: "1920x1080": 60 148500 1920 2008 2052 2200 1080 1084 1089 1125 0x48 0x5
+connector[378]: DP-2
+	crtc=crtc-0
+	self_refresh_aware=0
+	interlace_allowed=0
+	ycbcr_420_allowed=1
+	max_requested_bpc=16
+	colorspace=Default
+plane[202]: plane-3
+	crtc=crtc-0
+	fb=418
+		allocated by = gnome-shell
+		refcount=2
+		format=XR30 little-endian (0x30335258)
+		modifier=0x200000020867b04
+		size=1920x1080
+		layers:
+			size[0]=1920x1080
+			pitch[0]=7680
+			offset[0]=0
+			obj[0]:
+				name=0
+				refcount=5
+				start=001092c6

@@ -22,6 +22,7 @@ GROUPS = [
     # Plane groups: pipe 0 only. Not in the first dump because a full read stalled; read them one group at a time.
     ("hubp0", r"HUBP0_|HUBPREQ0_|HUBPRET0_|SURFACE|DCHUBP0"),
     ("dpp0", r"CNVC_CFG0_|CNVC_CUR0_|DSCL0_|CM0_|DPP_TOP0_|CURSOR0_|DPP0_"),
+    ("dcnvm", r"DCN_VM_|DCN_"),
 ]
 PLANE_GROUPS = ("hubp0", "dpp0")
 

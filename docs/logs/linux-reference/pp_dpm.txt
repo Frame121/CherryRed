@@ -1,0 +1,31 @@
+== pp_dpm_sclk
+S: 10Mhz *
+1: 500Mhz 
+2: 2124Mhz 
+== pp_dpm_mclk
+0: 96Mhz *
+1: 456Mhz 
+2: 772Mhz 
+3: 1218Mhz 
+== pp_dpm_socclk
+0: 300Mhz 
+1: 600Mhz *
+2: 1500Mhz 
+== pp_dpm_fclk
+0: 601Mhz 
+1: 1000Mhz *
+2: 1200Mhz 
+3: 1600Mhz 
+4: 1801Mhz 
+5: 1950Mhz 
+6: 2201Mhz 
+7: 2301Mhz 
+== pp_dpm_dceflk
+== pp_dpm_vclk
+S: 25Mhz *
+1: 513Mhz 
+2: 2934Mhz 
+== pp_dpm_dclk
+S: 25Mhz *
+1: 513Mhz 
+2: 2200Mhz 

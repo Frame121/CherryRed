@@ -7,7 +7,7 @@ shows the group and the last register reached. Run with the monitor lit by amdgp
 
     sudo python3 linux_dcn_pipe_dump.py dcn32_pipe_reglist.txt dcn_pipe_linux.txt hpd_aux4 dig4_dp4 clocks otg0 opp0 mpc
 
-Groups, safest first: hpd_aux4 dig4_dp4 clocks otg0 opp0 mpc hubbub hubp0 dpp0 dcio. With no group names it reads the first six.
+Groups, safest first: hpd_aux4 dig4_dp4 clocks otg0 opp0 mpc hubbub hubp0 dpp0 dcnvm dcio. With no group names it reads the first six.
 """
 import glob
 import os

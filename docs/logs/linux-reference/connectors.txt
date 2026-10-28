@@ -1,0 +1,8 @@
+/sys/class/drm/card1-DP-1: disconnected 
+/sys/class/drm/card1-HDMI-A-1: disconnected 
+/sys/class/drm/card1-HDMI-A-2: disconnected 
+/sys/class/drm/card2-DP-2: connected 1920x1080
+/sys/class/drm/card2-DP-3: disconnected 
+/sys/class/drm/card2-HDMI-A-3: disconnected 
+/sys/class/drm/card2-HDMI-A-4: disconnected 
+/sys/class/drm/card2-Writeback-1: unknown 

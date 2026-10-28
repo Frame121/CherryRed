@@ -570,7 +570,11 @@ void RedNaviProbe::dpTrain() {
         return;
     }
     if (!dmubUp) { IOLog("RedNavi: DP training: DMCUB not running\n"); return; }
-    const uint32_t aux = 4, lanes = 4, rateCode = 0x14, symclk10k = rateCode * 27000 / 10;   // HBR2, 540000 kHz symbol clock
+    // Link rate: RBR (0x06, 162000 kHz symbol clock) like Linux uses for 1080p60 8 bpc, which is also the state the replay table
+    // was captured in (DP_DTO0, VID_M/N); rednavi_dp_rate=0x14 selects HBR2 as before.
+    uint32_t rateArg = 0x06;
+    PE_parse_boot_argn("rednavi_dp_rate", &rateArg, sizeof(rateArg));
+    const uint32_t aux = 4, lanes = 4, rateCode = rateArg, symclk10k = rateCode * 27000 / 10;
     uint32_t dmu = dmubDmu;
     // DP4 back end and DIG4 registers (dcn_3_2_0_offset.h, base index 2)
     const uint32_t DP_CONFIG = 0x250b, DP_LINK_CNTL = 0x2508, DP_DPHY_CNTL = 0x2517, DP_PATTERN_SEL = 0x2518, DP_SCRAM = 0x251e;
@@ -581,7 +585,7 @@ void RedNaviProbe::dpTrain() {
 
     uint8_t caps[16] = {};
     if (!dpcdRead(aux, 0, caps, 16)) { IOLog("RedNavi: DP training: no DPCD\n"); return; }
-    bool tps3 = (caps[2] & 0x40) != 0, enhanced = (caps[2] & 0x80) != 0;
+    bool tps3 = (caps[2] & 0x40) != 0 && rateCode >= 0x14, enhanced = (caps[2] & 0x80) != 0;
 
     // Sink and source setup (dp_enable_link_phy, enc1_configure_encoder, dcn10_link_encoder_setup)
     uint8_t d0 = 1;

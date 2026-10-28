@@ -1,0 +1,11 @@
+03:00.0 VGA compatible controller [0300]: Advanced Micro Devices, Inc. [AMD/ATI] Navi 32 [Radeon RX 7700 XT / 7800 XT] [1002:747e] (rev c8) (prog-if 00 [VGA controller])
+	Subsystem: Sapphire Technology Limited Device [1da2:d475]
+	Region 0: Memory at 6000000000 (64-bit, prefetchable) [size=16G]
+	Region 2: Memory at 6400000000 (64-bit, prefetchable) [size=256M]
+	Region 4: I/O ports at 3000 [size=256]
+	Region 5: Memory at 7f800000 (32-bit, non-prefetchable) [size=1M]
+	Expansion ROM at 7f900000 [disabled] [size=128K]
+		LnkSta:	Speed 16GT/s, Width x16
+	Capabilities: [200 v1] Physical Resizable BAR
+		BAR 0: current size: 16GB, supported: 256MB 512MB 1GB 2GB 4GB 8GB 16GB
+		BAR 2: current size: 256MB, supported: 2MB 4MB 8MB 16MB 32MB 64MB 128MB 256MB
