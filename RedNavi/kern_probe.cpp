@@ -77,6 +77,9 @@
 #include "dmub_fw.h"
 #endif
 
+// Log a step and give the console time to print it, so a hang shows the last step reached on screen.
+#define RN_STEP(...) do { IOLog(__VA_ARGS__); IOSleep(40); } while (0)
+
 #define kRNRegBar          5          // MMIO registers (512 KB on Navi 3x)
 #define kRNVramBar         0          // VRAM aperture (size depends on Resizable BAR)
 
@@ -1030,10 +1033,13 @@ void RedNaviProbe::loadDmcub() {
         IODelay(1);
         U(CNTL, 1u << 16, 0);
     }
+    RN_STEP("RedNavi: DMUB step: clearing windows CW2-CW7\n");
     for (uint32_t n = 2; n <= 7; n++) U(CWTOP(n), EN, 0);
+    RN_STEP("RedNavi: DMUB step: clearing ring pointers\n");
     W(IN_RP, 0); W(IN_WP, 0); W(O1_RP, 0); W(O1_WP, 0); W(O0_RP, 0); W(O0_WP, 0);
     W(S0, 0);
     W(GPINT1, 0);
+    RN_STEP("RedNavi: DMUB step: building the block in VRAM (zeroing %u bytes)\n", kRNDmubBlockSize);
 
     // Build the memory block (the windows of tools/dmub_layout.py) in VRAM.
     const uint64_t blockOff = kRNDmubBlockVramOff;
@@ -1043,12 +1049,14 @@ void RedNaviProbe::loadDmcub() {
         for (uint32_t k = 0; k < 4 && off + k < kRNDmubInstSize; k++) v |= static_cast<uint32_t>(kRNDmubInst[off + k]) << (8 * k);
         vramWrite(blockOff + kRNDmubWin_INST_CONST_Off + off, v);
     }
+    RN_STEP("RedNavi: DMUB step: zeroed, copying code (%u bytes)\n", kRNDmubInstSize);
     const uint8_t *vb = static_cast<const uint8_t *>(vbiosCopy->getBytesNoCopy());
     for (uint32_t off = 0; off < kRNDmubVbiosSize; off += 4) {
         uint32_t v = 0;
         for (uint32_t k = 0; k < 4 && off + k < kRNDmubVbiosSize; k++) v |= static_cast<uint32_t>(vb[off + k]) << (8 * k);
         vramWrite(blockOff + kRNDmubWin_VBIOS_Off + off, v);
     }
+    RN_STEP("RedNavi: DMUB step: copied VBIOS, verifying code\n");
     uint32_t bad = 0;
     for (uint32_t off = 0; off < kRNDmubInstSize; off += 4) {
         uint32_t v = 0;
@@ -1075,6 +1083,7 @@ void RedNaviProbe::loadDmcub() {
     U(SEC, (1u << 16) | (0xFFu << 8), 0x20u << 8);   // DMCUB_SEC_RESET = 0, DMCUB_MEM_UNIT_ID = 0x20
     }
 
+    RN_STEP("RedNavi: DMUB step: block verified, programming windows\n");
     // dmub_dcn32_enable_dmub_boot_options and setup_windows: VBIOS, mailbox, trace, firmware state.
     W(S14, 0);
     window(3, addr(kRNDmubWin_VBIOS_Off), kRNDmubCw3Base, kRNDmubCw3Base + kRNDmubWin_VBIOS_Size);
@@ -1092,6 +1101,7 @@ void RedNaviProbe::loadDmcub() {
     W(O1_BASE, kRNDmubCw4Base + kRNDmubRbSize);
     W(O1_SIZE, kRNDmubRbSize);
 
+    RN_STEP("RedNavi: DMUB step: windows set, releasing reset\n");
     // dmub_dcn32_reset_release
     U(RST, 1u << 8, 0);                         // DMUIF_SOFT_RESET = 0
     W(S15, 0);
