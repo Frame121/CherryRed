@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>RedNaviFB</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.rednavi.RedNaviFB</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>RedNaviFB</string>
+	<key>CFBundlePackageType</key>
+	<string>KEXT</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.1</string>
+	<key>CFBundleVersion</key>
+	<string>0.0.1</string>
+	<key>IOKitPersonalities</key>
+	<dict>
+		<key>RedNaviFB</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>org.rednavi.RedNaviFB</string>
+			<key>IOClass</key>
+			<string>RedNaviFB</string>
+			<key>IOProviderClass</key>
+			<string>RedNaviProbe</string>
+			<key>IOPropertyMatch</key>
+			<dict>
+				<key>rednavi-fb-ready</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
+	<key>OSBundleLibraries</key>
+	<dict>
+		<key>com.apple.iokit.IOGraphicsFamily</key>
+		<string>1.3</string>
+		<key>com.apple.kpi.iokit</key>
+		<string>8.0.0</string>
+		<key>com.apple.kpi.libkern</key>
+		<string>8.0.0</string>
+		<key>com.apple.kpi.mach</key>
+		<string>8.0.0</string>
+	</dict>
+</dict>
+</plist>

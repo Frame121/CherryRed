@@ -76,7 +76,7 @@ SPEC = [
     "HUBPREQ0_REF_FREQ_TO_PIX_FREQ", "HUBPREQ0_DST_Y_DELTA_DRQ_LIMIT")] + [
     # the surface address goes last; its value is replaced by the probe's own scanout buffer
     (13, "HUBPREQ0_DCSURF_PRIMARY_SURFACE_ADDRESS_HIGH", 0x00000080),
-    (13, "HUBPREQ0_DCSURF_PRIMARY_SURFACE_ADDRESS", 0x60000000),
+    (13, "HUBPREQ0_DCSURF_PRIMARY_SURFACE_ADDRESS", 0x08000000),
     (14, "DPG0_DPG_CONTROL", 0x00000000),                      # pattern generator off: the plane shows
 ]
 

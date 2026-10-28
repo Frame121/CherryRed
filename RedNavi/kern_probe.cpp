@@ -138,7 +138,7 @@
 #define kRNMp0C2pmsg70        0x086
 #define kRNMp0C2pmsg71        0x087
 #define kRNPspMboxMask        0x8000FFFFu      // response flag plus status bits
-#define kRNScanoutVramOff     0x60000000ull    // 1.5 GB into VRAM: MC address 0x8060000000, the value in dcn_replay.h
+#define kRNScanoutVramOff     0x08000000ull    // 128 MB into VRAM, inside the 256 MB macOS maps through BAR0: MC address 0x8008000000, the value in dcn_replay.h
 #define kRNPspBufSize         (1u << 20)
 #define kRNHwIdMp1            1
 #define kRNHwIdMmhub          34
@@ -268,6 +268,7 @@ class RedNaviProbe : public IOService {
     void dcnDump();
     void dcnReplay();
     void fillScanout();
+    void publishFramebuffer();
     bool dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k);
     bool dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n);
     bool dpcdRead(uint32_t eng, uint32_t addr, uint8_t *d, uint32_t n);
@@ -685,6 +686,28 @@ void RedNaviProbe::fillScanout() {
         }
         if ((y & 63) == 0) IOSleep(1);
     }
+}
+
+// Opt-in (rednavi_fb=1): tell the RedNaviFB kext (a separate bundle, see RedNaviFB/kern_fb.cpp) where the lit
+// scanout surface is. It matches on rednavi-fb-ready, so that property has to be set last.
+void RedNaviProbe::publishFramebuffer() {
+    uint32_t arg = 0, replay = 0;
+    if (!PE_parse_boot_argn("rednavi_fb", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: framebuffer not requested (boot-arg rednavi_fb=1)\n");
+        return;
+    }
+    if (!PE_parse_boot_argn("rednavi_dcn_replay", &replay, sizeof(replay)) || replay < 14) {
+        IOLog("RedNavi: framebuffer needs rednavi_dcn_replay=14, skipping\n");
+        return;
+    }
+    IODeviceMemory *bar0 = pci->getDeviceMemoryWithRegister(kIOPCIConfigBaseAddress0 + kRNVramBar * 4);
+    if (!bar0) { IOLog("RedNavi: framebuffer: no BAR0\n"); return; }
+    uint64_t phys = static_cast<uint64_t>(bar0->getPhysicalAddress());
+    uint64_t len = static_cast<uint64_t>(bar0->getLength());
+    IOLog("RedNavi: framebuffer: BAR0 phys 0x%llx, %llu MB\n", phys, len >> 20);
+    if (kRNScanoutVramOff + 1920ull * 1080 * 4 > len) { IOLog("RedNavi: framebuffer: scanout outside BAR0\n"); return; }
+    setProperty("fb-scanout-phys", phys + kRNScanoutVramOff, 64);
+    setProperty("rednavi-fb-ready", kOSBooleanTrue);
 }
 
 void RedNaviProbe::dcnReplay() {
@@ -1295,6 +1318,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dpTrain();
     dcnReplay();
     dcnDump();
+    publishFramebuffer();
     registerService();
     return true;
 }
