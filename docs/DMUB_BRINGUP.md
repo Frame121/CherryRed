@@ -57,7 +57,7 @@ Read-only, `docs/logs/ioreg-rednavi-probe10-dmcub.txt` (registers at DMU base in
 | `DMCUB_INBOX1_WPTR` / `_RPTR` | 0x440 / 0x440 |
 | `DMCUB_OUTBOX1_WPTR`, `_CNTL2`, `_SCRATCH2`, `_GPINT_DATAOUT`, `_REGION3_CW0_OFFSET` | 0 |
 
-Reading: the **VBIOS already started a DMCUB** and it is idle and healthy. Its mailbox is ready, and the inbox read and write pointers are equal at 0x440, i.e. 17 commands of 64 bytes were consumed. `dal_fw` is clear, so it is the boot-time firmware and not the DAL firmware that amdgpu loads; `dmub_dcn31_is_hw_init` would say "not initialised" because it requires \`dal_fw\`. \`SCRATCH1\` (0x07008748) is a version-like value newer than the file we have (0x07003600), which fits a firmware shipped with the card's IFWI. The \`DMCUB_CNTL\` field layout was not decoded.
+Reading: the **VBIOS already started a DMCUB** and it is idle and healthy. Its mailbox is ready, and the inbox read and write pointers are equal at 0x440, i.e. 17 commands of 64 bytes were consumed. `dal_fw` is clear, so it is the boot-time firmware and not the DAL firmware that amdgpu loads; `dmub_dcn31_is_hw_init` would say "not initialised" because it requires `dal_fw`. `SCRATCH1` (0x07008748) is a version-like value newer than the file we have (0x07003600), which fits a firmware shipped with the card's IFWI. The `DMCUB_CNTL` field layout was not decoded.
 
 Consequences: reading DCN registers is safe on this card (no hang). amdgpu would reset this DMCUB and load the DAL firmware over it; we can do the same, or first try to talk to the running one. Loading ours needs the reset-and-backdoor sequence below, which writes to the card.
 
