@@ -92,6 +92,27 @@ The unanswered question was therefore what makes the PSP-loaded code reachable a
 
 The probe boot-args for this stage (`rednavi_dmub_load`, `rednavi_dmub_psp`, `rednavi_dmub_mode`, `rednavi_dmub_min`) have been removed from the desktop; the PSP stages stay enabled.
 
+## The DMCUB runs (2026-10-28)
+
+With **SETUP_TMR sent before `LOAD_IP_FW`, and the TMR placed where Linux places it** (`rednavi_psp_tmr=2`: VRAM offset `0x3e0000000`, size `0xa700000` from LOAD_TOC), our DMCUB firmware starts:
+
+| Register | Value |
+|---|---|
+| `SCRATCH0` | 0x3 (`dal_fw` and `mailbox_rdy`) |
+| `SCRATCH1` | **0x07003600**, the version of the file we loaded (the VBIOS firmware reported 0x07008748) |
+| `CNTL` / `CNTL2` | 0x1900c6 / 0 |
+| `FAULT_ADDR` | 0 |
+| `TIMER` | running |
+
+Dump: `docs/logs/ioreg-rednavi-probe13-dmcub-running.txt`. `LOAD_IP_FW` now returns `fw_addr` `0x83fee00000`, a real address near the top of VRAM.
+
+What it took, in order: LOAD_TOC, **SETUP_TMR** (status 0), `LOAD_IP_FW` of the signed image, then the unchanged `dmub_dcn32` sequence with the windows of `tools/dmub_layout.py`.
+- TMR at 32 MB into VRAM (`rednavi_psp_tmr=1`): SETUP_TMR accepted, but `fw_addr` came back as `0x80fee00000` and the core still faulted at `0xfffffff0` with the timer stopped.
+- TMR at the top of VRAM, as the Linux reference run: starts. The PSP evidently requires the TMR in that region.
+- Without SETUP_TMR: `fw_addr` came back as `0x00fee00000` and the core faulted.
+
+Not yet done: send a DMUB command through the inbox and read the reply, to prove the mailbox works end to end; the SMU was not initialised by us (Linux does that before the DMUB init and it did not matter here).
+
 ## Next code step
 
-Debug why the PSP-loaded DMCUB does not start (see the questions above). Add reads of the CW0/CW1/SEC registers after `LOAD_IP_FW` and before the reset.
+Send a first DMUB command through inbox1 and read the response (for instance `DMUB_CMD__REG_SEQ_READ_MODIFY_WRITE`-free ones such as the firmware boot options or a no-op), then look at what DC needs to program a mode on one connector.

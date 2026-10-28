@@ -532,15 +532,16 @@ void RedNaviProbe::sendPspBootCfgGet() {
 
 void RedNaviProbe::sendPspSetupTmr() {
     uint32_t arg = 0;
-    if (!PE_parse_boot_argn("rednavi_psp_tmr", &arg, sizeof(arg)) || arg != 1) {
-        IOLog("RedNavi: PSP SETUP_TMR not requested (boot-arg rednavi_psp_tmr=1)\n");
+    if (!PE_parse_boot_argn("rednavi_psp_tmr", &arg, sizeof(arg)) || (arg != 1 && arg != 2)) {
+        IOLog("RedNavi: PSP SETUP_TMR not requested (boot-arg rednavi_psp_tmr=1, or 2 for the top of VRAM as Linux does)\n");
         return;
     }
     if (!pspTmrSize) { IOLog("RedNavi: PSP SETUP_TMR: no TMR size from LOAD_TOC\n"); return; }
     IODeviceMemory *bar0 = pci->getDeviceMemoryWithRegister(kIOPCIConfigBaseAddress0 + kRNVramBar * 4);
     if (!bar0) { IOLog("RedNavi: PSP SETUP_TMR: no BAR0\n"); return; }
-    uint64_t mc = kRNVramMcBase + kRNPspTmrVramOffset;                         // GPU address
-    uint64_t pa = static_cast<uint64_t>(bar0->getPhysicalAddress()) + kRNPspTmrVramOffset;   // CPU physical address of the same bytes (amdgpu_gmc_vram_pa)
+    uint64_t tmrOff = arg == 2 ? 0x3e0000000ull : kRNPspTmrVramOffset;       // 2: where the Linux reference run put it
+    uint64_t mc = kRNVramMcBase + tmrOff;                                      // GPU address
+    uint64_t pa = static_cast<uint64_t>(bar0->getPhysicalAddress()) + tmrOff;  // CPU physical address of the same bytes (amdgpu_gmc_vram_pa)
     // cmd.cmd_setup_tmr: buf_phy_addr_lo/hi, buf_size, flags (bit 1 = virt_phy_addr), system_phy_addr_lo/hi
     uint32_t args[6] = {static_cast<uint32_t>(mc), static_cast<uint32_t>(mc >> 32), pspTmrSize, 2u,
                         static_cast<uint32_t>(pa), static_cast<uint32_t>(pa >> 32)};
