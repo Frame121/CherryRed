@@ -67,8 +67,8 @@ PSP initialises before display and graphics: the DMUB firmware used by the displ
 
 ## Milestone M3 (native framebuffer) in practice
 
-1. Map BARs, read IP discovery (M1).
-2. Compatibility layer sufficient to run the needed amdgpu code (M2).
-3. PSP bring-up, SMU bring-up, load DMUB firmware.
-4. Port DC for DCN 3.2, set a mode on one connector.
-5. `IOFramebuffer` subclass publishing the display to WindowServer.
+1. Map BARs, read IP discovery (M1). Done.
+2. Compatibility layer sufficient to run the needed amdgpu code (M2). Started (`COMPAT.md`).
+3. PSP bring-up, load DMUB firmware (done); SMU bring-up (not done).
+4. Display: a replay of a lit Linux pipe for one fixed mode (done, `DP_BRINGUP.md`); a port of DC for DCN 3.2 with modes from the EDID is still open.
+5. `IOFramebuffer` subclass publishing the display to WindowServer. Done for one mode (`RedNaviFB`).

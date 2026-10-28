@@ -1,6 +1,6 @@
 # DisplayPort bring-up on path 0 (steps 3 and 4 of `DC_PLAN.md`)
 
-Goal: a 1920x1080@60 test pattern on the Samsung monitor attached to VBIOS path 0 (DisplayPort, UNIPHY2, AUX4, HPD4). This note records what was read in the Linux display code (MIT) and what has been tried on the card. Nothing past step "transmitter INIT" is implemented yet.
+Goal: a 1920x1080@60 test pattern on the Samsung monitor attached to VBIOS path 0 (DisplayPort, UNIPHY2, AUX4, HPD4). This note records what was read in the Linux display code (MIT) and what has been tried on the card. Since then the link has been trained, a test pattern and an image from VRAM have been shown, and an `IOFramebuffer` publishes the scanout (see the sections below, newest last).
 
 ## Key finding: the VBIOS command tables can be run by our DMCUB
 
@@ -49,13 +49,11 @@ Result, read from the sink (`docs/logs/ioreg-rednavi-probe16-dp-training.txt`): 
 
 So a real DisplayPort link at HBR2 x4 comes up from our kext: PHY, DIG back end, AUX and the training handshake are right. There is still no video on it: no stream encoder, no timing generator, no pixel data.
 
-## Next sub-steps, each checkable without a picture
+## What was left at that point
 
-1. Pixel clock for the stream (the PHY PLL is up at the symbol rate; the stream pixel clock is a separate DTO).
-2. **Link training [done]**, see above.
-3. Stream setup, OTG timing, DPG pattern, unblank: the picture.
+The pixel clock for the stream (the PHY PLL is up at the symbol rate; the stream pixel clock is a separate DTO), stream setup, OTG timing, the pattern generator and unblanking. These were done by the register replay described below.
 
-Open risks: the exact clock state needed for the transmitter and DPG (the clock manager and SMU are not driven yet), the DISPCLK/DPPCLK the VBIOS left, and whether the OPP/OPTC clocks are enabled without the DCCG sequence.
+Open risks at the time: the exact clock state needed for the transmitter and DPG (the clock manager and SMU are not driven yet), the DISPCLK/DPPCLK the VBIOS left, and whether the OPP/OPTC clocks are enabled without the DCCG sequence.
 
 ## Lesson: do not read the whole DCN register list from macOS (2026-10-28)
 
@@ -87,11 +85,11 @@ Reading registers of blocks that are clock- or power-gated (unused pipes, DSC, D
 
 ## A plane reads an image from VRAM (2026-10-28)
 
-With `rednavi_dcn_replay=14` the monitor shows the **test image the probe wrote into VRAM** (red/green gradient with a blue checker, white 8 pixel frame, eight colour bars along the bottom): a linear XRGB8888 1920x1080 surface at VRAM `0x60000000` (MC `0x8060000000`), pitch 7680, scanned out by HUBP0 -> DPP0 -> MPCC0 -> OPP0 -> OTG0 -> DIG4 -> the DisplayPort link trained at RBR x4. It is the first picture whose pixels come from memory the kext filled, not from the pattern generator. Dump: `docs/logs/ioreg-rednavi-probe17-plane.txt`.
+With `rednavi_dcn_replay=14` the monitor shows the **test image the probe wrote into VRAM** (red/green gradient with a blue checker, white 8 pixel frame, eight colour bars along the bottom): a linear XRGB8888 1920x1080 surface at VRAM `0x60000000` (MC `0x8060000000`; later moved to `0x08000000`, see the IOFramebuffer section), pitch 7680, scanned out by HUBP0 -> DPP0 -> MPCC0 -> OPP0 -> OTG0 -> DIG4 -> the DisplayPort link trained at RBR x4. It is the first picture whose pixels come from memory the kext filled, not from the pattern generator. Dump: `docs/logs/ioreg-rednavi-probe17-plane.txt`.
 
 How it was built: the register state of Linux's text console (linear `XR24`, `docs/logs/linux-reference/dcn_plane_linux_linear.txt`) replayed in five more groups on top of the pattern pipe: 10 DCHUBBUB watermarks and the VRAM aperture, 11 DPP clock and conversion blocks, 12 the MPCC0 tree, 13 the HUBP surface (the primary surface address replaced by ours), 14 pattern generator off. The tiled and DCC-compressed capture from GNOME was not usable for this; a linear surface needed its own capture. Boot-arg: `rednavi_dcn_replay=14`. Note the kext takes longer to load with the image fill (a few seconds), so the desktop needs a few minutes before SSH answers.
 
-Still not a framebuffer: the image is a fixed test image, the mode is the replayed 1080p60, and nothing here is visible to WindowServer.
+At that point it was not yet a framebuffer: the image was a fixed test image, the mode was the replayed 1080p60, and nothing was visible to WindowServer. The IOFramebuffer section below covers the next step.
 
 ## IOFramebuffer (RedNaviFB)
 

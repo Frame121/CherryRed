@@ -8,7 +8,7 @@ Goal: a real framebuffer on the card, driven by our own kext (DCN 3.2 display en
 
 **Pre-alpha, 2026-10-28:** the macOS Sequoia desktop is shown on a real RX 7800 XT, over DisplayPort, through our own kext. The kext loads the card's PSP firmware chain and our own DMCUB display firmware, trains the DisplayPort link, lights a 1920x1080 at 60 Hz pipe and scans out a linear framebuffer in VRAM that WindowServer draws into. No GOP, VESA or firmware framebuffer is involved: without the kext the card's output stays dark.
 
-What this is **not**: there is no acceleration and no Metal. WindowServer renders on the CPU (expect fans spinning during animations). The mode is fixed at 1080p60, not taken from the EDID. There is no cursor plane, clock or power management (SMU), hot-plug, audio or HDMI, and only one DisplayPort connector has been tested. Running it needs SIP off and an OpenCore setup, and it can hang the machine. There is no release.
+What this is **not**: there is no acceleration and no Metal. WindowServer renders on the CPU (expect fans spinning during animations). The mode is fixed at 1080p60, not taken from the EDID. There is no cursor plane, clock or power management (SMU), hot-plug, audio or HDMI, and only one DisplayPort connector has been tested. It needs OpenCore, and the framebuffer kext needs SIP off (details below). It can hang the machine. There is no release.
 
 | Milestone | What | State |
 |---|---|---|

@@ -12,7 +12,7 @@
 | Link | PCIe 4.0 x16 (bus 3, device 0, function 0 on Windows) |
 | Windows driver | 32.0.31041.1004 |
 
-macOS (Sequoia 15.8.2) is booted on this machine through OpenCore with the UHD 630 driving the screen, so the 7800 XT is free for experiments and panics can be read. The machine boots macOS first, auto-mounts the EFI and has SSH (Remote Login) enabled, so kext updates and logs can be handled remotely. Boot-args: `-v debug=0x100 keepsyms=1` (no `-wegnoegpu`); OpenCore file logging is on.
+macOS (Sequoia 15.8.2) is booted on this machine through OpenCore. For most experiments the UHD 630 drives the screen, so the 7800 XT is free and panics can be read. Once the framebuffer works, `-wegnoigpu` (WhateverGreen) switches the iGPU off and the 7800 XT is the only display; keep SSH (Remote Login) enabled and a USB copy of the EFI without the kexts for that case. The machine boots macOS first and auto-mounts the EFI, so kext updates and logs can be handled remotely. Boot-args: `-v debug=0x100 keepsyms=1` plus the `rednavi_*` ones (no `-wegnoegpu`); OpenCore file logging is on.
 
 ## To collect before running anything on macOS
 

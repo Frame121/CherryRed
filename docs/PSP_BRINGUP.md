@@ -1,4 +1,4 @@
-# PSP 13.0.10 bring-up (M2 plan)
+# PSP 13.0.10 bring-up (M2)
 
 Source of truth: `psp_v13_0.c` and `amdgpu_psp.c` in the Linux kernel (MIT). State of the card after the VBIOS is in [ARCHITECTURE.md](ARCHITECTURE.md): bootloader ready (`C2PMSG_35` bit 31), sOS not running (`C2PMSG_81` = 0).
 
@@ -69,7 +69,7 @@ So the whole round trip works: the sOS read our frame from VRAM, executed it and
 ## What amdgpu does next, and what DCN 3.2 needs (read from `amdgpu_psp.c`, `amdgpu_dm_dmub.c`)
 
 - After the ring, `psp_hw_start` calls `psp_tmr_init` (which sends **LOAD_TOC** to learn the TMR size) and `psp_tmr_load` (**SETUP_TMR**). **Correction (2026-10-28):** an earlier version of this note said Linux skips SETUP_TMR on this PSP. That was a misreading: `psp_early_init` sets `boot_time_tmr = false` for MP0 13.0.10, so `psp_skip_tmr()` is false and SETUP_TMR **is** sent. The Linux reference log from this very card confirms it: `reserve 0xa700000 from 0x83e0000000 for PSP TMR`.
-- The display firmware does not need the PSP. `amdgpu_dm_dmub.c` has two paths. With `load_type == AMDGPU_FW_LOAD_PSP` the PSP loads the DMCUB `inst_const` part (`AMDGPU_UCODE_ID_DMCUB`, via `LOAD_IP_FW`). Otherwise the driver copies it into the DMUB framebuffer window itself ("backdoor load", `hw_params.load_inst_const = true`). For a native framebuffer the backdoor path avoids `LOAD_IP_FW` and the TMR bookkeeping entirely.
+- `amdgpu_dm_dmub.c` has two paths to get the DMCUB code in. With `load_type == AMDGPU_FW_LOAD_PSP` the PSP loads the DMCUB `inst_const` part (`AMDGPU_UCODE_ID_DMCUB`, via `LOAD_IP_FW`). Otherwise the driver copies it into the DMUB framebuffer window itself ("backdoor load", `hw_params.load_inst_const = true`). **Correction:** on this ASIC the backdoor load does not work (the instruction memory is not loadable from the host), so the PSP path with SETUP_TMR is required, see DMUB_BRINGUP.md.
 - Confirmed: the DMCUB file for DCN 3.2.0 is `amdgpu/dcn_3_2_0_dmcub.bin` (`FIRMWARE_DCN_V3_2_0_DMCUB`).
 - The DMUB window setup also copies the card's **VBIOS image** (obtained, see below) into the framebuffer (`DMUB_WINDOW_3_VBIOS`, from `adev->bios`). We will need the VBIOS bytes: from the PCI expansion ROM, the ACPI VFCT table, or VRAM.
 
@@ -89,9 +89,9 @@ The PCI expansion ROM is readable: the probe enables the ROM decode bit, maps it
 - **`CW0` and `CW1` read 0 also under Linux**, `SEC_CNTL` 0, `TMR_AXI_SPACE` 0. So these are PSP-managed, as suspected.
 - **`SCRATCH0` = 3** (dal_fw and mailbox_rdy), `SCRATCH1` = 0x07002f00 (the firmware version), `FAULT_ADDR` 0, timer running, `CNTL` = 0x001900c6, inbox pointers 0x1600/0x1600.
 - **Order of events in dmesg:** VBIOS fetched (from VFCT), GART enabled (512 MB), DMUB marked "via PSP", PSP initialised with `reserve 0xa700000 from 0x83e0000000 for PSP TMR`, SMU initialised, then `DMUB hardware initialized` about 2 ms after SMU. The TMR is placed at the very top of VRAM; VRAM is 16368 MB (the last 16 MB are reserved) and Linux sees BAR0 as 16 GB while macOS gives us 256 MB.
-- **The cause of our halted DMCUB (confirmed by the next test):** we never sent **SETUP_TMR**, and when we did, the TMR had to sit at the top of VRAM. `LOAD_IP_FW` then returned `fw_addr` `0xfee00000`, an address that is not inside any TMR we configured, and the PSP could not place the code where the core boots from. The probe now has `rednavi_psp_tmr=1`, which sends SETUP_TMR (32 MB into VRAM, inside the 256 MB visible BAR, size from LOAD_TOC) before the DMCUB load.
+- **The cause of our halted DMCUB (confirmed by the next test):** we never sent **SETUP_TMR**, and when we did, the TMR had to sit at the top of VRAM. `LOAD_IP_FW` then returned `fw_addr` `0xfee00000`, an address that is not inside any TMR we configured, and the PSP could not place the code where the core boots from. `rednavi_psp_tmr=1` sends SETUP_TMR 32 MB into VRAM (inside the 256 MB visible BAR) and is accepted, but the DMCUB still does not start; `rednavi_psp_tmr=2` puts the TMR at VRAM offset `0x3e0000000` like Linux, and that works.
 - Also: SMU initialisation precedes the DMUB init in Linux; it may matter for clocks. Linux's `smu fw version 0x00505600`; ours is the IFWI one.
 
-## Next code step
+## What came next
 
-The PSP side needed for a display is probably done and the VBIOS is available. Next is the display path: lay out the DMUB framebuffer windows and start the DMCUB by the backdoor path. Check what the DMCUB needs from the SMU/clocks first. Optional PSP follow-ups: `FB_FW_RESERV_ADDR` query, SMU firmware load (`psp_load_smu_fw`).
+SETUP_TMR with the TMR at the top of VRAM, then `LOAD_IP_FW` for the DMCUB, started the display firmware (see DMUB_BRINGUP.md). Optional PSP follow-ups, not needed so far: `FB_FW_RESERV_ADDR` query, SMU firmware load (`psp_load_smu_fw`).

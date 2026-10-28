@@ -1,6 +1,6 @@
 # DMUB / DMCUB bring-up for DCN 3.2 (M3 plan)
 
-Source of truth: `drivers/gpu/drm/amd/display/dmub/` (`dmub_srv.c`, `dmub_dcn32.c`, `dmub_dcn31.c`) and `amdgpu_dm/amdgpu_dm_dmub.c` in the Linux kernel (MIT). Nothing in this document has been run on the card yet; the layout below is a dry run (`tools/dmub_layout.py`).
+Source of truth: `drivers/gpu/drm/amd/display/dmub/` (`dmub_srv.c`, `dmub_dcn32.c`, `dmub_dcn31.c`) and `amdgpu_dm/amdgpu_dm_dmub.c` in the Linux kernel (MIT). The first sections are the original plan and a dry run of the layout (`tools/dmub_layout.py`); the later sections record what was run on the card, ending with the DMCUB running our firmware.
 
 ## What the firmware file contains
 
@@ -86,11 +86,11 @@ Reading: the fault address 0xfffffff0 and the stopped timer say the core faulted
 - **After `LOAD_IP_FW`:** the PSP stopped the DMCUB: `CNTL` 0x800c6 (`DMCUB_ENABLE` clear), `CNTL2` 1 (soft reset asserted), `TIMER` 0. CW0/CW1 still read 0 (they may be PSP-protected and read as zero for us).
 - **After releasing the reset, with or without our window programming** (`rednavi_dmub_min=1` releases only): `CNTL` 0x900c6, `CNTL2` 0, but `TIMER` stays 0, `SCRATCH0` never changes and `DMCUB_UNDEFINED_ADDRESS_FAULT_ADDR` reads **0xfffffff0**. So the core is released but faults on its first instruction fetch, and our window programming is not the cause.
 
-**Update:** a Linux reference run (see `docs/PSP_BRINGUP.md`, `docs/logs/linux-reference/`) shows the same window programming works there, and that Linux sends SETUP_TMR before loading the DMCUB, which we did not. That is now the main suspect; test pending.
+**Update:** a Linux reference run (see `docs/PSP_BRINGUP.md`, `docs/logs/linux-reference/`) shows the same window programming works there, and that Linux sends SETUP_TMR before loading the DMCUB, which we did not. That turned out to be the cause, see "The DMCUB runs" below.
 
 The unanswered question was therefore what makes the PSP-loaded code reachable at the reset vector. Candidates, none tested: a PSP step Linux performs earlier that we skip (the full `psp_load_non_psp_fw` list, `SETUP_TMR`-equivalent state, `psp_update_fw_reservation`); a register in `DMCUB_SEC_CNTL` (`MEM_SEC_LVL`, `MEM_UNIT_ID`) or `MEM_CNTL` that the PSP expects the driver to set; clocks (`DMCUBCLK`, DCCG) that the SMU/DC init in amdgpu brings up before this point. A clean way to narrow it down is a trace of the same sequence on Linux (`umr` register dump of `DMCUB_*` right after `dm_dmub_hw_init`) on the machine's Windows/Linux side, or a read of the SMU-side clock state.
 
-The probe boot-args for this stage (`rednavi_dmub_load`, `rednavi_dmub_psp`, `rednavi_dmub_mode`, `rednavi_dmub_min`) have been removed from the desktop; the PSP stages stay enabled.
+The probe boot-args for this stage are `rednavi_dmub_load`, `rednavi_dmub_psp`, `rednavi_dmub_mode` and `rednavi_dmub_min`; they are opt-in, like the PSP stages.
 
 ## The DMCUB runs (2026-10-28)
 
@@ -119,6 +119,6 @@ With `rednavi_dmub_cmd=1` the probe wrote one 64-byte command into inbox1 at the
 
 So the mailbox works end to end: our driver and our DMCUB firmware talk, with the block in VRAM and the TMR where the PSP wants it. The remaining distance to a picture is the display core itself (DC): clocks and DCCG, HUBBUB/HUBP/DPP/MPC/OPP/OPTC/DIO programming for one stream, link training on a connector, and an `IOFramebuffer` on top.
 
-## Next code step
+## What came next
 
-Decode the feature caps. Then plan the DC part: list which `dc/dcn32` and `dc/dcn30` functions a single-stream, single-connector mode set needs, and how much of DC can be taken as is.
+The feature caps were decoded and the DC part was planned in `DC_PLAN.md`; the display path is described in `DP_BRINGUP.md`.
