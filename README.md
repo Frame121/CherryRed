@@ -6,12 +6,13 @@ Goal: a real framebuffer on the card, driven by our own kext (DCN 3.2 display en
 
 ## Status
 
-**Pre-alpha, nothing works yet.** There is no release. What exists today:
+**Pre-alpha, no display output yet.** The probe kext runs on the card and reads its IP discovery table, but nothing drives the display. There is no release. What exists today:
 
 | Milestone | What | State |
 |---|---|---|
-| M0 | Repo, CI (macOS runner), build scripts | Written, not yet built by CI |
-| M1 | Probe kext: matches `1002:747E`, maps the register BAR, logs PCI info and the IP discovery table | Written, never run on hardware |
+| M0 | Repo, CI (macOS runner), build scripts | Done, CI green (Debug and Release) |
+| M1 | Probe kext: matches `1002:747E`, maps the register BAR, reads the IP discovery table | Done: ran on a real RX 7800 XT, versions recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| M1.5 | Probe stage 2: read-only PSP and SMU mailbox registers | Written, not yet run on hardware |
 | M2 | Compatibility layer (LinuxKPI-style), PSP 13 + SMU 13 + DMUB firmware bring-up | Not started |
 | M3 | Native framebuffer: port of amdgpu DC (DCN 3.2) + `IOFramebuffer` | Not started |
 | M4 | GFX11, MES, SDMA 6, GPU VM, IH ring, user client | Not started |
@@ -28,7 +29,7 @@ For AMD that means: **amdgpu in a kext, RADV (ACO) in userspace, Metal -> SPIR-V
 
 ASUS ROG STRIX Z490-G GAMING, i7-10700K, **Intel UHD 630 as the primary display**, Sapphire RX 7800 XT as the development target (PCIe 4.0 x16). See [docs/TEST_MACHINES.md](docs/TEST_MACHINES.md).
 
-Navi 32 boards (RX 7700 XT / 7800 XT) are in scope; reports from other 7000-series owners are welcome once the probe works.
+Navi 32 boards (RX 7700 XT / 7800 XT) are in scope; reports from other 7000-series owners are welcome now that the probe works.
 
 ## Building
 
@@ -44,10 +45,11 @@ make DEBUG=1
 Load `RedNavi.kext` on a machine where the 7800 XT is **not** the display you depend on. Then:
 
 ```
-log show --last boot --predicate 'eventMessage CONTAINS "RedNavi"'
+ioreg -rn RedNaviProbe -l -x > probe.txt
+python3 tools/decode_discovery.py probe.txt
 ```
 
-Please post the output in an issue, together with your board and BIOS settings (Above 4G Decoding, Resizable BAR).
+The probe publishes the raw table as the `ip-discovery` property and the PSP/SMU registers as `mailbox-regs`. `IOLog` output may not show up in `log show` (cause unknown), so read the properties. Please post the decoded output in an issue, together with your board and BIOS settings (Above 4G Decoding, Resizable BAR).
 
 ## Contributing
 

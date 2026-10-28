@@ -5,7 +5,7 @@ Current goal: **M3, a native framebuffer** on the RX 7800 XT. M4 to M6 are open 
 | Milestone | Scope | Test |
 |---|---|---|
 | M0 | Repo, CI on a macOS runner, build scripts | CI green |
-| M1 | Probe kext: PCI info, BARs, IP discovery dump (read-only) | Log shows `1002:747E` and the IP versions |
+| M1 | Probe kext: PCI info, BARs, IP discovery dump (read-only). **Done 2026-10-27.** Stage 2 (PSP/SMU mailbox registers) written, awaiting a hardware run | `ioreg` shows the IP versions and mailbox registers |
 | M2 | LinuxKPI-style compatibility layer for XNU; PSP 13 and SMU 13 bring-up; DMUB firmware load | Firmware loaded, log of PSP/SMU state |
 | M3 | Port of amdgpu DC for DCN 3.2 and an `IOFramebuffer` subclass | A native mode on one connector, desktop visible |
 | M4 | GFX11, MES, SDMA 6, GPU VM, IH ring, user client (buffers, VA, submit, sync) | Command submission works |

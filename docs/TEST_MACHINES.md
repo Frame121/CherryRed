@@ -12,11 +12,11 @@
 | Link | PCIe 4.0 x16 (bus 3, device 0, function 0 on Windows) |
 | Windows driver | 32.0.31041.1004 |
 
-macOS is booted on this machine through OpenCore with the UHD 630 driving the screen, so the 7800 XT is free for experiments and panics can be read.
+macOS (Sequoia 15.8.2) is booted on this machine through OpenCore with the UHD 630 driving the screen, so the 7800 XT is free for experiments and panics can be read. The machine boots macOS first, auto-mounts the EFI and has SSH (Remote Login) enabled, so kext updates and logs can be handled remotely. Boot-args: `-v debug=0x100 keepsyms=1` (no `-wegnoegpu`); OpenCore file logging is on.
 
 ## To collect before running anything on macOS
 
 - [x] Above 4G Decoding / Resizable BAR state in the BIOS: Resizable BAR ON. VRAM is 16 GB.
-- [ ] VBIOS dump (GPU-Z)
-- [ ] IP discovery from a Linux live boot (`dmesg | grep -i discovery`, `/sys/kernel/debug/dri/*/`)
+- [ ] VBIOS dump (GPU-Z), optional
+- [x] IP discovery: read by the probe from VRAM (no Linux needed), see `docs/ARCHITECTURE.md`
 - [ ] ACPI VFCT table presence
