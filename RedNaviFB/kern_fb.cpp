@@ -95,14 +95,51 @@ class RedNaviFB : public IOFramebuffer {
     // a second display, makes it the main one and puts the desktop on it, where the monitor does not show it.
     // Returns how many it asked to terminate. The boot framebuffer is registered a little after this kext starts, so the timer
     // calls this again every second until it has been found.
+    // rednavi_kill_boot_fb=2: leave the stock framebuffer alone (terminating it panics) and terminate only the IODisplayConnect
+    // it published for its one mode, which is what macOS turns into the second display. Same-provider framebuffers other than
+    // this one are the stock one.
+    unsigned removeBootDisplayConnect(IOService *pci) {
+        OSDictionary *match = IOService::serviceMatching("IOFramebuffer");
+        OSIterator *it = match ? IOService::getMatchingServices(match) : nullptr;
+        unsigned fbs = 0, asked = 0;
+        if (it) {
+            OSObject *o;
+            while ((o = it->getNextObject())) {
+                IOService *fb = OSDynamicCast(IOService, o);
+                if (!fb || fb == this || fb->getProvider() != pci) continue;
+                fbs++;
+                OSIterator *kids = fb->getChildIterator(gIOServicePlane);
+                if (!kids) continue;
+                OSObject *k;
+                while ((k = kids->getNextObject())) {
+                    IOService *kid = OSDynamicCast(IOService, k);
+                    if (kid && kid->metaCast("IODisplayConnect")) {
+                        IOLog("RedNaviFB: terminating the display connect of the stock framebuffer\n");
+                        if (kid->terminate()) asked++;
+                    }
+                }
+                kids->release();
+            }
+            it->release();
+        }
+        if (match) match->release();
+        char msg[64];
+        snprintf(msg, sizeof(msg), "try %u: stock framebuffers %u, display connects terminated %u", ghostTries, fbs, asked);
+        OSString *str = OSString::withCString(msg);
+        if (str && (asked || ghostTries % 30 == 0)) setProperty("boot-fb-removal", str);
+        if (str) str->release();
+        return asked;
+    }
+
     unsigned removeBootFramebuffer(IOService *probe) {
         // Off by default: terminating the stock IOFramebuffer makes IOGraphics notify AppleUpstreamUserClient, which dereferences a
         // null pointer in fbNotificationOccurred and panics (seen on macOS 15.8.2). Kept for experiments with boot-arg
-        // rednavi_kill_boot_fb=1.
+        // rednavi_kill_boot_fb=1 (2 = only its display connect).
         uint32_t kill = 0;
         if (!PE_parse_boot_argn("rednavi_kill_boot_fb", &kill, sizeof(kill)) || !kill) return 0;
         IOService *pci = probe ? probe->getProvider() : nullptr;
         if (!pci) return 0;
+        if (kill == 2) return removeBootDisplayConnect(pci);
         OSDictionary *match = IOService::serviceMatching("IONDRVFramebuffer");
         OSIterator *it = match ? IOService::getMatchingServices(match) : nullptr;
         unsigned found = 0, asked = 0, other = 0;
