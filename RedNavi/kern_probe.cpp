@@ -275,7 +275,7 @@ class RedNaviProbe : public IOService {
     void dcnReplay();
     void fillScanout();
     void publishFramebuffer();
-    void smuProbe();
+    void smuProbe(const char *property, bool send);
     bool dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k);
     bool dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n);
     bool dpcdRead(uint32_t eng, uint32_t addr, uint8_t *d, uint32_t n);
@@ -697,7 +697,7 @@ void RedNaviProbe::fillScanout() {
 
 // Opt-in (rednavi_smu=1): first talk to the SMU through the compat layer. Only read-style messages: the
 // test message, the firmware version and the driver interface version. Published as "smu-info".
-void RedNaviProbe::smuProbe() {
+void RedNaviProbe::smuProbe(const char *property, bool send) {
     uint32_t arg = 0;
     if (!PE_parse_boot_argn("rednavi_smu", &arg, sizeof(arg)) || arg != 1) {
         IOLog("RedNavi: SMU messages not requested (boot-arg rednavi_smu=1)\n");
@@ -706,20 +706,34 @@ void RedNaviProbe::smuProbe() {
     uint32_t mp1 = 0;
     if (!ipBase(kRNHwIdMp1, &mp1)) { IOLog("RedNavi: SMU: no MP1 base\n"); return; }
 
-    struct rn_device adev;
-    rn_device_init(&adev, "RedNavi SMU", reinterpret_cast<volatile void *>(regs->getVirtualAddress()), regs->getLength());
-    adev.reg_offset[RN_MP1_HWIP][0][0] = mp1;
+    struct rn_device dev;
+    struct rn_device *adev = &dev;       // the RREG32 macros expect a pointer called adev
+    rn_device_init(adev, "RedNavi SMU", reinterpret_cast<volatile void *>(regs->getVirtualAddress()), regs->getLength());
+    adev->reg_offset[RN_MP1_HWIP][0][0] = mp1;
 
-    OSDictionary *out = OSDictionary::withCapacity(8);
+    OSDictionary *out = OSDictionary::withCapacity(12);
     if (!out) return;
+    rnPublishOne(out, "mp1_base", mp1);
+    // MP1_FIRMWARE_FLAGS (SMN 0x3b10024: MP1_Public | smnMP1_FIRMWARE_FLAGS) through the NBIO RSMU index/data pair;
+    // bit 0 is INTERRUPTS_ENABLED, which smu_v13_0_check_fw_status wants set before messages are sent.
+    uint32_t nbif = 0;
+    if (ipBase(108, &nbif, 1)) {
+        wr((nbif + 0) * 4, 0x03b10024u);
+        rnPublishOne(out, "fw_flags", rd((nbif + 1) * 4));
+        rnPublishOne(out, "nbif_base1", nbif);
+    }
+    rnPublishOne(out, "c2pmsg_66_before", RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_66));
+    rnPublishOne(out, "c2pmsg_82_before", RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_82));
+    rnPublishOne(out, "c2pmsg_90_before", RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90));
     static const struct { const char *name; uint32_t msg; uint32_t arg; } msgs[] = {
-        {"test", PPSMC_MSG_TestMessage, 0x12345678},
         {"smu_version", PPSMC_MSG_GetSmuVersion, 0},
         {"driver_if_version", PPSMC_MSG_GetDriverIfVersion, 0},
+        {"test", PPSMC_MSG_TestMessage, 0x12345678},
     };
     for (const auto &m : msgs) {
+        if (!send) break;                    // read-only call: only the registers above
         uint32_t result = 0, resp = 0;
-        int rc = rn_smu13_send(&adev, m.msg, m.arg, &result, &resp, 100000);
+        int rc = rn_smu13_send(adev, m.msg, m.arg, &result, &resp, 100000);
         IOLog("RedNavi: SMU %s: rc %d, response 0x%x, argument 0x%08x\n", m.name, rc, resp, result);
         char key[40];
         snprintf(key, sizeof(key), "%s_rc", m.name);
@@ -728,9 +742,10 @@ void RedNaviProbe::smuProbe() {
         rnPublishOne(out, key, resp);
         snprintf(key, sizeof(key), "%s_arg", m.name);
         rnPublishOne(out, key, result);
-        if (rc == -ETIMEDOUT) break;          // the SMU does not answer: do not pile up more writes
+        if (rc == -ETIMEDOUT) WREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90, 1);   // diagnostic only: let the next message try
     }
-    setProperty("smu-info", out);
+    rnPublishOne(out, "c2pmsg_90_after", RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90));
+    setProperty(property, out);
     out->release();
 }
 
@@ -1361,6 +1376,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
     dumpRegs(kRNDmcubRegs, sizeof(kRNDmcubRegs) / sizeof(kRNDmcubRegs[0]), "dmcub-regs");
     dumpRegs(kRNHpdRegs, sizeof(kRNHpdRegs) / sizeof(kRNHpdRegs[0]), "hpd-regs");
+    smuProbe("smu-info-early", false);   // registers only, before any stage that writes to the card
     dmcubSnapshot("dmcub-snap-boot");
     loadPspChain();
     if (createPspRing()) {
@@ -1374,7 +1390,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dpTrain();
     dcnReplay();
     dcnDump();
-    smuProbe();
+    smuProbe("smu-info", true);          // messages, once the PSP and the display are up
     publishFramebuffer();
     registerService();
     return true;
