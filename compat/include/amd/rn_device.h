@@ -27,6 +27,7 @@ enum rn_hw_ip {
 // Byte offsets of the index/data pair that reaches any register or VRAM address.
 #define RN_MM_INDEX 0x00
 #define RN_MM_DATA 0x04
+#define RN_MM_INDEX_HI 0x18
 
 struct rn_device {
     struct device dev;
@@ -42,6 +43,10 @@ extern "C" {
 
 void rn_device_init(struct rn_device *adev, const char *name, volatile void *rmmio, size_t rmmio_size);
 u32 rn_rreg32(struct rn_device *adev, u32 reg);               // reg in dwords, like amdgpu
+
+// VRAM through MM_INDEX / MM_DATA / MM_INDEX_HI, by offset from the start of VRAM (works whatever size BAR0 has).
+u32 rn_vram_rd32(struct rn_device *adev, u64 vram_offset);
+void rn_vram_wr32(struct rn_device *adev, u64 vram_offset, u32 v);
 void rn_wreg32(struct rn_device *adev, u32 reg, u32 v);
 
 #ifdef __cplusplus

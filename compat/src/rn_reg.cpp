@@ -32,4 +32,22 @@ void rn_wreg32(struct rn_device *adev, u32 reg, u32 v) {
     spin_unlock(&adev->mmio_idx_lock);
 }
 
+
+u32 rn_vram_rd32(struct rn_device *adev, u64 off) {
+    spin_lock(&adev->mmio_idx_lock);
+    writel((u32)off | 0x80000000u, adev->rmmio + RN_MM_INDEX);
+    writel((u32)(off >> 31), adev->rmmio + RN_MM_INDEX_HI);
+    u32 v = readl(adev->rmmio + RN_MM_DATA);
+    spin_unlock(&adev->mmio_idx_lock);
+    return v;
+}
+
+void rn_vram_wr32(struct rn_device *adev, u64 off, u32 v) {
+    spin_lock(&adev->mmio_idx_lock);
+    writel((u32)off | 0x80000000u, adev->rmmio + RN_MM_INDEX);
+    writel((u32)(off >> 31), adev->rmmio + RN_MM_INDEX_HI);
+    writel(v, adev->rmmio + RN_MM_DATA);
+    spin_unlock(&adev->mmio_idx_lock);
+}
+
 }

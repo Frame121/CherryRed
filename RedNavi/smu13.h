@@ -12,6 +12,13 @@
 #define PPSMC_MSG_SetAllowedFeaturesMaskLow 0x4
 #define PPSMC_MSG_SetAllowedFeaturesMaskHigh 0x5
 #define PPSMC_MSG_EnableAllSmuFeatures 0x6
+#define PPSMC_MSG_SetDriverDramAddrHigh 0xE
+#define PPSMC_MSG_SetDriverDramAddrLow 0xF
+#define PPSMC_MSG_SetToolsDramAddrHigh 0x10
+#define PPSMC_MSG_SetToolsDramAddrLow 0x11
+#define PPSMC_MSG_RunDcBtc 0x36
+#define PPSMC_MSG_AllowGfxOff 0x28
+#define PPSMC_MSG_DisallowGfxOff 0x29
 #define PPSMC_MSG_GetRunningSmuFeaturesLow 0xC
 #define PPSMC_MSG_GetRunningSmuFeaturesHigh 0xD
 

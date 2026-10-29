@@ -87,6 +87,7 @@
 #include "edid.h"
 #include "mode_regs.h"
 #include "smu13.h"
+#include "gfx11.h"
 
 #ifdef RN_HAVE_PSP_FW
 #include "psp_fw.h"
@@ -281,6 +282,8 @@ class RedNaviProbe : public IOService {
     void loadDmcub();
     void loadSmuFw();
     void loadGcFw();
+    void sdmaTest();
+    struct rn_device gpu;          // register access in the amdgpu style, filled in start()
     void gcStatus(OSDictionary *out, const char *prefix, uint32_t timeoutMs);
     void probeAux();
     bool dmubSend(const uint8_t *cmd, uint32_t len, uint32_t reply[16]);
@@ -793,7 +796,16 @@ void RedNaviProbe::smuProbe(const char *property, bool send) {
     // wait for it. Allowed mask first (smu_feature_set_allowed_mask), then the enable, then the features that are running.
     uint32_t en = 0;
     if (send && PE_parse_boot_argn("rednavi_smu_enable", &en, sizeof(en)) && en == 1) {
+        // smu_smc_hw_setup does these before it enables the features: tell the SMU where the driver and tool tables are (in VRAM, as
+        // in Linux), then run the DC BTC. The power firmware stopped answering messages a few seconds after the enable without them.
+        const uint64_t drvMc = kRNVramMcBase + 0x0C300000ull, toolMc = kRNVramMcBase + 0x0C320000ull;
+        for (uint32_t o = 0; o < 0x40000; o += 4) vramWrite(0x0C300000ull + o, 0);
         struct { const char *name; uint32_t msg; uint32_t arg; } steps[] = {
+            {"drv_hi", PPSMC_MSG_SetDriverDramAddrHigh, static_cast<uint32_t>(drvMc >> 32)},
+            {"drv_lo", PPSMC_MSG_SetDriverDramAddrLow, static_cast<uint32_t>(drvMc)},
+            {"tool_hi", PPSMC_MSG_SetToolsDramAddrHigh, static_cast<uint32_t>(toolMc >> 32)},
+            {"tool_lo", PPSMC_MSG_SetToolsDramAddrLow, static_cast<uint32_t>(toolMc)},
+            {"run_btc", PPSMC_MSG_RunDcBtc, 0},
             {"allow_hi", PPSMC_MSG_SetAllowedFeaturesMaskHigh, 0xFFFFFFFFu},
             {"allow_lo", PPSMC_MSG_SetAllowedFeaturesMaskLow, 0xFFFFFFFFu},
             {"enable_all", PPSMC_MSG_EnableAllSmuFeatures, 0},
@@ -802,7 +814,7 @@ void RedNaviProbe::smuProbe(const char *property, bool send) {
         };
         for (auto &st : steps) {
             uint32_t result = 0, resp = 0;
-            int rc = rn_smu13_send(adev, st.msg, st.arg, &result, &resp, 500000);
+            int rc = rn_smu13_send(adev, st.msg, st.arg, &result, &resp, 3000000);   // RunDcBtc can take a while
             IOLog("RedNavi: SMU %s: rc %d, response 0x%x, argument 0x%08x\n", st.name, rc, resp, result);
             char key[40];
             snprintf(key, sizeof(key), "%s_rc", st.name); rnPublishOne(out, key, static_cast<uint64_t>(static_cast<uint32_t>(rc)));
@@ -1536,6 +1548,75 @@ void RedNaviProbe::loadGcFw() {
 #endif
 }
 
+// First command on the graphics engines (boot-arg rednavi_sdma_test=1, needs the GC firmware and the SMU features enabled so the RLC has
+// booted): enable the GC memory hub on VRAM, start SDMA0 on a ring in VRAM and have it write a magic value that the CPU then reads.
+void RedNaviProbe::sdmaTest() {
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_sdma_test", &arg, sizeof(arg)) || arg != 1) return;
+    uint32_t gc1 = 0;
+    if (!ipBase(kRNHwIdGc, &gc1, 1)) return;
+    uint32_t boot = rd((gc1 + 0x4e82) * 4);
+    if (!(boot & 0x80000000u)) { IOLog("RedNavi: SDMA test: the RLC has not booted (BOOTLOAD_STATUS 0x%08x), skipping\n", boot); return; }
+    // With the SMU features on, GFXOFF powers the graphics block down when it is idle and its registers read back as zero (the SDMA
+    // status did). Linux brackets register access with amdgpu_gfx_off_ctrl; here GFXOFF is simply disallowed for the test.
+    struct rn_device *adev = &gpu;                                         // the RREG32 macros expect this name
+    // After the features are enabled the SMU may be busy for a while with C2PMSG_90 at 0: wait for it (up to 10 s) and record how long.
+    uint32_t waitedMs = 0;
+    while (waitedMs < 10000 && RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90) == 0) { IOSleep(1); waitedMs++; }
+    {
+        const char *wn[1] = {"smu_idle_wait_ms"};
+        uint32_t wv[1] = {waitedMs};
+        rnPublish(this, "sdma-wait", wn, wv, 1);
+    }
+    uint32_t goResult = 0, goResp = 0, c66 = RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_66), c82 = RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_82), c90 = RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90);
+    uint32_t verResult = 0, verResp = 0;
+    int ver = rn_smu13_send(&gpu, PPSMC_MSG_GetSmuVersion, 0, &verResult, &verResp, 500000);   // is the SMU still answering at all?
+    {
+        const char *sn[6] = {"c2pmsg_66", "c2pmsg_82", "c2pmsg_90", "version_rc", "version_resp", "version"};
+        uint32_t sv[6] = {c66, c82, c90, static_cast<uint32_t>(ver), verResp, verResult};
+        rnPublish(this, "sdma-smu", sn, sv, 6);
+    }
+    int go = rn_smu13_send(&gpu, PPSMC_MSG_DisallowGfxOff, 0, &goResult, &goResp, 500000);
+    IOLog("RedNavi: SDMA test: DisallowGfxOff rc %d response 0x%x\n", go, goResp);
+    IOSleep(20);
+    {
+        uint32_t gc0 = 0;
+        ipBase(kRNHwIdGc, &gc0, 0);
+        uint32_t dn[6] = {static_cast<uint32_t>(go), goResp, rd((gc0 + 0xda4) * 4), rd((gc1 + 0x4e6b) * 4), rd((gc0 + 0xf40) * 4), rd((gc1 + 0x4c00) * 4)};
+        const char *dnn[6] = {"gfxoff_rc", "gfxoff_resp", "grbm_status", "rlc_gpm_stat", "cp_stat", "rlc_cntl"};
+        rnPublish(this, "sdma-pre", dnn, dn, 6);
+    }
+    // VRAM offsets: the first ~8 MB hold the firmware boot framebuffer that macOS draws into, the scanout is at 0x08000000, so the
+    // engines work at 192 MB: page table 0x0C100000, default and fault pages 0x0C200000/0x0C201000, SDMA ring 0x0C000000, target 0x0C002000.
+    struct rn_gmc gmc = {kRNVramMcBase, kRNVramMcBase + 0x3FFFFFFFFull, 0, 0x1FFFFFFFull, 0x0C100000, 0x0C200000, 0x0C201000};
+    for (uint32_t o = 0; o < 0x1000; o += 4) rn_vram_wr32(&gpu, gmc.pt_vram_offset + o, 0);
+    // Does CPU access to VRAM through MM_INDEX/MM_DATA survive the memory hub being switched on? Two probe locations, read right
+    // after writing and again 50 ms later, before and after rn_gfxhub_enable.
+    uint32_t pt[8] = {};
+    rn_vram_wr32(&gpu, 0x0C000000, 0xA1A1A1A1u); rn_vram_wr32(&gpu, 0x0C002000, 0xB2B2B2B2u);
+    pt[0] = rn_vram_rd32(&gpu, 0x0C000000); pt[1] = rn_vram_rd32(&gpu, 0x0C002000);
+    IOSleep(50);
+    pt[2] = rn_vram_rd32(&gpu, 0x0C000000); pt[3] = rn_vram_rd32(&gpu, 0x0C002000);
+    rn_gfxhub_enable(&gpu, &gmc);
+    rn_vram_wr32(&gpu, 0x0C000000, 0xC3C3C3C3u); rn_vram_wr32(&gpu, 0x0C002000, 0xD4D4D4D4u);
+    pt[4] = rn_vram_rd32(&gpu, 0x0C000000); pt[5] = rn_vram_rd32(&gpu, 0x0C002000);
+    IOSleep(50);
+    pt[6] = rn_vram_rd32(&gpu, 0x0C000000); pt[7] = rn_vram_rd32(&gpu, 0x0C002000);
+    {
+        const char *pn[8] = {"before_now_0", "before_now_2", "before_50ms_0", "before_50ms_2", "after_now_0", "after_now_2", "after_50ms_0", "after_50ms_2"};
+        rnPublish(this, "vram-persist", pn, pt, 8);
+    }
+    IOLog("RedNavi: SDMA test: GFXHUB enabled, starting SDMA0\n");
+    struct rn_sdma_result res;
+    rn_sdma0_test(&gpu, 0x0C000000, 4096, 0x0C002000, &res);
+    IOLog("RedNavi: SDMA test: step %u, value 0x%08x, RPTR 0x%x WPTR 0x%x F32_CNTL 0x%08x RB_CNTL 0x%08x -> %s\n", res.step, res.value, res.rptr, res.wptr, res.f32_cntl, res.rb_cntl, res.ok ? "OK" : "FAILED");
+    const char *n[25] = {"ok", "step", "value", "pre_value", "rptr", "wptr", "f32_cntl", "rb_cntl", "fault_status", "fault_addr_lo", "fault_addr_hi", "sdma_status", "sdma_status1", "ctx_status",
+                         "version", "cntl", "power_cntl", "checksum", "freeze", "chicken", "program", "ring0", "ring3", "rptr_shadow", "wptr_shadow"};
+    uint32_t v[25] = {static_cast<uint32_t>(res.ok), res.step, res.value, res.pre_value, res.rptr, res.wptr, res.f32_cntl, res.rb_cntl, res.fault_status, res.fault_addr_lo, res.fault_addr_hi, res.sdma_status, res.sdma_status1, res.ctx_status,
+                      res.version, res.cntl, res.power_cntl, res.checksum, res.freeze, res.chicken, res.program, res.ring0, res.ring3, res.rptr_shadow, res.wptr_shadow};
+    rnPublish(this, "sdma-test", n, v, 25);
+}
+
 void RedNaviProbe::loadDmcub() {
 #ifdef RN_HAVE_DMUB_FW
     uint32_t arg = 0;
@@ -1740,6 +1821,9 @@ bool RedNaviProbe::start(IOService *provider) {
         return false;
     }
     IOLog("RedNavi: registers mapped, %llu KB\n", (uint64_t)regs->getLength() >> 10);
+    rn_device_init(&gpu, "RedNavi", reinterpret_cast<volatile void *>(regs->getVirtualAddress()), regs->getLength());
+    for (uint32_t i = 0; i < 4; i++) ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i);
+    ipBase(kRNHwIdMp1, &gpu.reg_offset[RN_MP1_HWIP][0][0]);
 
     // System Information reads the GPU name and VRAM size from these properties of the PCI node.
     {
@@ -1775,6 +1859,7 @@ bool RedNaviProbe::start(IOService *provider) {
     dcnReplay();
     dcnDump();
     smuProbe("smu-info", true);          // messages, once the PSP and the display are up
+    sdmaTest();
     publishFramebuffer();
     registerService();
     return true;
