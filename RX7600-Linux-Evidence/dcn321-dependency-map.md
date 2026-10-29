@@ -47,8 +47,8 @@ The clone is a **partial** (`blob:none`) checkout. For DCN 3.2.1 specifically:
   link_encoder, mem_input, abm, audio, aux_engine, dccg, dchubbub, ipp, mcif_wb, …)
 
 **NOT materialized (must be fetched before the display port can be built):**
-- The DCN 3.2.1 register-map header `dc/inc/hw/dcn321.h` (block register offsets) — not tracked
-  in the clone.
+- The DCN 3.2.1 block register-map header `dc/inc/hw/dcn321.h` (block register offsets) — not
+  tracked in the clone.
 - `dc/hwss/dcn321/` (hwseq/init), `dc/optc/dcn321/`, `dc/clk_mgr/dcn321/`, `dc/dccg/dcn321/`.
 
 Fetch options (Mac-day or on demand):
@@ -56,6 +56,14 @@ Fetch options (Mac-day or on demand):
    the specific blobs from the existing clone), or
 2. source the DCN 3.2.1 register map + block files from the upstream `amd/amd-staging-dkms` /
    `linux` display tree at a matching commit.
+
+> **Update (2026-10-29):** the *asic_reg* register headers `dcn_3_2_1_offset.h` (1.49 MB) and
+> `dcn_3_2_1_sh_mask.h` (6.07 MB) under `drivers/gpu/drm/amd/include/asic_reg/dcn/` **are**
+> materializable on demand from this `blob:none` clone (a `git show <commit>:<path>` fetches just
+> those two blobs). They were fetched and `src/dcn321/dcn321_regs.h` was **generated from them**
+> by `tools/dcn321/gen_regs.py` (see its provenance line). The block-level `dcn321.h` above is a
+> separate file and remains unmaterialized; the generated header covers the OTG/HUBPREQ/DMCUB
+> registers needed for the display bring-up.
 
 ## Init order (bring-up sequence, display portion)
 

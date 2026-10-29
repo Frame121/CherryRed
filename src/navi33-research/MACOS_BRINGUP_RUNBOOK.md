@@ -73,10 +73,12 @@ scaffold, reusing the Navi 48 stack where it is generation-agnostic.)
    (gfx1102) only after the documented prerequisites; verify PSP/SMU init.
 4. **VRAM/GMC/GART + interrupt handling** — memory manager, MSI/MSI-X, interrupt dispatch.
 5. **Command submission + synchronization** — GFX/SDMA rings, fences, ring reset.
-6. **Display-engine init + scanout (DCN 3.2.1)** — generate `src/dcn321/dcn321_regs.h` from the
-   real `dcn_3_2_1_offset.h`/`sh_mask.h` (`tools/dcn321/gen_regs.py`), load
-   `dcn_3_2_1_dmcub.bin`, bring up clock → link → hub → OTG → DML → scanout. **First visible
-   output on the RX 7600.**
+6. **Display-engine init + scanout (DCN 3.2.1)** — `src/dcn321/dcn321_regs.h` is **already
+   generated** from the real DCN 3.2.1 headers (see its provenance line; regenerate with
+   `tools/dcn321/gen_regs.py` + `--check` if the source moves). On the live card: read the DCN
+   segment base from BAR5 and confirm `seg[BASE_IDX] + offset` (BASE_IDX 2) is inside the window
+   before any register access, then load `dcn_3_2_1_dmcub.bin` and bring up clock → link → hub →
+   OTG → DML → scanout. **First visible output on the RX 7600.**
 7. **Acceleration API + Metal** — expose the user-client ABI to the Metal bundle
    (`tools/native/`), AIR→SPIR-V (`src/xlat12/`), Mesa RADV (`mesa-patches/`); run Metal workloads.
 

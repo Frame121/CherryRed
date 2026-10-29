@@ -9,8 +9,8 @@ CLI:
       --shmask <dcn_3_2_1_sh_mask.h> --spec <spec.json> --out <dcn321_regs.h>
   python3 tools/dcn321/gen_regs.py ... --check   # exit 1 if --out differs from a fresh generation
 
-Inputs (a FULL Linux/amdgpu checkout; the DCN 3.2.1 asic_reg headers are NOT materialized in
-the blob:none evidence clone, so this generator is run on Mac-day or against a full checkout):
+Inputs (two DCN 3.2.1 asic_reg headers; these are materializable on demand from the blob:none
+evidence clone via `git show <commit>:<path>`, or from any full Linux/amdgpu checkout):
   drivers/gpu/drm/amd/include/asic_reg/dcn/dcn_3_2_1_offset.h   regXXX offsets + regXXX_BASE_IDX
   drivers/gpu/drm/amd/include/asic_reg/dcn/dcn_3_2_1_sh_mask.h  XXX__FIELD_MASK / XXX__FIELD__SHIFT
 
@@ -20,10 +20,11 @@ generator REFUSES when an instance is missing, when instances disagree on BASE_I
 another instance's mask/shift differs from instance 0's. No arithmetic other than parsing.
 
 The register SPEC is data (spec.json: a list of [group, prefix, count, reg, [fields]]), not
-hard-coded, so the same generator serves the display bring-up and can be extended as the DCN
-3.2.1 register set is confirmed against the real headers. The test in src/dcn321/tests/
-exercises this logic against a synthetic fixture (so the generator is proven without the real
-headers) and is NOT a claim that any DCN 3.2.1 register offset is known.
+hard-coded, so the same generator serves the display bring-up and can be extended as more DCN
+3.2.1 registers are needed. The test in src/dcn321/tests/ exercises this logic against a
+synthetic fixture (so the generator is proven without the real headers). The committed
+src/dcn321/dcn321_regs.h was generated from the real headers (see its provenance line); that
+header is not yet validated against the physical card.
 """
 import argparse
 import json
@@ -43,7 +44,7 @@ def parse(text):
     return d
 
 
-def generate(offset_text, shmask_text, spec, prefix="DCN321"):
+def generate(offset_text, shmask_text, spec, prefix="DCN321", provenance=""):
     off = parse(offset_text)
     msk = parse(shmask_text)
     out = [
@@ -54,9 +55,11 @@ def generate(offset_text, shmask_text, spec, prefix="DCN321"):
         " * by its _BASE_IDX; the absolute BAR5 dword is seg[BASE_IDX] + offset. Field masks and shifts are the",
         " * instance-0 names; the generator refused if any instance disagreed.",
         " *",
-        " * NOTE: generated from the real DCN 3.2.1 headers on Mac-day / a full checkout. This header is NOT valid",
-        " * until those headers are provided; the synthetic-fixture test proves the generator, not the offsets.",
-        " */",
+    ]
+    if provenance:
+        out.append(" * Provenance: " + provenance)
+        out.append(" *")
+    out += [
         f"#ifndef {prefix}_REGS_H",
         f"#define {prefix}_REGS_H",
         "",
@@ -112,13 +115,15 @@ def main(argv=None):
     ap.add_argument("--spec", required=True, help="path to spec.json (list of [group,prefix,count,reg,[fields]])")
     ap.add_argument("--out", required=True, help="output header path")
     ap.add_argument("--prefix", default="DCN321", help="macro prefix (default DCN321)")
+    ap.add_argument("--provenance", default="",
+                    help="one-line source provenance (commit/clone + blob SHAs) embedded in the header")
     ap.add_argument("--check", action="store_true", help="exit 1 if --out differs from a fresh generation")
     args = ap.parse_args(argv)
 
     spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
     text = generate(Path(args.offset).read_text(encoding="utf-8"),
                     Path(args.shmask).read_text(encoding="utf-8"),
-                    spec, args.prefix)
+                    spec, args.prefix, args.provenance)
     if args.check:
         cur = Path(args.out).read_text(encoding="utf-8") if Path(args.out).exists() else ""
         if cur != text:
