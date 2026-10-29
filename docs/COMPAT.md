@@ -37,3 +37,12 @@ Put it under `compat/include/linux/` only if Linux code includes it by that name
 `rn_smu13_send` follows `smu_msg_v1_send_msg` from Linux: wait for the previous response, clear `C2PMSG_90`, write the argument to `C2PMSG_82`, the message to `C2PMSG_66`, poll `C2PMSG_90` (1 = OK). `rednavi_smu=1` sends `GetSmuVersion`, `GetDriverIfVersion` and `TestMessage` after the PSP and display bring-up and publishes `smu-info` (and `smu-info-early`, registers only, read before any write) on the probe node. Message numbers come from `pmfw_if/smu_v13_0_0_ppsmc.h`; SMU 13.0.10 uses those tables. Messages that change clocks or features are not sent.
 
 **First hardware result (2026-10-29): the SMU does not answer.** The compat layer loads and runs in the kernel (all new kernel symbols resolve), register access through `struct rn_device` works, and the SMU looks alive: `C2PMSG_90` reads 1, `MP1_FIRMWARE_FLAGS` (SMN `0x3b10024`, read through the NBIO RSMU index/data pair) reads `0x1`, i.e. `INTERRUPTS_ENABLED`, which is what Linux's `smu_v13_0_check_fw_status` checks. But none of the three messages gets a response within 100 ms: `C2PMSG_66` and `_82` keep the values written and `C2PMSG_90` stays 0. The result is the same before and after our PSP, DMCUB and display stages, so those did not break it. Linux does not load SMU firmware through the PSP on this ASIC (`autoload_supported`), so the IFWI firmware is expected to answer. What is not known yet: whether Linux does something between PSP start and the first message that we do not (the Linux reference dmesg shows the PSP TMR at 20.50 s and the SMU version query at 20.74 s), or whether the mailbox needs a step this read of `smu_v13_0.c` missed. A register capture of the MP1 mailbox around the first message on Linux would settle it.
+
+### Linux comparison run
+
+`tools/linux_smu_mailbox.py` reads the MP1 mailbox on Linux and, with `send`, sends the same three messages with the same protocol. Run it twice on the card: once on a normal boot (the driver has initialised the SMU) and once with the kernel parameter `amdgpu.dpm=0` (the driver leaves the SMU alone, like RedNavi does). If the SMU answers on Linux in the second case, the difference is in what RedNavi does around the mailbox; if it does not, it needs something the Linux driver does during its power-management init. Results go to `docs/logs/linux-reference/`.
+
+```
+sudo python3 linux_smu_mailbox.py send smu_mailbox_normal.txt
+sudo python3 linux_smu_mailbox.py send smu_mailbox_dpm0.txt
+```
