@@ -23,11 +23,11 @@ def find_card():
         try:
             if "amdgpu" in open(d + "/name").read() and os.path.exists(d + "/amdgpu_regs"):
                 dev = open(d + "/device/device").read().strip() if os.path.exists(d + "/device/device") else ""
-                if dev in ("", "0x747e"):
+                if dev in ("", "0x747e", "0x7480"):   # 0x7480 = Navi 33; the DMU bases below are Navi 32's, check them against linux_ip_discovery.py
                     return d
         except OSError:
             pass
-    raise SystemExit("no amdgpu debugfs for 1002:747e (amdgpu loaded? debugfs mounted? root?)")
+    raise SystemExit("no amdgpu debugfs for 1002:747e or 1002:7480 (amdgpu loaded? debugfs mounted? root?)")
 
 
 def main():

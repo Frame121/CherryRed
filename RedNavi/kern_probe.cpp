@@ -1893,6 +1893,16 @@ bool RedNaviProbe::start(IOService *provider) {
     for (uint32_t i = 0; i < 4; i++) ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i);
     ipBase(kRNHwIdMp1, &gpu.reg_offset[RN_MP1_HWIP][0][0]);
 
+    // Anything but the RX 7800 XT (1002:747E, e.g. the RX 7600, 1002:7480) only gets the table and the VBIOS: every register number
+    // and firmware below is Navi 32's, and nothing here has been checked on another die.
+    if (pci->configRead16(kIOPCIConfigDeviceID) != 0x747E) {
+        IOLog("RedNavi: device 0x%04x is not a Navi 32, read-only: IP discovery and VBIOS only\n", pci->configRead16(kIOPCIConfigDeviceID));
+        dumpDiscovery();
+        dumpVbios();
+        registerService();
+        return true;
+    }
+
     // System Information reads the GPU name and VRAM size from these properties of the PCI node.
     {
         static const char kName[] = "AMD Radeon RX 7800 XT";
