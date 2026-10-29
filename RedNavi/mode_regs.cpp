@@ -32,7 +32,42 @@ uint32_t lbPartitions(unsigned width) {
 
 }
 
+namespace {
+
+// Dentist divider code (DID) <-> divider in quarter steps, from dc/clk_mgr (dentist_get_divider_from_did).
+uint32_t unitsFromDid(uint32_t did) {
+    if (did < 0x08) did = 0x08;
+    if (did < 0x40) return 8 + (did - 0x08);
+    if (did < 0x60) return 64 + 2 * (did - 0x40);
+    if (did < 0x7e) return 128 + 4 * (did - 0x60);
+    return 248 + 264 * (did - 0x7e);
+}
+
+// Largest code whose divider is not above `units` (so the clock is not below the request).
+uint32_t didFromUnits(uint32_t units) {
+    if (units <= 8) return 0x08;
+    if (units < 64) return 0x08 + (units - 8);
+    if (units < 128) return 0x40 + (units - 64) / 2;
+    if (units < 248) return 0x60 + (units - 128) / 4;
+    return 0x7e;
+}
+
+const uint64_t kDentistVcoQuarterKhz = 4ull * 4300000;     // vco 4.3 GHz, divider counted in quarters
+
+}
+
 extern "C" {
+
+uint32_t rn_dispclk_register(uint32_t current, const struct rn_mode *mode, int *changed) {
+    uint32_t curDid = (current >> 24) & 0x7F;
+    uint64_t curKhz = kDentistVcoQuarterKhz / unitsFromDid(curDid);
+    uint64_t needKhz = static_cast<uint64_t>(mode->pclk_khz) * 10175 / 10000;      // 1.75% headroom
+    *changed = 0;
+    if (curKhz >= needKhz || !needKhz) return current;
+    uint32_t did = didFromUnits(static_cast<uint32_t>(kDentistVcoQuarterKhz / needKhz));
+    *changed = 1;
+    return (did << 24) | (current & 0x00FF0000u) | (did << 8) | did;
+}
 
 const struct rn_mode *rn_base_mode(void) { return &kBase; }
 

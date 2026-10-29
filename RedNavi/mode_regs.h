@@ -32,6 +32,12 @@ unsigned rn_pitch_pixels(unsigned width);
 // baseValue is the value in the table. Returns 0 for registers that stay as they are.
 int rn_mode_register(const char *name, uint32_t baseValue, const struct rn_mode_ctx *ctx, uint32_t *out);
 
+// DENTIST_DISPCLK_CNTL for a mode: the VBIOS leaves DISPCLK at about 165 MHz, enough up to a pixel clock of roughly 160 MHz.
+// Above that the divider code (bits 30-24, copied to the two DPPCLK dividers in bits 14-8 and 6-0) must be lowered: the DENTIST
+// VCO is 4.3 GHz and the divider is in quarter steps, DISPCLK = 4.3 GHz * 4 / units, with 1.75% headroom as Linux uses
+// (330.769 MHz for 325.07 MHz, code 0x34). Returns the value to write; *changed is 1 if it differs from `current`.
+uint32_t rn_dispclk_register(uint32_t current, const struct rn_mode *mode, int *changed);
+
 #ifdef __cplusplus
 }
 #endif

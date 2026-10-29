@@ -103,6 +103,13 @@ int main() {
     CHECK(rn_mode_register("DP4_DP_MSA_TIMING_PARAM3", 0, &cv, &out) && out == ((2u | 0x8000u) | ((96u | 0x8000u) << 16)));
     CHECK(!rn_mode_register("OTG0_OTG_STATUS_POSITION", 0, &cv, &out));
     CHECK(rn_pitch_pixels(800) == 832 && rn_pitch_pixels(1920) == 1920 && rn_pitch_pixels(720) == 768);
+    // DISPCLK: the VBIOS value 0x54195454 (about 165 MHz) is enough up to 1080p60 and too low for 325 MHz, where Linux uses 0x34.
+    int changed = 0;
+    CHECK(rn_dispclk_register(0x54195454, &m1080, &changed) == 0x54195454 && !changed);
+    CHECK(rn_dispclk_register(0x54195454, &m720, &changed) == 0x54195454 && !changed);
+    uint32_t dv = rn_dispclk_register(0x54195454, &m144, &changed);
+    CHECK(changed && (dv >> 24) == 0x34 && ((dv >> 8) & 0x7F) == 0x34 && (dv & 0x7F) == 0x34 && ((dv >> 16) & 0xFF) == 0x19);
+    CHECK((rn_dispclk_register(0x341f3434, &m144, &changed) == 0x341f3434) && !changed);       // already fast enough
     printf(failures ? "%d FAILED\n" : "all mode register tests passed\n", failures);
     return failures ? 1 : 0;
 }

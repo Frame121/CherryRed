@@ -840,6 +840,19 @@ void RedNaviProbe::dcnReplay() {
         if (!baseState) rn_mode_register(r.name, r.value, &modeCtx, &v);
         return v;
     };
+    if (!baseState && maxGroup >= 1) {                                       // DISPCLK high enough for the pixel clock?
+        uint32_t dentOff = (base[1] + 0x64) * 4, cur = rd(dentOff);
+        int changed = 0;
+        uint32_t nv = rn_dispclk_register(cur, &selMode, &changed);
+        if (changed) {
+            wr(dentOff, nv);
+            IOSleep(5);
+            RN_STEP("RedNavi: replay: DENTIST_DISPCLK_CNTL 0x%08x -> 0x%08x (read back 0x%08x) for %u kHz\n", cur, nv, rd(dentOff), selMode.pclk_khz);
+        } else {
+            RN_STEP("RedNavi: replay: DENTIST_DISPCLK_CNTL 0x%08x is enough for %u kHz\n", cur, selMode.pclk_khz);
+        }
+        setProperty("dentist-dispclk-cntl", static_cast<uint64_t>(rd(dentOff)), 32);
+    }
     for (uint32_t g = 1; g <= maxGroup; g++) {
         RN_STEP("RedNavi: replay group %u: %s\n", g, names[g]);
         if (g == 13) { RN_STEP("RedNavi: replay: writing the scanout image to VRAM\n"); fillScanout(); RN_STEP("RedNavi: replay: scanout image written\n"); }
