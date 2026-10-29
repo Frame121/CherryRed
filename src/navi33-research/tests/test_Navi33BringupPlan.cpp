@@ -32,6 +32,14 @@ int main() {
  s = validateBringupPlan(ready, 9);
  check(s.valid && s.canAdvance && !s.hardwareWritesPermitted, "target validation never grants write permission");
  check(bringupStageName(BringupStage::Metal)[0] == 'm', "stage names are stable and readable");
+ BringupGate unknownStage[9]; for (unsigned i = 0; i < 9; ++i) unknownStage[i] = base[i]; unknownStage[0].stage = static_cast<BringupStage>(99);
+ check(!validateBringupPlan(unknownStage, 9).valid && !validateBringupPlan(unknownStage, 9).hardwareWritesPermitted, "unknown stage fails closed");
+ BringupGate partial[9]; for (unsigned i = 0; i < 9; ++i) { partial[i] = base[i]; partial[i].state = GateState::ValidatedOnTarget; } partial[2].state = GateState::EvidenceCollected; partial[0].state = GateState::Reviewed;
+ s = validateBringupPlan(partial, 9);
+ check(s.valid && !s.canAdvance && s.firstBlockedStage == BringupStage::Identity && !s.hardwareWritesPermitted, "earliest incomplete stage blocks even when later stages are validated");
+ BringupGate shuffled[9]; for (unsigned i = 0; i < 9; ++i) shuffled[i] = ready[8 - i];
+ s = validateBringupPlan(shuffled, 9);
+ check(s.valid && s.canAdvance && !s.hardwareWritesPermitted, "gate ordering does not change result and never grants hardware writes");
  std::printf("Navi33 bring-up plan tests: %d, failures: %d\\n", count, failures);
  return failures == 0 ? 0 : 1;
 }

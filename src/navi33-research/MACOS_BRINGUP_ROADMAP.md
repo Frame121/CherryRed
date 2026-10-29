@@ -66,6 +66,25 @@ On dedicated test hardware with recoverable boot media, validate one subsystem a
 
 Each stage needs logs, reproducible steps, failure rollback, and a clear PASS/FAIL/SKIP result. Do not enable the next stage based only on compile success.
 
+## Checkpoint — 2026-10-28 (Windows host)
+
+This checkpoint records validation performed on the connected Windows development host. It is not macOS or GPU validation.
+
+- Inspected the existing Navi33 research core, bring-up gate model, host tests, macOS preflight, and the RX7600 Linux evidence notes before editing.
+- Extended `tests/test_Navi33BringupPlan.cpp` with regression cases for an unknown stage value, earliest-incomplete-stage blocking, and shuffled gate ordering.
+- Rebuilt `navi33_bringup_plan_tests` with the existing Visual Studio 2022 Build Tools configuration: **PASS** (10 checks, 0 failures).
+- Ran the configured Debug CTest suite: **PASS, 9/9 tests**.
+- Ran `tools/ipdisc/test_ipdiscovery.py`: **PASS, 30 tests**.
+- Ran `tools/ipdisc/test_scan_windows_driver.py`: **PASS, 7 tests**.
+- The initial generic `ctest` command was not on `PATH`; tests were subsequently run through the repository's configured CMake executable and generated Visual Studio build.
+
+### Still blocked / not claimed
+
+- No macOS host, Apple SDK, or verified MacKernelSDK is available through this Windows session.
+- No production Navi33 IOKit backend, GPU firmware startup, VRAM/GART manager, command submission, display engine, or Metal integration is present in this research module.
+- No live RX 7600 test, macOS build, kext load, or Hardware Acceleration test was performed.
+- No EFI files, live system configuration, or hardware state were modified.
+
 ## Current blocker
 
 The current host has no macOS toolchain, and the project has no verified Navi33 kernel backend. Therefore the next external prerequisite is access to a suitable macOS validation host/toolchain. Meanwhile, Linux-side source tracing and offline tests can proceed, but they cannot establish that macOS boots with accelerated RX 7600 graphics.
