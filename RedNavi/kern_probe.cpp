@@ -811,7 +811,12 @@ void RedNaviProbe::smuProbe(const char *property, bool send) {
             {"enable_all", PPSMC_MSG_EnableAllSmuFeatures, 0},
             {"running_lo", PPSMC_MSG_GetRunningSmuFeaturesLow, 0},
             {"running_hi", PPSMC_MSG_GetRunningSmuFeaturesHigh, 0},
+            {"disallow_gfxoff", PPSMC_MSG_DisallowGfxOff, 0},
         };
+        // SDMA0_VERSION reads 0x600 on a healthy card and 0 while the graphics block is power gated (GFXOFF); sample it around the
+        // messages to see when it goes dark. GC base 0x1260 + dword 0x1295 (Linux reference: docs/logs).
+        const uint32_t sdmaVersion = (0x1260 + 0x1295) * 4;
+        rnPublishOne(out, "sdma_version_before_enable", rd(sdmaVersion));
         for (auto &st : steps) {
             uint32_t result = 0, resp = 0;
             int rc = rn_smu13_send(adev, st.msg, st.arg, &result, &resp, 3000000);   // RunDcBtc can take a while
@@ -819,6 +824,7 @@ void RedNaviProbe::smuProbe(const char *property, bool send) {
             char key[40];
             snprintf(key, sizeof(key), "%s_rc", st.name); rnPublishOne(out, key, static_cast<uint64_t>(static_cast<uint32_t>(rc)));
             snprintf(key, sizeof(key), "%s_arg", st.name); rnPublishOne(out, key, result);
+            snprintf(key, sizeof(key), "%s_sdma_version", st.name); rnPublishOne(out, key, rd(sdmaVersion));
             if (rc == -ETIMEDOUT) break;
         }
         gcStatus(out, "after_enable_", 2000);
