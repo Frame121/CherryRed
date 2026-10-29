@@ -725,6 +725,18 @@ void RedNaviProbe::smuProbe(const char *property, bool send) {
     rnPublishOne(out, "c2pmsg_66_before", RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_66));
     rnPublishOne(out, "c2pmsg_82_before", RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_82));
     rnPublishOne(out, "c2pmsg_90_before", RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90));
+    // The whole MP1 mailbox block and the PSP state, to compare with docs/logs/linux-reference/smu_mailbox_normal.txt.
+    for (uint32_t n = 66; n <= 90; n++) {
+        char key[24];
+        snprintf(key, sizeof(key), "m1_%u", n);
+        rnPublishOne(out, key, rd((mp1 + 0x282 + (n - 66)) * 4));
+    }
+    uint32_t mp0 = 0;
+    if (ipBase(kRNHwIdMp0, &mp0)) {
+        rnPublishOne(out, "m0_33", rd((mp0 + 0x61) * 4));
+        rnPublishOne(out, "m0_35", rd((mp0 + 0x63) * 4));
+        rnPublishOne(out, "m0_81", rd((mp0 + 0x91) * 4));
+    }
     static const struct { const char *name; uint32_t msg; uint32_t arg; } msgs[] = {
         {"smu_version", PPSMC_MSG_GetSmuVersion, 0},
         {"driver_if_version", PPSMC_MSG_GetDriverIfVersion, 0},
