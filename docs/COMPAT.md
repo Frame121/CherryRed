@@ -74,3 +74,17 @@ With `rednavi_smu_load=1 rednavi_gc_load=1 rednavi_smu=1 rednavi_smu_enable=1` t
 4. SMU messages `GetSmuVersion` etc., then `EnableAllSmuFeatures` (0x6). `SetAllowedFeaturesMaskLow/High` are rejected with CmdRejectedPrereq (SCPM, the PSP owns the allowed mask). Right after the enable the RLC boots: `BOOTLOAD_STATUS` 0xc000001f (BOOTLOAD_COMPLETE, bit 31), `CP_STAT` 0, `RLC_CNTL` 1, `RLC_GPM_STAT` 0xb40016, `GRBM_STATUS` 0x302c. Running SMU features: 0x0003ebbc_71ffffff.
 
 So the RLC autoload waits for the SMU features to be enabled. Next for acceleration: memory access for the engines (the VRAM is reachable by physical MC address through the system aperture the VBIOS left; GART for system memory comes later), then an SDMA ring and a first command (write a value to VRAM, check it from the CPU), then the graphics ring (MES/KIQ).
+
+## M4 step 2: the first SDMA command (2026-10-29)
+
+`rednavi_sdma_test=1` (after the step 1 boot-args) programs the GC memory hub and SDMA0, puts a ring of one `WRITE_LINEAR` packet in VRAM and checks the target from the CPU. Verified on the RX 7800 XT: the SDMA writes `0xDEADBEEF` to VRAM, no fault (`sdma-test`: `ok` 1, `rptr` 0x14, `fault_status` 0).
+
+What it took, in order of how long each cost:
+
+- **GC 11.0.3 has its own register offsets for the memory hub.** `gmc_v11_0.c` picks `gfxhub_v3_0_3` for IP 11.0.3, which includes `gc_11_0_3_offset.h`: `GCMC_VM_*`, `GCVM_L2_*` and `GCVM_CONTEXT0_*` sit 0x10 (or 4) higher than in `gc_11_0_0_offset.h`. With the 11.0.0 numbers the writes landed on unrelated GC registers and the reads gave zeros (also on Linux, see below). `RedNavi/gc_regs.h` is now generated from the 11.0.3 headers (`tools/gen_gc_regs.py`). `gfxhub_v3_0_3.c` also redefines `GCVM_L2_CNTL3_DEFAULT` as 0x80100007 (11.0.0: 0x80120007). The SDMA registers are the same in both. Check: before any write, `GCMC_VM_FB_LOCATION_BASE/TOP` now read 0x8000/0x83ff, what the VBIOS programmed.
+- **The register bases of the compat layer were never filled.** `gpu.reg_offset` was set in `start()` before the IP discovery table is parsed, so every `RREG32_SOC15` in the SDMA code hit dword `reg` instead of `base + reg` and the "ring registers that hold what we wrote" were plain low registers. They are now set at the start of `sdmaTest`.
+- **GFXOFF.** With the GC in GFXOFF every GC and SDMA register reads 0 (on Linux too: `docs/logs/linux-reference/gc_sdma_regs_linux.txt` was read with GFXOFF disabled through the `amdgpu_gfxoff` debugfs file; its GCMC/GCVM lines were read at the 11.0.0 offsets and mean nothing). Here the SDMA powers up right after `EnableAllSmuFeatures` (`SDMA0_VERSION` 0x600, as on Linux) and `DisallowGfxOff` is accepted.
+- **The SMU mailbox reads 0 shortly after the enable** (`C2PMSG_90` = 0, no answer) while the SDMA stays up; not understood, and not needed for this test. Do not wait for the mailbox: the old 10 s wait is skipped while `SDMA0_VERSION` is nonzero.
+- The ring and the target are addressed by MC address (`0x8000000000 + VRAM offset`) through the system aperture; no GART mapping is used. The SDMA firmware polls the wptr shadow in memory (`F32_WPTR_POLL_ENABLE`), which is written together with the register.
+
+Not done: a graphics ring (KIQ/MES), system memory (GART), interrupts, doorbells, and getting the SMU mailbox to answer after the enable.

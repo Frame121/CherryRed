@@ -1637,15 +1637,17 @@ void RedNaviProbe::sdmaTest() {
     IOSleep(50);
     pt[2] = rn_vram_rd32(&gpu, 0x0C000000); pt[3] = rn_vram_rd32(&gpu, 0x0C002000);
     trace[3] = rd(0x1295 * 4);
+    // Proof that the 11.0.3 hub offsets are right: before we write anything, FB_LOCATION_BASE/TOP should hold what the VBIOS left (0x8000/0x83ff).
+    const uint32_t fbBefore = RREG32_SOC15(RN_GC, 0, regGCMC_VM_FB_LOCATION_BASE), fbTopBefore = RREG32_SOC15(RN_GC, 0, regGCMC_VM_FB_LOCATION_TOP);
     rn_gfxhub_enable(&gpu, &gmc);
     trace[4] = rd(0x1295 * 4);
     {   // do the GCVM writes stick? (they read 0 on a healthy Linux system too, so this may tell nothing)
-        const char *gn[8] = {"l2_cntl", "ctx0_cntl", "aperture_low", "aperture_high", "l1_tlb", "pt_base_lo", "pt_end_lo", "fb_base"};
-        uint32_t gv[8] = {RREG32_SOC15(RN_GC, 0, regGCVM_L2_CNTL), RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_CNTL),
+        const char *gn[10] = {"l2_cntl", "ctx0_cntl", "aperture_low", "aperture_high", "l1_tlb", "pt_base_lo", "pt_end_lo", "fb_base", "fb_base_before", "fb_top_before"};
+        uint32_t gv[10] = {RREG32_SOC15(RN_GC, 0, regGCVM_L2_CNTL), RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_CNTL),
                           RREG32_SOC15(RN_GC, 0, regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR), RREG32_SOC15(RN_GC, 0, regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR),
                           RREG32_SOC15(RN_GC, 0, regGCMC_VM_MX_L1_TLB_CNTL), RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32),
-                          RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32), RREG32_SOC15(RN_GC, 0, regGCMC_VM_FB_LOCATION_BASE)};
-        rnPublish(this, "gcvm-readback", gn, gv, 8);
+                          RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32), RREG32_SOC15(RN_GC, 0, regGCMC_VM_FB_LOCATION_BASE), fbBefore, fbTopBefore};
+        rnPublish(this, "gcvm-readback", gn, gv, 10);
     }
     rn_vram_wr32(&gpu, 0x0C000000, 0xC3C3C3C3u); rn_vram_wr32(&gpu, 0x0C002000, 0xD4D4D4D4u);
     pt[4] = rn_vram_rd32(&gpu, 0x0C000000); pt[5] = rn_vram_rd32(&gpu, 0x0C002000);
@@ -1657,7 +1659,7 @@ void RedNaviProbe::sdmaTest() {
     }
     IOLog("RedNavi: SDMA test: GFXHUB enabled, starting SDMA0\n");
     struct rn_sdma_result res;
-    rn_sdma0_test(&gpu, 0, 0x0C000000, 4096, 0x0C002000, &res);
+    rn_sdma0_test(&gpu, kRNVramMcBase, 0x0C000000, 4096, 0x0C002000, &res);   // MC addresses, through the system aperture
     trace[5] = rd(0x1295 * 4);
     {   // Did the write land somewhere else (fault default pages, an offset by the FB base)? Look for it in the whole work area.
         uint32_t hits[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu}, n = 0;
