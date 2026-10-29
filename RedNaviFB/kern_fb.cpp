@@ -4,8 +4,8 @@
 // is: an aperture over BAR0, which macOS maps as 256 MB, so the surface lives in the first 256 MB of VRAM. It lists
 // the modes of the monitor's EDID (fb-modes, published by the probe) and a mode change is a platform function call
 // to the probe ("rednavi-set-mode"), which reprograms the pipe. There is no cursor plane, no gamma and no vertical
-// blank interrupt yet. The firmware boot framebuffer (IONDRVFramebuffer) on the same PCI device is terminated at start,
-// otherwise macOS lists it as a second display and makes it the main one.
+// blank interrupt yet. The firmware boot framebuffer (IONDRVFramebuffer) on the same PCI device stays: macOS lists it as a
+// second display (see docs/DP_BRINGUP.md); terminating it panics inside Apple's AppleUpstreamUserClient.
 //
 // This is a separate kext because IOGraphicsFamily sits in the system kernel collection and OpenCore can only
 // link injected kexts against the boot collection. It matches the property RedNaviProbe sets after the replay
@@ -96,8 +96,11 @@ class RedNaviFB : public IOFramebuffer {
     // Returns how many it asked to terminate. The boot framebuffer is registered a little after this kext starts, so the timer
     // calls this again every second until it has been found.
     unsigned removeBootFramebuffer(IOService *probe) {
-        uint32_t keep = 0;
-        if (PE_parse_boot_argn("rednavi_keep_boot_fb", &keep, sizeof(keep)) && keep) return 0;
+        // Off by default: terminating the stock IOFramebuffer makes IOGraphics notify AppleUpstreamUserClient, which dereferences a
+        // null pointer in fbNotificationOccurred and panics (seen on macOS 15.8.2). Kept for experiments with boot-arg
+        // rednavi_kill_boot_fb=1.
+        uint32_t kill = 0;
+        if (!PE_parse_boot_argn("rednavi_kill_boot_fb", &kill, sizeof(kill)) || !kill) return 0;
         IOService *pci = probe ? probe->getProvider() : nullptr;
         if (!pci) return 0;
         OSDictionary *match = IOService::serviceMatching("IONDRVFramebuffer");
