@@ -19,3 +19,17 @@ The direct sysfs paths were read from `/sys/bus/pci/devices/0000:03:00.0/ip_disc
 
 ## Closure decision
 The inventory is complete for all 30 numeric IDs, but semantic source-name coverage is 28/30. Do not report 30/30 names resolved. Naming the remaining two requires a matching Arch kernel source/patch or authoritative AMD HWID documentation; guesses are not acceptable.
+
+## Addendum — 2026-10-25 (definitive v7.2.11 source check)
+
+Checked the locally cloned `v7.2.11-arch1` source (`RX7600-Linux-Evidence/source-investigation/
+arch-linux-v7.2.11`, commit `64a90897d`) `drivers/gpu/drm/amd/include/soc15_hw_ip.h` directly. The
+highest HWID constants defined are `ATU_HWID 294` and `AIGC_HWID 295`; the numeric range 275–293
+is empty (gap between `DAZ_HWID 274` and `ATU_HWID 294`). **Neither 282 nor 286 is defined** in this
+snapshot, confirming the unresolved status with a citable source line rather than a guess.
+
+Known limitation: this clone is a `blob:none` partial checkout and does not contain the RDNA 3
+dGPU asic file (`navi33.c`) or a `0x7480` entry in `ObjectID.h`, so the installed `7.2.11.arch1-1`
+package's exact build recipe/patch set remains unproven against this source (the captured
+`PKGBUILD.trunk` is for 6.3.2). Naming 282/286 therefore still requires the exact package source
+or authoritative AMD documentation. No names are guessed.

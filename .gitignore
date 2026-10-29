@@ -15,6 +15,9 @@ build-*/
 # generated firmware C arrays (fw_table.h in the same directory IS tracked source)
 src/navi48-bringup/src/fw/fw_*.c
 src/navi48-bringup/firmware/
+# Navi 33 (RX 7600) bring-up firmware + generated embeds (AMD blobs, never committed)
+src/navi33-bringup/src/fw/fw_*.c
+src/navi33-bringup/firmware/
 # our own assembled compute test shaders (from shaders/*.s), tracked so no LLVM is needed
 !src/navi48-bringup/shaders/store_magic.bin
 !src/navi48-bringup/shaders/store_magic_hsa.bin
