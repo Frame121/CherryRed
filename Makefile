@@ -33,6 +33,10 @@ $(OUT)/kern_probe.o: RedNavi/kern_probe.cpp $(wildcard RedNavi/psp_fw.h RedNavi/
 	@mkdir -p $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+$(OUT)/edid.o: RedNavi/edid.cpp RedNavi/edid.h
+	@mkdir -p $(OUT)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 $(OUT)/smu13.o: RedNavi/smu13.cpp RedNavi/smu13.h $(wildcard compat/include/*/*.h)
 	@mkdir -p $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -49,9 +53,9 @@ $(OUT)/kern_info.o: RedNavi/kern_info.c
 	@mkdir -p $(OUT)
 	clang $(ARCH) $(OPT) -mkernel -nostdinc -isystem $(SDK)/Headers -DKERNEL -mmacosx-version-min=12.0 -c $< -o $@
 
-$(KEXT): $(OUT)/kern_probe.o $(OUT)/smu13.o $(COMPAT_OBJ) $(OUT)/kern_info.o RedNavi/Info.plist.in
+$(KEXT): $(OUT)/kern_probe.o $(OUT)/smu13.o $(OUT)/edid.o $(COMPAT_OBJ) $(OUT)/kern_info.o RedNavi/Info.plist.in
 	@mkdir -p $(KEXT)/Contents/MacOS
-	$(CXX) $(LDFLAGS) $(OUT)/kern_probe.o $(OUT)/smu13.o $(COMPAT_OBJ) $(OUT)/kern_info.o -o $(KEXT)/Contents/MacOS/RedNavi
+	$(CXX) $(LDFLAGS) $(OUT)/kern_probe.o $(OUT)/smu13.o $(OUT)/edid.o $(COMPAT_OBJ) $(OUT)/kern_info.o -o $(KEXT)/Contents/MacOS/RedNavi
 	cp RedNavi/Info.plist.in $(KEXT)/Contents/Info.plist
 	@echo "built $(KEXT)"
 
@@ -79,5 +83,7 @@ test:
 	clang++ -std=c++17 -Wall -DRN_HOST_TEST -Icompat/include tests/host/compat_test.cpp tests/host/host_hooks.cpp \
 		compat/src/rn_slab.cpp compat/src/rn_firmware.cpp compat/src/rn_reg.cpp -o build/compat_test
 	./build/compat_test
+	clang++ -std=c++17 -Wall tests/host/edid_test.cpp RedNavi/edid.cpp -o build/edid_test
+	./build/edid_test
 
 .PHONY: all clean test

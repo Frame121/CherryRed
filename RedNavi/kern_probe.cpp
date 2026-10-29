@@ -83,6 +83,7 @@
 #include <pexpert/pexpert.h>
 #include "dcn_reglist.h"
 #include "dcn_replay.h"
+#include "edid.h"
 #include "smu13.h"
 
 #ifdef RN_HAVE_PSP_FW
@@ -276,6 +277,8 @@ class RedNaviProbe : public IOService {
     void fillScanout();
     void publishFramebuffer();
     void smuProbe(const char *property, bool send);
+    void publishModes(const uint8_t *edid, size_t len);
+    rn_edid_info edidInfo {};      // parsed EDID of the connected monitor, valid when edidInfo.mode_count > 0
     bool dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k);
     bool dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n);
     bool dpcdRead(uint32_t eng, uint32_t addr, uint8_t *d, uint32_t n);
@@ -933,7 +936,28 @@ void RedNaviProbe::probeAux() {
     if (got) {
         OSData *e = OSData::withBytes(edid, got);
         if (e) { setProperty("edid", e); e->release(); }
+        publishModes(edid, got);
     }
+}
+
+// Interpret the EDID and publish the modes as "modes" (strings like "1920x1080@60 148500 kHz"), plus the monitor name.
+void RedNaviProbe::publishModes(const uint8_t *edid, size_t len) {
+    if (rn_edid_parse(edid, len, &edidInfo) != 0) { IOLog("RedNavi: EDID: header or checksum wrong, no modes\n"); return; }
+    OSArray *list = OSArray::withCapacity(edidInfo.mode_count);
+    if (!list) return;
+    for (unsigned i = 0; i < edidInfo.mode_count; i++) {
+        const rn_mode &m = edidInfo.modes[i];
+        char line[64];
+        snprintf(line, sizeof(line), "%ux%u@%u %u kHz%s%s", m.hactive, m.vactive, m.refresh_hz, m.pclk_khz,
+                 m.preferred ? " preferred" : "", m.vic ? " (CTA)" : "");
+        OSString *str = OSString::withCString(line);
+        if (str) { list->setObject(str); str->release(); }
+        IOLog("RedNavi: EDID mode %u: %s\n", i, line);
+    }
+    setProperty("modes", list);
+    list->release();
+    OSString *name = OSString::withCString(edidInfo.name);
+    if (name) { setProperty("monitor-name", name); name->release(); }
 }
 
 bool RedNaviProbe::loadComponent(uint32_t mp0, const char *name, uint32_t cmd, const uint8_t *data, uint32_t len, uint32_t version) {

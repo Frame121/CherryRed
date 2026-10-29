@@ -116,3 +116,11 @@ Lessons:
 - The stock `IONDRVFramebuffer` on `GFX0/.Display_boot` (from the firmware boot framebuffer) shows up in System Information as a second, nameless "Display" with the same serial number.
 - System Information takes the GPU name and VRAM size from the `model` and `VRAM,totalMB` properties of the PCI node, which the probe now sets.
 - The `fb-diag` property of the `RedNaviFB` node shows WindowServer's calls and sampled scanout pixels.
+
+## Modes from the EDID (issue #3, step A, 2026-10-29)
+
+`RedNavi/edid.cpp` parses the EDID the probe reads over AUX: detailed timings (the first is the preferred mode), CTA-861 video data blocks (a table of common progressive VICs), the established timings that have a fixed DMT definition (640x480, 800x600 and 1024x768 at 60 Hz) and the standard timings, which are generated with CVT reduced blanking. Interlaced modes are skipped. The probe publishes the result as `modes` and `monitor-name` on the `RedNaviProbe` node. For the Samsung F24G3xTF it lists 17 modes, from 640x480@60 to 1920x1080@144 (325.07 MHz). `rn_min_dp_link_rate` gives the lowest link rate that carries a mode on 4 lanes at 24 bpp (RBR is enough up to 216 MHz, HBR up to 360 MHz, HBR2 up to 720 MHz).
+
+Host tests (`make test`) run the parser on the monitor's real EDID with the serial number removed and check CVT-RB against the VESA values (1080p60: 138.5 MHz, 720p60: 64.0 MHz, 1024x768: 56.0 MHz).
+
+Not done yet: programming any mode other than the replayed 1080p60. That needs the list of registers that depend on the mode (OTG timing, the DP stream and MSA registers, the pixel-rate divider and DP DTO, the plane viewport and pitch, MPC and DSCL sizes), which will be derived from Linux register captures at other modes, see `tools/linux_dcn_pipe_dump.py`.
