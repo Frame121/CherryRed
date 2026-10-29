@@ -89,10 +89,12 @@ static void testLinkRate() {
     rn_edid_info info;
     rn_edid_parse(kEdid, sizeof(kEdid), &info);
     CHECK(rn_min_dp_link_rate(&info.modes[0], 4) == 0x06);
-    CHECK(rn_min_dp_link_rate(&info.modes[0], 1) == 0x14);                // 445 MB/s needs HBR2 on one lane (HBR carries 270)
+    CHECK(rn_min_dp_link_rate(&info.modes[0], 1) == 0x1E);                // 445 MB/s with headroom needs HBR3 on one lane
     m = info.modes[0];
     m.pclk_khz = 594000;                                                  // 4K60
-    CHECK(rn_min_dp_link_rate(&m, 4) == 0x14);
+    CHECK(rn_min_dp_link_rate(&m, 4) == 0x1E);                            // 1782 MB/s is above 80% of HBR2 x4 (1728)
+    m.pclk_khz = 325070;
+    CHECK(rn_min_dp_link_rate(&m, 4) == 0x14);                            // 1080p144: HBR2 like Linux
     m.pclk_khz = 5000000;
     CHECK(rn_min_dp_link_rate(&m, 4) < 0);
 }

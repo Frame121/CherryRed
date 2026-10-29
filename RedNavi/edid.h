@@ -43,7 +43,7 @@ int rn_edid_parse(const uint8_t *edid, size_t len, struct rn_edid_info *info);
 int rn_cvt_rb(unsigned hactive, unsigned vactive, unsigned refresh_hz, struct rn_mode *m);
 
 // Pixel rate a mode needs on the link in bytes per second at 24 bits per pixel, and the lowest DisplayPort link
-// rate code (0x06 RBR 1.62, 0x0A HBR 2.7, 0x14 HBR2 5.4, 0x1E HBR3 8.1 Gbps per lane) that carries it on 4 lanes.
+// rate (with 20% headroom) code (0x06 RBR 1.62, 0x0A HBR 2.7, 0x14 HBR2 5.4, 0x1E HBR3 8.1 Gbps per lane) that carries it on 4 lanes.
 uint64_t rn_mode_bytes_per_second(const struct rn_mode *m);
 int rn_min_dp_link_rate(const struct rn_mode *m, unsigned lanes);
 

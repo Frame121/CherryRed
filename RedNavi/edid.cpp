@@ -233,13 +233,13 @@ uint64_t rn_mode_bytes_per_second(const struct rn_mode *m) {
 }
 
 int rn_min_dp_link_rate(const struct rn_mode *m, unsigned lanes) {
-    // Payload per lane: link rate (Gbps) * 0.8 (8b/10b) / 8 bits = bytes. Codes: 0x06 1.62, 0x0A 2.7, 0x14 5.4, 0x1E 8.1.
+    // Payload per lane: link rate (Gbps) * 0.8 (8b/10b) / 8 bits = bytes; a mode may use 80% of it. Codes: 0x06 1.62, 0x0A 2.7, 0x14 5.4, 0x1E 8.1.
     static const struct { int code; uint64_t bytes_per_lane; } rates[] = {
         {0x06, 162000000ull}, {0x0A, 270000000ull}, {0x14, 540000000ull}, {0x1E, 810000000ull},
     };
     uint64_t need = rn_mode_bytes_per_second(m);
     for (const auto &r : rates)
-        if (r.bytes_per_lane * lanes >= need) return r.code;
+        if (need * 10 <= r.bytes_per_lane * lanes * 8) return r.code;      // keep 20% headroom (blanking, overhead)
     return -1;
 }
 

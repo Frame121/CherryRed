@@ -84,6 +84,7 @@
 #include "dcn_reglist.h"
 #include "dcn_replay.h"
 #include "edid.h"
+#include "mode_regs.h"
 #include "smu13.h"
 
 #ifdef RN_HAVE_PSP_FW
@@ -278,6 +279,10 @@ class RedNaviProbe : public IOService {
     void publishFramebuffer();
     void smuProbe(const char *property, bool send);
     void publishModes(const uint8_t *edid, size_t len);
+    rn_mode selMode {};            // the mode the pipe is programmed for (boot-arg rednavi_mode=WxH@R, else the EDID's preferred, else 1080p60)
+    uint32_t selRate {0x06};       // DisplayPort link rate code for that mode
+    uint32_t selPitch {1920};      // scanout pitch in pixels
+    void selectMode();
     rn_edid_info edidInfo {};      // parsed EDID of the connected monitor, valid when edidInfo.mode_count > 0
     bool dpTx(uint8_t action, uint8_t modeOrLane, uint8_t lanes, uint32_t symclk10k);
     bool dpcdWrite(uint32_t eng, uint32_t addr, const uint8_t *d, uint32_t n);
@@ -590,7 +595,7 @@ void RedNaviProbe::dpTrain() {
     if (!dmubUp) { IOLog("RedNavi: DP training: DMCUB not running\n"); return; }
     // Link rate: RBR (0x06, 162000 kHz symbol clock) like Linux uses for 1080p60 8 bpc, which is also the state the replay table
     // was captured in (DP_DTO0, VID_M/N); rednavi_dp_rate=0x14 selects HBR2 as before.
-    uint32_t rateArg = 0x06;
+    uint32_t rateArg = selRate;                                             // from the selected mode (RBR for 1080p60)
     PE_parse_boot_argn("rednavi_dp_rate", &rateArg, sizeof(rateArg));
     const uint32_t aux = 4, lanes = 4, rateCode = rateArg, symclk10k = rateCode * 27000 / 10;
     uint32_t dmu = dmubDmu;
@@ -683,16 +688,17 @@ void RedNaviProbe::dpTrain() {
 // eight colour bars along the bottom, so a wrong pitch, offset or format is obvious on screen.
 void RedNaviProbe::fillScanout() {
     static const uint32_t bars[8] = {0xFFFFFF, 0xFFFF00, 0x00FFFF, 0x00FF00, 0xFF00FF, 0xFF0000, 0x0000FF, 0x000000};
-    for (uint32_t y = 0; y < 1080; y++) {
-        for (uint32_t x = 0; x < 1920; x++) {
+    const uint32_t W = selMode.hactive, H = selMode.vactive;
+    for (uint32_t y = 0; y < H; y++) {
+        for (uint32_t x = 0; x < W; x++) {
             uint32_t v;
-            if (x < 8 || x >= 1912 || y < 8 || y >= 1072) v = 0xFFFFFF;
-            else if (y >= 880) v = bars[x / 240];
+            if (x < 8 || x + 8 >= W || y < 8 || y + 8 >= H) v = 0xFFFFFF;
+            else if (y >= H - H / 6) v = bars[(x * 8) / W];
             else {
-                uint32_t r = (x * 17) >> 7, g = (y * 242) >> 10, b = (((x >> 4) + (y >> 4)) & 1) ? 200 : 60;
+                uint32_t r = (x * 255) / W, g = (y * 255) / H, b = (((x >> 4) + (y >> 4)) & 1) ? 200 : 60;
                 v = (r << 16) | (g << 8) | b;
             }
-            vramWrite(kRNScanoutVramOff + (static_cast<uint64_t>(y) * 1920 + x) * 4, v);
+            vramWrite(kRNScanoutVramOff + (static_cast<uint64_t>(y) * selPitch + x) * 4, v);
         }
         if ((y & 63) == 0) IOSleep(1);
     }
@@ -781,7 +787,12 @@ void RedNaviProbe::publishFramebuffer() {
     uint64_t phys = static_cast<uint64_t>(bar0->getPhysicalAddress());
     uint64_t len = static_cast<uint64_t>(bar0->getLength());
     IOLog("RedNavi: framebuffer: BAR0 phys 0x%llx, %llu MB\n", phys, len >> 20);
-    if (kRNScanoutVramOff + 1920ull * 1080 * 4 > len) { IOLog("RedNavi: framebuffer: scanout outside BAR0\n"); return; }
+    uint64_t need = static_cast<uint64_t>(selPitch) * 4 * selMode.vactive;
+    if (kRNScanoutVramOff + need > len) { IOLog("RedNavi: framebuffer: mode does not fit in BAR0\n"); return; }
+    setProperty("fb-width", selMode.hactive, 32);
+    setProperty("fb-height", selMode.vactive, 32);
+    setProperty("fb-pitch", selPitch * 4, 32);
+    setProperty("fb-refresh", selMode.refresh_hz, 32);
     setProperty("fb-scanout-phys", phys + kRNScanoutVramOff, 64);
     setProperty("rednavi-fb-ready", kOSBooleanTrue);
 }
@@ -819,6 +830,16 @@ void RedNaviProbe::dcnReplay() {
     static const char *const names[15] = {"", "clocks", "optc clocks", "otg timing", "opp", "mpc", "dig/dp stream", "otg enable", "test pattern", "dp stream enable", "hubbub", "dpp and clocks", "mpc tree", "hubp surface", "pattern off"};
     uint32_t mismatches = 0;
     OSDictionary *mm = OSDictionary::withCapacity(16);
+    const rn_mode_ctx modeCtx = {&selMode, selPitch, 4};
+    const rn_mode *baseMode = rn_base_mode();
+    const bool baseState = selMode.pclk_khz == baseMode->pclk_khz && selMode.hactive == baseMode->hactive &&
+                           selMode.vactive == baseMode->vactive && selMode.htotal == baseMode->htotal && selMode.vtotal == baseMode->vtotal;
+    // The value to write for a table entry: the captured one, or the one computed for the selected mode.
+    auto valueFor = [&](const RNReplayReg &r) {
+        uint32_t v = r.value;
+        if (!baseState) rn_mode_register(r.name, r.value, &modeCtx, &v);
+        return v;
+    };
     for (uint32_t g = 1; g <= maxGroup; g++) {
         RN_STEP("RedNavi: replay group %u: %s\n", g, names[g]);
         if (g == 13) { RN_STEP("RedNavi: replay: writing the scanout image to VRAM\n"); fillScanout(); RN_STEP("RedNavi: replay: scanout image written\n"); }
@@ -826,7 +847,7 @@ void RedNaviProbe::dcnReplay() {
             if (r.group != g) continue;
             uint32_t off = (base[r.baseIdx] + r.dword) * 4;
             if (off + 4 > regLen) { IOLog("RedNavi: replay: %s outside the BAR\n", r.name); continue; }
-            wr(off, r.value);
+            wr(off, valueFor(r));
         }
         if (g == 7) {                                                       // wait for the OTG to report enabled
             uint32_t ctl = (base[2] + 0x1b41) * 4, ms = 0;
@@ -835,13 +856,13 @@ void RedNaviProbe::dcnReplay() {
         }
         for (const RNReplayReg &r : kRNReplay) {                            // read back, ignoring status bits
             if (r.group != g) continue;
-            uint32_t v = rd((base[r.baseIdx] + r.dword) * 4);
-            if (v != r.value) {
+            uint32_t v = rd((base[r.baseIdx] + r.dword) * 4), want = valueFor(r);
+            if (v != want) {
                 mismatches++;
-                if (mismatches <= 24) IOLog("RedNavi: replay: %s wrote 0x%08x read 0x%08x\n", r.name, r.value, v);
+                if (mismatches <= 24) IOLog("RedNavi: replay: %s wrote 0x%08x read 0x%08x\n", r.name, want, v);
                 if (mm && mismatches <= 16) {
                     char txt[40];
-                    snprintf(txt, sizeof(txt), "wrote 0x%08x read 0x%08x", r.value, v);
+                    snprintf(txt, sizeof(txt), "wrote 0x%08x read 0x%08x", want, v);
                     OSString *str = OSString::withCString(txt);
                     if (str) { mm->setObject(r.name, str); str->release(); }
                 }
@@ -849,6 +870,17 @@ void RedNaviProbe::dcnReplay() {
         }
         IOSleep(40);
     }
+    // Second pass: a few registers (line buffer partitions) do not take a write made early in the sequence. Write the
+    // ones that read back wrong once more, now that the pipe runs.
+    uint32_t fixed = 0;
+    for (const RNReplayReg &r : kRNReplay) {
+        if (r.group > maxGroup) continue;
+        uint32_t want = valueFor(r), off = (base[r.baseIdx] + r.dword) * 4;
+        if (off + 4 > regLen || rd(off) == want) continue;
+        wr(off, want);
+        if (rd(off) == want) { fixed++; IOLog("RedNavi: replay: %s took the second write\n", r.name); }
+    }
+    if (fixed) mismatches -= fixed < mismatches ? fixed : mismatches;
     // Status after the replay: is the OTG counting, is the stream flowing?
     uint32_t pos0 = rd((base[2] + 0x1b4a) * 4);
     IOSleep(2);
@@ -938,6 +970,44 @@ void RedNaviProbe::probeAux() {
         if (e) { setProperty("edid", e); e->release(); }
         publishModes(edid, got);
     }
+}
+
+// Pick the mode to light: boot-arg rednavi_mode=WxH@R if the monitor lists it, else the preferred mode of the EDID, else the
+// 1080p60 the replay table was captured at. Modes the link cannot carry (above HBR2 x4) are skipped.
+void RedNaviProbe::selectMode() {
+    selMode = *rn_base_mode();
+    uint32_t w = 0, h = 0, r = 0;
+    char arg[32] = {};
+    if (PE_parse_boot_argn("rednavi_mode", arg, sizeof(arg))) {
+        const char *p = arg;
+        auto num = [&](uint32_t *out) { *out = 0; while (*p >= '0' && *p <= '9') *out = *out * 10 + static_cast<uint32_t>(*p++ - '0'); };
+        num(&w); if (*p == 'x') { p++; num(&h); } if (*p == '@') { p++; num(&r); }
+    }
+    const rn_mode *pick = nullptr;
+    for (unsigned i = 0; i < edidInfo.mode_count && !pick; i++) {
+        const rn_mode &m = edidInfo.modes[i];
+        int rate = rn_min_dp_link_rate(&m, 4);
+        if (rate < 0 || rate > 0x14) continue;
+        if (w) { if (m.hactive == w && m.vactive == h && (!r || m.refresh_hz == r)) pick = &m; }
+        else if (m.preferred) pick = &m;
+    }
+    if (w && !pick) IOLog("RedNavi: mode %ux%u@%u is not usable on this monitor, falling back\n", w, h, r);
+    if (!pick) {
+        for (unsigned i = 0; i < edidInfo.mode_count && !pick; i++) {            // preferred mode, then the first one the link carries
+            int rate = rn_min_dp_link_rate(&edidInfo.modes[i], 4);
+            if (rate >= 0 && rate <= 0x14 && (edidInfo.modes[i].preferred || !w)) pick = &edidInfo.modes[i];
+        }
+    }
+    if (pick) selMode = *pick;
+    int rate = rn_min_dp_link_rate(&selMode, 4);
+    const rn_mode *base = rn_base_mode();
+    bool isBase = selMode.pclk_khz == base->pclk_khz && selMode.hactive == base->hactive && selMode.vactive == base->vactive && selMode.htotal == base->htotal;
+    selRate = isBase ? 0x06 : static_cast<uint32_t>(rate < 0x06 ? 0x06 : rate);    // the base state was captured at RBR
+    selPitch = rn_pitch_pixels(selMode.hactive);
+    IOLog("RedNavi: mode %ux%u@%u pclk %u kHz, link rate 0x%02x, pitch %u pixels\n", selMode.hactive, selMode.vactive, selMode.refresh_hz, selMode.pclk_khz, selRate, selPitch);
+    uint32_t vals[6] = {selMode.hactive, selMode.vactive, selMode.refresh_hz, selMode.pclk_khz, selRate, selPitch};
+    const char *names[6] = {"width", "height", "refresh", "pclk_khz", "link_rate", "pitch_pixels"};
+    rnPublish(this, "selected-mode", names, vals, 6);
 }
 
 // Interpret the EDID and publish the modes as "modes" (strings like "1920x1080@60 148500 kHz"), plus the monitor name.
@@ -1423,6 +1493,7 @@ bool RedNaviProbe::start(IOService *provider) {
     loadDmcub();
     dpInit();
     probeAux();
+    selectMode();
     dpTrain();
     dcnReplay();
     dcnDump();

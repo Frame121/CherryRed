@@ -15,15 +15,13 @@
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/graphics/IOFramebuffer.h>
 
-#define kRNFbWidth    1920u
-#define kRNFbHeight   1080u
-#define kRNFbPitch    7680u
 #define kRNFbModeId   1u
 
 class RedNaviFB : public IOFramebuffer {
     OSDeclareDefaultStructors(RedNaviFB)
 
     uint64_t scanoutPhys {0};          // CPU physical address of the surface (BAR0 + offset)
+    uint32_t fbWidth {1920}, fbHeight {1080}, fbPitch {7680}, fbRefresh {60};   // the mode the probe lit, from its properties
 
     // Diagnostics, published as the fb-diag property: what WindowServer asks and whether the surface changes.
     IOTimerEventSource *diagTimer {nullptr};
@@ -47,8 +45,8 @@ class RedNaviFB : public IOFramebuffer {
         if (diagMap) {
             volatile uint32_t *fb = reinterpret_cast<volatile uint32_t *>(diagMap->getVirtualAddress());
             for (unsigned i = 0; i < 16; i++) {
-                unsigned y = 8 + i * 64, x = 100 + i * 100;
-                px[i] = fb[y * (kRNFbPitch / 4) + x];
+                unsigned y = (8 + i * 64) % fbHeight, x = (100 + i * 100) % fbWidth;
+                px[i] = fb[y * (fbPitch / 4) + x];
                 sum = sum * 31 + px[i];
             }
         }
@@ -87,8 +85,13 @@ public:
             IOLog("RedNaviFB: provider has no fb-scanout-phys\n");
             return false;
         }
+        uint64_t v;
+        if (readNumber(provider, "fb-width", &v)) fbWidth = static_cast<uint32_t>(v);
+        if (readNumber(provider, "fb-height", &v)) fbHeight = static_cast<uint32_t>(v);
+        if (readNumber(provider, "fb-pitch", &v)) fbPitch = static_cast<uint32_t>(v);
+        if (readNumber(provider, "fb-refresh", &v)) fbRefresh = static_cast<uint32_t>(v);
         if (!IOFramebuffer::start(provider)) return false;
-        IOMemoryDescriptor *md = IOMemoryDescriptor::withPhysicalAddress(scanoutPhys, kRNFbPitch * kRNFbHeight, kIODirectionInOut);
+        IOMemoryDescriptor *md = IOMemoryDescriptor::withPhysicalAddress(scanoutPhys, fbPitch * fbHeight, kIODirectionInOut);
         if (md) { diagMap = md->map(kIOMapInhibitCache); md->release(); }
         return true;
     }
@@ -152,7 +155,7 @@ public:
             if (diagTimer && wl->addEventSource(diagTimer) == kIOReturnSuccess) diagTimer->setTimeoutMS(1000);
         }
         publishDiag();
-        IOLog("RedNaviFB: enabled, %ux%u at physical 0x%llx\n", kRNFbWidth, kRNFbHeight, scanoutPhys);
+        IOLog("RedNaviFB: enabled, %ux%u at physical 0x%llx\n", fbWidth, fbHeight, scanoutPhys);
         return kIOReturnSuccess;
     }
 
@@ -160,7 +163,7 @@ public:
         calls[0]++;
         publishDiag();
         if (aperture != kIOFBSystemAperture) return nullptr;
-        IODeviceMemory *m = IODeviceMemory::withRange(scanoutPhys, static_cast<IOPhysicalLength>(kRNFbPitch) * kRNFbHeight);
+        IODeviceMemory *m = IODeviceMemory::withRange(scanoutPhys, static_cast<IOPhysicalLength>(fbPitch) * fbHeight);
         if (m) m->setTag(kIOMapWriteCombineCache);    // VRAM through the BAR: write-combined, never plain cached
         return m;
     }
@@ -181,9 +184,9 @@ public:
     IOReturn getInformationForDisplayMode(IODisplayModeID mode, IODisplayModeInformation *info) APPLE_KEXT_OVERRIDE {
         if (mode != kRNFbModeId) return kIOReturnUnsupportedMode;
         bzero(info, sizeof(*info));
-        info->nominalWidth = kRNFbWidth;
-        info->nominalHeight = kRNFbHeight;
-        info->refreshRate = 60 << 16;
+        info->nominalWidth = fbWidth;
+        info->nominalHeight = fbHeight;
+        info->refreshRate = fbRefresh << 16;
         info->maxDepthIndex = 0;
         info->flags = kDisplayModeValidFlag | kDisplayModeSafeFlag;
         return kIOReturnSuccess;
@@ -201,9 +204,9 @@ public:
         pi->componentCount = 3;
         pi->bitsPerComponent = 8;
         pi->bitsPerPixel = 32;
-        pi->bytesPerRow = kRNFbPitch;
-        pi->activeWidth = kRNFbWidth;
-        pi->activeHeight = kRNFbHeight;
+        pi->bytesPerRow = fbPitch;
+        pi->activeWidth = fbWidth;
+        pi->activeHeight = fbHeight;
         pi->componentMasks[0] = 0x00ff0000;
         pi->componentMasks[1] = 0x0000ff00;
         pi->componentMasks[2] = 0x000000ff;

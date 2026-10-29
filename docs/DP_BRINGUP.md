@@ -124,3 +124,15 @@ Lessons:
 Host tests (`make test`) run the parser on the monitor's real EDID with the serial number removed and check CVT-RB against the VESA values (1080p60: 138.5 MHz, 720p60: 64.0 MHz, 1024x768: 56.0 MHz).
 
 Not done yet: programming any mode other than the replayed 1080p60. That needs the list of registers that depend on the mode (OTG timing, the DP stream and MSA registers, the pixel-rate divider and DP DTO, the plane viewport and pitch, MPC and DSCL sizes), which will be derived from Linux register captures at other modes, see `tools/linux_dcn_pipe_dump.py`.
+
+### Programming other modes (issue #3, step C, 2026-10-29)
+
+`rednavi_mode=WxH@R` (a mode the monitor lists; default is the EDID's preferred one) makes the probe light that mode. `RedNavi/mode_regs.cpp` recomputes the registers of the replay table that depend on the mode; the base mode (1920x1080@60, VIC 16) keeps the captured values untouched. The formulas were derived from three Linux captures of the same card (`docs/logs/linux-reference/modes/`, 1280x720@60, 1920x1080@60 and 1920x1080@144) and are checked against them in `tests/host/mode_regs_test.cpp`:
+
+- exact: OTG horizontal and vertical timing, sync widths and polarity, DP MSA timing parameters (`vtotal | htotal << 16`, blank ends, sync widths with the polarity in bit 15, active size), the DP stream clock DTO (`phase = pclk_kHz * 500`), plane viewport and DSCL sizes, pitch (width rounded up to 64 pixels), `HUBPREQ0_DST_DIMENSIONS` (`htotal * 12.8e6 / pclk_kHz`), `REF_FREQ_TO_PIX_FREQ` (`2^18 * 100000 / pclk_kHz`), `OTG_VSTARTUP_PARAM` (vertical blank lines minus one), the line-buffer partition count, the end of vertical blank in `BLANK_OFFSET_0`;
+- scaling laws (within 1%): TTU values, per-line delivery, `DST_AFTER_SCALER`, taken from the linear 1080p60 baseline;
+- kept from the baseline because no formula was found: the rest of the DML output (watermarks, prefetch, `GLOBAL_TTU_CNTL`, vblank parameters). These are the values to watch for underflow.
+
+The link rate follows the mode: the lowest rate that carries it with 20% headroom (RBR up to about 216 MHz at 24 bpp, HBR2 above), as Linux does (it trains 2 lanes RBR for 720p, 4 lanes RBR for 1080p60 and 4 lanes HBR2 for 1080p144). We always use 4 lanes.
+
+Result on the Samsung F24G3xTF: **1280x720@60 is stable, no flicker, no artefacts** (after fixing the vertical blank end in `BLANK_OFFSET_0`, which had left a black line at the top). When the resolution changes, the new display gets a new ID and macOS puts the firmware boot framebuffer (the nameless "Display") back as main; moving the origin of the RedNavi display to (0, 0) with `CGConfigureDisplayOrigin` fixes it.
