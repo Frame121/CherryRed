@@ -46,3 +46,16 @@ Put it under `compat/include/linux/` only if Linux code includes it by that name
 2. Boot with the kernel parameter `modprobe.blacklist=amdgpu` so no driver touches the card, then read BAR5 directly, like RedNavi does: `sudo python3 linux_smu_mailbox.py send smu_mailbox_nodriver.txt bar5`. (`amdgpu.dpm=0` gives a black screen on this card and is not usable.)
 
 If the SMU answers in run 2, the difference is in what RedNavi does around the mailbox; if it does not but answers in run 1, it needs something the Linux driver does during its power-management init. Results go to `docs/logs/linux-reference/`.
+
+**Result of the Linux runs (2026-10-29)** (`docs/logs/linux-reference/smu_mailbox_normal.txt`, `smu_mailbox_nodriver.txt`):
+
+| | Normal boot (driver ran) | `modprobe.blacklist=amdgpu`, BAR5 only |
+|---|---|---|
+| `MP0_C2PMSG_81` (sOS alive) | `0x030b09a0` | 0 |
+| `MP0_C2PMSG_35` | 0 | `0x80000000` (bootloader waiting) |
+| `MP1_FIRMWARE_FLAGS` | 1 | 1 |
+| `MP1_C2PMSG_90` before | 1 | 1 |
+| `GetSmuVersion` | answered in 0.3 ms: `0x00505600` | no response in 1 s |
+| `GetDriverIfVersion`, `TestMessage` | `0x40`, `0x12345679` (OK) | not sent after the first timeout |
+
+So the protocol and the offsets in `rn_smu13_send` are right: the same sequence of writes gets an answer on Linux once the driver has run. Without the driver (sOS not running) the SMU does not answer, which is also what RedNavi saw. RedNavi's late attempt has the sOS running, the ring, LOAD_TOC and SETUP_TMR done, and still gets no answer, so something else in Linux's init order unlocks the mailbox. In the driver-run state `MP1_C2PMSG_71` = 5 and `_74` = 0x14 are set (zero in the no-driver state). Candidates, untested: the non-PSP firmware loads Linux does before the SMU init (IMU, RLC, SDMA, MES, DMUB, TOC), or a PSP step after SETUP_TMR.
