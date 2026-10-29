@@ -7,3 +7,4 @@ RedNavi/dmub_*.h
 *.local.md
 RedNavi/smu_*.h
 !RedNavi/smu13.h
+RedNavi/gc_*.h

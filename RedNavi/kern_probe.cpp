@@ -94,6 +94,9 @@
 #ifdef RN_HAVE_SMU_FW
 #include "smu_fw.h"
 #endif
+#ifdef RN_HAVE_GC_FW
+#include "gc_fw.h"
+#endif
 #ifdef RN_HAVE_DMUB_FW
 #include "dmub_fw.h"
 #endif
@@ -154,6 +157,8 @@
 #define kRNPspCmdLoadIpFw     0x06u            // GFX_CMD_ID_LOAD_IP_FW
 #define kRNPspFwTypeDmub      51u              // GFX_FW_TYPE_DMUB
 #define kRNPspFwTypeSmu       18u              // GFX_FW_TYPE_SMU
+#define kRNPspCmdAutoloadRlc  0x21u            // GFX_CMD_ID_AUTOLOAD_RLC
+#define kRNHwIdGc             11
 #define kRNDmubGpintStopFw    0x10020000u      // status 1, command DMUB_GPINT__STOP_FW (2)
 #define kRNDmubStopResponse   0xDEADDEADu
 #define kRNDmubCw0Base        0x60000000u
@@ -275,6 +280,8 @@ class RedNaviProbe : public IOService {
     void dumpVbios();
     void loadDmcub();
     void loadSmuFw();
+    void loadGcFw();
+    void gcStatus(OSDictionary *out, const char *prefix, uint32_t timeoutMs);
     void probeAux();
     bool dmubSend(const uint8_t *cmd, uint32_t len, uint32_t reply[16]);
     void dpInit();
@@ -782,6 +789,28 @@ void RedNaviProbe::smuProbe(const char *property, bool send) {
         if (rc == -ETIMEDOUT) WREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90, 1);   // diagnostic only: let the next message try
     }
     rnPublishOne(out, "c2pmsg_90_after", RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90));
+    // Experiment (boot-arg rednavi_smu_enable=1): Linux's smu_smc_hw_setup ends with EnableAllSmuFeatures; the RLC autoload may
+    // wait for it. Allowed mask first (smu_feature_set_allowed_mask), then the enable, then the features that are running.
+    uint32_t en = 0;
+    if (send && PE_parse_boot_argn("rednavi_smu_enable", &en, sizeof(en)) && en == 1) {
+        struct { const char *name; uint32_t msg; uint32_t arg; } steps[] = {
+            {"allow_hi", PPSMC_MSG_SetAllowedFeaturesMaskHigh, 0xFFFFFFFFu},
+            {"allow_lo", PPSMC_MSG_SetAllowedFeaturesMaskLow, 0xFFFFFFFFu},
+            {"enable_all", PPSMC_MSG_EnableAllSmuFeatures, 0},
+            {"running_lo", PPSMC_MSG_GetRunningSmuFeaturesLow, 0},
+            {"running_hi", PPSMC_MSG_GetRunningSmuFeaturesHigh, 0},
+        };
+        for (auto &st : steps) {
+            uint32_t result = 0, resp = 0;
+            int rc = rn_smu13_send(adev, st.msg, st.arg, &result, &resp, 500000);
+            IOLog("RedNavi: SMU %s: rc %d, response 0x%x, argument 0x%08x\n", st.name, rc, resp, result);
+            char key[40];
+            snprintf(key, sizeof(key), "%s_rc", st.name); rnPublishOne(out, key, static_cast<uint64_t>(static_cast<uint32_t>(rc)));
+            snprintf(key, sizeof(key), "%s_arg", st.name); rnPublishOne(out, key, result);
+            if (rc == -ETIMEDOUT) break;
+        }
+        gcStatus(out, "after_enable_", 2000);
+    }
     setProperty(property, out);
     out->release();
 }
@@ -1434,6 +1463,79 @@ void RedNaviProbe::loadSmuFw() {
 #endif
 }
 
+// psp_load_non_psp_fw for the graphics block: every GC, SDMA, MES, IMU and RLC image goes to the sOS with LOAD_IP_FW in the order of
+// Linux's AMDGPU_UCODE_ID enum, and once RLC_G is in, GFX_CMD_ID_AUTOLOAD_RLC starts the RLC autoload. Then gfx_v11_0_wait_for_rlc_
+// autoload_complete: CP_STAT must read 0 and RLC_RLCS_BOOTLOAD_STATUS.BOOTLOAD_COMPLETE (bit 31) must be set. Opt-in, boot-arg
+// rednavi_gc_load=1, needs RedNavi/gc_fw.h (tools/gen_gc_fw_header.py).
+// gfx_v11_0_wait_for_rlc_autoload_complete: CP_STAT == 0 and RLC_RLCS_BOOTLOAD_STATUS.BOOTLOAD_COMPLETE. Publishes the values with `prefix`.
+void RedNaviProbe::gcStatus(OSDictionary *out, const char *prefix, uint32_t timeoutMs) {
+    uint32_t gc0 = 0, gc1 = 0;
+    if (!ipBase(kRNHwIdGc, &gc0, 0) || !ipBase(kRNHwIdGc, &gc1, 1)) return;
+    uint32_t cpStat = 0xFFFFFFFFu, boot = 0, ms = 0;
+    for (; ms < timeoutMs; ms++) {
+        cpStat = rd((gc0 + 0xf40) * 4);                             // regCP_STAT
+        boot = rd((gc1 + 0x4e82) * 4);                              // regRLC_RLCS_BOOTLOAD_STATUS
+        if (cpStat == 0 && (boot & 0x80000000u)) break;
+        IOSleep(1);
+    }
+    struct { const char *name; uint64_t v; } vals[] = {
+        {"wait_ms", ms}, {"cp_stat", cpStat}, {"bootload_status", boot}, {"grbm_status", rd((gc0 + 0xda4) * 4)},
+        {"rlc_gpm_stat", rd((gc1 + 0x4e6b) * 4)}, {"rlc_cntl", rd((gc1 + 0x4c00) * 4)}, {"imu_scratch0", rd((gc1 + 0x4068) * 4)},
+    };
+    for (auto &v : vals) {
+        char key[40];
+        snprintf(key, sizeof(key), "%s%s", prefix, v.name);
+        rnPublishOne(out, key, v.v);
+    }
+    IOLog("RedNavi: GC status%s: CP_STAT=0x%08x BOOTLOAD_STATUS=0x%08x after %u ms\n", prefix, cpStat, boot, ms);
+}
+
+void RedNaviProbe::loadGcFw() {
+#ifdef RN_HAVE_GC_FW
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_gc_load", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: GC firmware load not requested (boot-arg rednavi_gc_load=1)\n");
+        return;
+    }
+    uint32_t okCount = 0, failIndex = 0xFFFFFFFFu, failStatus = 0, autoload = 0xFFFFFFFFu;
+    for (uint32_t i = 0; i < kRNGcFwCount; i++) {
+        const RNGcFw &f = kRNGcFw[i];
+        if (f.size > kRNPspBufSize) { IOLog("RedNavi: GC firmware %s does not fit the staging buffer\n", f.name); failIndex = i; break; }
+        for (uint32_t off = 0; off < f.size; off += 4) {
+            uint32_t v = 0;
+            for (uint32_t k = 0; k < 4 && off + k < f.size; k++) v |= static_cast<uint32_t>(kRNGcFwBlob[f.offset + off + k]) << (8 * k);
+            vramWrite(kRNPspBufVramOffset + off, v);
+        }
+        uint64_t mc = kRNVramMcBase + kRNPspBufVramOffset;
+        uint32_t args[4] = {static_cast<uint32_t>(mc), static_cast<uint32_t>(mc >> 32), f.size, f.type};
+        uint32_t resp[4] = {};
+        bool ok = pspSubmit(kRNPspCmdLoadIpFw, args, 4, resp, 4);
+        IOLog("RedNavi: GC firmware %s (type %u, %u bytes): fence %s, status 0x%08x\n", f.name, f.type, f.size, ok ? "ok" : "missing", resp[0]);
+        if (!ok || resp[0] != 0) { failIndex = i; failStatus = resp[0]; break; }
+        okCount++;
+        if (f.type == 8) {                                                  // GFX_FW_TYPE_RLC_G: all graphics firmware is in
+            uint32_t r[1] = {};
+            bool a = pspSubmit(kRNPspCmdAutoloadRlc, nullptr, 0, r, 1);
+            autoload = a ? r[0] : 0xFFFFFFFEu;
+            IOLog("RedNavi: AUTOLOAD_RLC: fence %s, status 0x%08x\n", a ? "ok" : "missing", r[0]);
+            if (!a || r[0] != 0) break;
+        }
+    }
+    OSDictionary *out = OSDictionary::withCapacity(16);
+    if (!out) return;
+    rnPublishOne(out, "images", kRNGcFwCount);
+    rnPublishOne(out, "loaded", okCount);
+    rnPublishOne(out, "fail_index", failIndex);
+    rnPublishOne(out, "fail_status", failStatus);
+    rnPublishOne(out, "autoload_status", autoload);
+    if (autoload == 0) gcStatus(out, "", 2000);                              // only touch GC registers once the autoload was accepted
+    setProperty("gc-load", out);
+    out->release();
+#else
+    IOLog("RedNavi: built without RedNavi/gc_fw.h, GC firmware load unavailable\n");
+#endif
+}
+
 void RedNaviProbe::loadDmcub() {
 #ifdef RN_HAVE_DMUB_FW
     uint32_t arg = 0;
@@ -1663,6 +1765,7 @@ bool RedNaviProbe::start(IOService *provider) {
         sendPspLoadToc();
         sendPspSetupTmr();
         loadSmuFw();
+        loadGcFw();
     }
     loadDmcub();
     dpInit();

@@ -63,3 +63,14 @@ So the protocol and the offsets in `rn_smu13_send` are right: the same sequence 
 **RedNavi's state at the first message (2026-10-29)**, same registers from the probe (`smu-info`): `MP0_C2PMSG_81` = 0x0231bf63 (sOS alive) and `MP0_C2PMSG_35` = 0, like the Linux driver-run column; but `MP1_C2PMSG_71` = 0 and `_74` = 0 (Linux with driver: 5 and 0x14), `MP1_C2PMSG_66` = 0, `_82` = 0, `_90` = 1, `MP1_FIRMWARE_FLAGS` = 1. So the PSP side matches what Linux has after its PSP init, and the SMU side looks like the no-driver state.
 
 Working hypothesis, not tested: in Linux the SMU is first queried (`smu_hw_init`, after `amdgpu_device_fw_loading`) when the PSP has already loaded the GC, SDMA, MES, IMU and RLC firmware into the TMR and started the RLC autoload (`GFX_CMD_ID_AUTOLOAD_RLC`). The SMU firmware may wait for the IMU/RLC handshake before it opens the mailbox. Checking this means loading `gc_11_0_3_{pfp,me,mec,rlc,imu}.bin` and friends through `LOAD_IP_FW`, which is also the first step of M4 (GFX11 bring-up). The display does not depend on it; the SMU would only be needed for clock management.
+
+## M4 step 1: the graphics core boots (2026-10-29)
+
+With `rednavi_smu_load=1 rednavi_gc_load=1 rednavi_smu=1 rednavi_smu_enable=1` the GC block comes up, in this order (the order Linux uses, `psp_load_non_psp_fw` then `smu_smc_hw_setup`):
+
+1. `LOAD_IP_FW` of `smu_13_0_10.bin` (type 18).
+2. `LOAD_IP_FW` of 26 images in `AMDGPU_UCODE_ID` order, with the types and image offsets Linux uses (`tools/gen_gc_fw_header.py`, local header `RedNavi/gc_fw.h`): SDMA threads 0 and 1, CP RS64 PFP/ME/MEC and their stacks, MES scheduler and KIQ with their data, IMU I/D, the RLC restore lists, IRAM, DRAM, P, V and G. The sOS accepts all of them (status 0).
+3. `GFX_CMD_ID_AUTOLOAD_RLC` (0x21) after `RLC_G`. Accepted, and `GFX_IMU_SCRATCH_0` shows the IMU firmware version 0xb204700, so the IMU runs, but the RLC does not finish booting: `RLC_RLCS_BOOTLOAD_STATUS` stays 0 for 2 s.
+4. SMU messages `GetSmuVersion` etc., then `EnableAllSmuFeatures` (0x6). `SetAllowedFeaturesMaskLow/High` are rejected with CmdRejectedPrereq (SCPM, the PSP owns the allowed mask). Right after the enable the RLC boots: `BOOTLOAD_STATUS` 0xc000001f (BOOTLOAD_COMPLETE, bit 31), `CP_STAT` 0, `RLC_CNTL` 1, `RLC_GPM_STAT` 0xb40016, `GRBM_STATUS` 0x302c. Running SMU features: 0x0003ebbc_71ffffff.
+
+So the RLC autoload waits for the SMU features to be enabled. Next for acceleration: memory access for the engines (the VRAM is reachable by physical MC address through the system aperture the VBIOS left; GART for system memory comes later), then an SDMA ring and a first command (write a value to VRAM, check it from the CPU), then the graphics ring (MES/KIQ).

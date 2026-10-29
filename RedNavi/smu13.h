@@ -9,6 +9,11 @@
 #define PPSMC_MSG_TestMessage 0x1
 #define PPSMC_MSG_GetSmuVersion 0x2
 #define PPSMC_MSG_GetDriverIfVersion 0x3
+#define PPSMC_MSG_SetAllowedFeaturesMaskLow 0x4
+#define PPSMC_MSG_SetAllowedFeaturesMaskHigh 0x5
+#define PPSMC_MSG_EnableAllSmuFeatures 0x6
+#define PPSMC_MSG_GetRunningSmuFeaturesLow 0xC
+#define PPSMC_MSG_GetRunningSmuFeaturesHigh 0xD
 
 #define PPSMC_Result_OK 0x1
 #define PPSMC_Result_Failed 0xFF
