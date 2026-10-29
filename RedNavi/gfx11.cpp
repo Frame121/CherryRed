@@ -25,6 +25,14 @@ extern "C" {
 void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc) {
     u32 tmp;
 
+    // One 8-byte PTE per 4 KB GART page; the page at GART address A maps to VRAM offset A (valid | readable | writeable).
+    for (u64 va = gmc->gart_start; va <= gmc->gart_end; va += 4096) {
+        u64 pte = va | 0x1ull | 0x20ull | 0x40ull;
+        u64 slot = gmc->pt_vram_offset + ((va - gmc->gart_start) >> 12) * 8;
+        rn_vram_wr32(adev, slot, lower_32_bits(pte));
+        rn_vram_wr32(adev, slot + 4, upper_32_bits(pte));
+    }
+
     // init_gart_aperture_regs: the VMID 0 page table (physical VRAM offset | valid) and the GART range in 4 KB pages
     u64 pt_base = gmc->pt_vram_offset | 1ull;
     WREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32, lower_32_bits(pt_base));
@@ -102,11 +110,11 @@ void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc) {
     WREG32_SOC15(RN_GC, 0, regGCVM_L2_CONTEXT_IDENTITY_PHYSICAL_OFFSET_HI32, 0);
 }
 
-void rn_sdma0_test(struct rn_device *adev, u64 ringOff, u32 ringBytes, u64 targetOff, struct rn_sdma_result *res) {
+void rn_sdma0_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, u64 targetOff, struct rn_sdma_result *res) {
     memset(res, 0, sizeof(*res));
-    const u64 ringMc = RN_VRAM_MC_BASE + ringOff;
+    const u64 ringMc = vaBase + ringOff;
     const u64 rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008;      // pointer shadows after the ring page
-    const u64 targetMc = RN_VRAM_MC_BASE + targetOff;
+    const u64 targetMc = vaBase + targetOff;
     u32 tmp;
 
     for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
@@ -132,10 +140,10 @@ void rn_sdma0_test(struct rn_device *adev, u64 ringOff, u32 ringBytes, u64 targe
     SDW(regSDMA0_QUEUE0_RB_RPTR_HI, 0);
     SDW(regSDMA0_QUEUE0_RB_WPTR, 0);
     SDW(regSDMA0_QUEUE0_RB_WPTR_HI, 0);
-    SDW(regSDMA0_QUEUE0_RB_WPTR_POLL_ADDR_LO, lower_32_bits(RN_VRAM_MC_BASE + wptrOff));
-    SDW(regSDMA0_QUEUE0_RB_WPTR_POLL_ADDR_HI, upper_32_bits(RN_VRAM_MC_BASE + wptrOff));
-    SDW(regSDMA0_QUEUE0_RB_RPTR_ADDR_HI, upper_32_bits(RN_VRAM_MC_BASE + rptrOff));
-    SDW(regSDMA0_QUEUE0_RB_RPTR_ADDR_LO, lower_32_bits(RN_VRAM_MC_BASE + rptrOff) & 0xFFFFFFFCu);
+    SDW(regSDMA0_QUEUE0_RB_WPTR_POLL_ADDR_LO, lower_32_bits(vaBase + wptrOff));
+    SDW(regSDMA0_QUEUE0_RB_WPTR_POLL_ADDR_HI, upper_32_bits(vaBase + wptrOff));
+    SDW(regSDMA0_QUEUE0_RB_RPTR_ADDR_HI, upper_32_bits(vaBase + rptrOff));
+    SDW(regSDMA0_QUEUE0_RB_RPTR_ADDR_LO, lower_32_bits(vaBase + rptrOff) & 0xFFFFFFFCu);
     rbCntl = REG_SET_FIELD(rbCntl, SDMA0_QUEUE0_RB_CNTL, RPTR_WRITEBACK_ENABLE, 1);
     rbCntl = REG_SET_FIELD(rbCntl, SDMA0_QUEUE0_RB_CNTL, WPTR_POLL_ENABLE, 0);
     rbCntl = REG_SET_FIELD(rbCntl, SDMA0_QUEUE0_RB_CNTL, F32_WPTR_POLL_ENABLE, 1);

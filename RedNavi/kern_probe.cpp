@@ -88,6 +88,7 @@
 #include "mode_regs.h"
 #include "smu13.h"
 #include "gfx11.h"
+#include "gc_regs.h"
 
 #ifdef RN_HAVE_PSP_FW
 #include "psp_fw.h"
@@ -814,8 +815,8 @@ void RedNaviProbe::smuProbe(const char *property, bool send) {
             {"disallow_gfxoff", PPSMC_MSG_DisallowGfxOff, 0},
         };
         // SDMA0_VERSION reads 0x600 on a healthy card and 0 while the graphics block is power gated (GFXOFF); sample it around the
-        // messages to see when it goes dark. GC base 0x1260 + dword 0x1295 (Linux reference: docs/logs).
-        const uint32_t sdmaVersion = (0x1260 + 0x1295) * 4;
+        // messages to see when it goes dark. absolute dword 0x1295 (GC base 0x1260 + 0x35, as in the Linux reference in docs/logs).
+        const uint32_t sdmaVersion = 0x1295 * 4;
         rnPublishOne(out, "sdma_version_before_enable", rd(sdmaVersion));
         for (auto &st : steps) {
             uint32_t result = 0, resp = 0;
@@ -826,6 +827,14 @@ void RedNaviProbe::smuProbe(const char *property, bool send) {
             snprintf(key, sizeof(key), "%s_arg", st.name); rnPublishOne(out, key, result);
             snprintf(key, sizeof(key), "%s_sdma_version", st.name); rnPublishOne(out, key, rd(sdmaVersion));
             if (rc == -ETIMEDOUT) break;
+        }
+        // When does the block go dark again? Only SDMA0_VERSION and the mailbox response are read, so nothing else can disturb it.
+        const uint32_t waits[] = {0, 100, 400};   // the block was still alive 7 s later; the SMU stops answering some seconds after that
+        for (uint32_t w : waits) {
+            IOSleep(w);
+            char key[40];
+            snprintf(key, sizeof(key), "tick_%u_sdma_version", w); rnPublishOne(out, key, rd(sdmaVersion));
+            snprintf(key, sizeof(key), "tick_%u_c2pmsg_90", w); rnPublishOne(out, key, RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90));
         }
         gcStatus(out, "after_enable_", 2000);
     }
@@ -1496,14 +1505,25 @@ void RedNaviProbe::gcStatus(OSDictionary *out, const char *prefix, uint32_t time
         if (cpStat == 0 && (boot & 0x80000000u)) break;
         IOSleep(1);
     }
-    struct { const char *name; uint64_t v; } vals[] = {
-        {"wait_ms", ms}, {"cp_stat", cpStat}, {"bootload_status", boot}, {"grbm_status", rd((gc0 + 0xda4) * 4)},
-        {"rlc_gpm_stat", rd((gc1 + 0x4e6b) * 4)}, {"rlc_cntl", rd((gc1 + 0x4c00) * 4)}, {"imu_scratch0", rd((gc1 + 0x4068) * 4)},
+    // Each read is followed by a look at SDMA0_VERSION (0x600 while the block is up): one of these reads may be what turns it off.
+    auto alive = [&](const char *name) {
+        char key[48];
+        snprintf(key, sizeof(key), "%safter_%s_sdma", prefix, name);
+        rnPublishOne(out, key, rd(0x1295 * 4));
     };
-    for (auto &v : vals) {
-        char key[40];
-        snprintf(key, sizeof(key), "%s%s", prefix, v.name);
-        rnPublishOne(out, key, v.v);
+    struct { const char *name; uint32_t reg; } regs[] = {
+        {"grbm_status", (gc0 + 0xda4) * 4}, {"rlc_gpm_stat", (gc1 + 0x4e6b) * 4}, {"rlc_cntl", (gc1 + 0x4c00) * 4},
+        {"imu_scratch0", (gc1 + 0x4068) * 4},
+    };
+    char key[40];
+    snprintf(key, sizeof(key), "%swait_ms", prefix); rnPublishOne(out, key, ms);
+    snprintf(key, sizeof(key), "%scp_stat", prefix); rnPublishOne(out, key, cpStat);
+    snprintf(key, sizeof(key), "%sbootload_status", prefix); rnPublishOne(out, key, boot);
+    alive("cp_boot");
+    for (auto &r : regs) {
+        snprintf(key, sizeof(key), "%s%s", prefix, r.name);
+        rnPublishOne(out, key, rd(r.reg));
+        alive(r.name);
     }
     IOLog("RedNavi: GC status%s: CP_STAT=0x%08x BOOTLOAD_STATUS=0x%08x after %u ms\n", prefix, cpStat, boot, ms);
 }
@@ -1566,15 +1586,26 @@ void RedNaviProbe::sdmaTest() {
     // With the SMU features on, GFXOFF powers the graphics block down when it is idle and its registers read back as zero (the SDMA
     // status did). Linux brackets register access with amdgpu_gfx_off_ctrl; here GFXOFF is simply disallowed for the test.
     struct rn_device *adev = &gpu;                                         // the RREG32 macros expect this name
+    // The IP bases are only known once the discovery table is parsed, which is after rn_device_init in start(): fill them in here.
+    // (They were all 0 until now, so every macro access in this test hit the wrong register.)
+    for (uint32_t i = 0; i < 4; i++) ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i);
+    ipBase(kRNHwIdMp1, &gpu.reg_offset[RN_MP1_HWIP][0][0]);
     // After the features are enabled the SMU may be busy for a while with C2PMSG_90 at 0: wait for it (up to 10 s) and record how long.
+    {
+        const char *sn[2] = {"c2pmsg_90", "sdma_version"};
+        uint32_t sv[2] = {RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90), rd(0x1295 * 4)};
+        rnPublish(this, "sdma-start", sn, sv, 2);
+    }
     uint32_t waitedMs = 0;
-    while (waitedMs < 10000 && RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90) == 0) { IOSleep(1); waitedMs++; }
+    // Not while the SDMA is up (SDMA0_VERSION nonzero): the mailbox reads 0 from here on, and the block went dark during this wait.
+    while (rd(0x1295 * 4) == 0 && waitedMs < 10000 && RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90) == 0) { IOSleep(1); waitedMs++; }
     {
         const char *wn[1] = {"smu_idle_wait_ms"};
         uint32_t wv[1] = {waitedMs};
         rnPublish(this, "sdma-wait", wn, wv, 1);
     }
     uint32_t goResult = 0, goResp = 0, c66 = RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_66), c82 = RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_82), c90 = RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90);
+    uint32_t trace[6] = {rd(0x1295 * 4), 0, 0, 0, 0, 0};   // SDMA0_VERSION after: start, GetSmuVersion, DisallowGfxOff, vram writes, gfxhub, test
     uint32_t verResult = 0, verResp = 0;
     int ver = rn_smu13_send(&gpu, PPSMC_MSG_GetSmuVersion, 0, &verResult, &verResp, 500000);   // is the SMU still answering at all?
     {
@@ -1582,9 +1613,11 @@ void RedNaviProbe::sdmaTest() {
         uint32_t sv[6] = {c66, c82, c90, static_cast<uint32_t>(ver), verResp, verResult};
         rnPublish(this, "sdma-smu", sn, sv, 6);
     }
+    trace[1] = rd(0x1295 * 4);
     int go = rn_smu13_send(&gpu, PPSMC_MSG_DisallowGfxOff, 0, &goResult, &goResp, 500000);
     IOLog("RedNavi: SDMA test: DisallowGfxOff rc %d response 0x%x\n", go, goResp);
     IOSleep(20);
+    trace[2] = rd(0x1295 * 4);
     {
         uint32_t gc0 = 0;
         ipBase(kRNHwIdGc, &gc0, 0);
@@ -1594,8 +1627,8 @@ void RedNaviProbe::sdmaTest() {
     }
     // VRAM offsets: the first ~8 MB hold the firmware boot framebuffer that macOS draws into, the scanout is at 0x08000000, so the
     // engines work at 192 MB: page table 0x0C100000, default and fault pages 0x0C200000/0x0C201000, SDMA ring 0x0C000000, target 0x0C002000.
-    struct rn_gmc gmc = {kRNVramMcBase, kRNVramMcBase + 0x3FFFFFFFFull, 0, 0x1FFFFFFFull, 0x0C100000, 0x0C200000, 0x0C201000};
-    for (uint32_t o = 0; o < 0x1000; o += 4) rn_vram_wr32(&gpu, gmc.pt_vram_offset + o, 0);
+    struct rn_gmc gmc = {kRNVramMcBase, kRNVramMcBase + 0x3FFFFFFFFull, 0x0C000000, 0x0C3FFFFF, 0x0C100000, 0x0C200000, 0x0C201000};   // GART window over VRAM 0x0C000000..0x0C3FFFFF
+    
     // Does CPU access to VRAM through MM_INDEX/MM_DATA survive the memory hub being switched on? Two probe locations, read right
     // after writing and again 50 ms later, before and after rn_gfxhub_enable.
     uint32_t pt[8] = {};
@@ -1603,7 +1636,17 @@ void RedNaviProbe::sdmaTest() {
     pt[0] = rn_vram_rd32(&gpu, 0x0C000000); pt[1] = rn_vram_rd32(&gpu, 0x0C002000);
     IOSleep(50);
     pt[2] = rn_vram_rd32(&gpu, 0x0C000000); pt[3] = rn_vram_rd32(&gpu, 0x0C002000);
+    trace[3] = rd(0x1295 * 4);
     rn_gfxhub_enable(&gpu, &gmc);
+    trace[4] = rd(0x1295 * 4);
+    {   // do the GCVM writes stick? (they read 0 on a healthy Linux system too, so this may tell nothing)
+        const char *gn[8] = {"l2_cntl", "ctx0_cntl", "aperture_low", "aperture_high", "l1_tlb", "pt_base_lo", "pt_end_lo", "fb_base"};
+        uint32_t gv[8] = {RREG32_SOC15(RN_GC, 0, regGCVM_L2_CNTL), RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_CNTL),
+                          RREG32_SOC15(RN_GC, 0, regGCMC_VM_SYSTEM_APERTURE_LOW_ADDR), RREG32_SOC15(RN_GC, 0, regGCMC_VM_SYSTEM_APERTURE_HIGH_ADDR),
+                          RREG32_SOC15(RN_GC, 0, regGCMC_VM_MX_L1_TLB_CNTL), RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_PAGE_TABLE_BASE_ADDR_LO32),
+                          RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_PAGE_TABLE_END_ADDR_LO32), RREG32_SOC15(RN_GC, 0, regGCMC_VM_FB_LOCATION_BASE)};
+        rnPublish(this, "gcvm-readback", gn, gv, 8);
+    }
     rn_vram_wr32(&gpu, 0x0C000000, 0xC3C3C3C3u); rn_vram_wr32(&gpu, 0x0C002000, 0xD4D4D4D4u);
     pt[4] = rn_vram_rd32(&gpu, 0x0C000000); pt[5] = rn_vram_rd32(&gpu, 0x0C002000);
     IOSleep(50);
@@ -1614,7 +1657,24 @@ void RedNaviProbe::sdmaTest() {
     }
     IOLog("RedNavi: SDMA test: GFXHUB enabled, starting SDMA0\n");
     struct rn_sdma_result res;
-    rn_sdma0_test(&gpu, 0x0C000000, 4096, 0x0C002000, &res);
+    rn_sdma0_test(&gpu, 0, 0x0C000000, 4096, 0x0C002000, &res);
+    trace[5] = rd(0x1295 * 4);
+    {   // Did the write land somewhere else (fault default pages, an offset by the FB base)? Look for it in the whole work area.
+        uint32_t hits[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu}, n = 0;
+        for (uint64_t o = 0x0C000000ull; o < 0x0C300000ull && n < 4; o += 4)
+            if (rn_vram_rd32(&gpu, o) == 0xDEADBEEFu) hits[n++] = static_cast<uint32_t>(o);
+        const char *hn[5] = {"hit0", "hit1", "hit2", "hit3", "target_after"};
+        uint32_t hv[5] = {hits[0], hits[1], hits[2], hits[3], rn_vram_rd32(&gpu, 0x0C002000)};
+        rnPublish(this, "sdma-scan", hn, hv, 5);
+    }
+    {
+        const char *tn[10] = {"start", "after_version_msg", "after_gfxoff_msg", "after_vram", "after_gfxhub", "after_test",
+                              "gc_base0", "gc_base1", "gc_base2", "macro_version"};
+        uint32_t tv[10] = {trace[0], trace[1], trace[2], trace[3], trace[4], trace[5], gpu.reg_offset[RN_GC_HWIP][0][0],
+                           gpu.reg_offset[RN_GC_HWIP][0][1], gpu.reg_offset[RN_GC_HWIP][0][2],
+                           rn_rreg32(&gpu, gpu.reg_offset[RN_GC_HWIP][0][0] + 0x35)};
+        rnPublish(this, "sdma-trace", tn, tv, 10);
+    }
     IOLog("RedNavi: SDMA test: step %u, value 0x%08x, RPTR 0x%x WPTR 0x%x F32_CNTL 0x%08x RB_CNTL 0x%08x -> %s\n", res.step, res.value, res.rptr, res.wptr, res.f32_cntl, res.rb_cntl, res.ok ? "OK" : "FAILED");
     const char *n[25] = {"ok", "step", "value", "pre_value", "rptr", "wptr", "f32_cntl", "rb_cntl", "fault_status", "fault_addr_lo", "fault_addr_hi", "sdma_status", "sdma_status1", "ctx_status",
                          "version", "cntl", "power_cntl", "checksum", "freeze", "chicken", "program", "ring0", "ring3", "rptr_shadow", "wptr_shadow"};
@@ -1865,6 +1925,12 @@ bool RedNaviProbe::start(IOService *provider) {
     dcnReplay();
     dcnDump();
     smuProbe("smu-info", true);          // messages, once the PSP and the display are up
+    {
+        struct rn_device *adev = &gpu;
+        const char *hn[3] = {"c2pmsg_90", "sdma_version", "ms_uptime"};
+        uint32_t hv[3] = {RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90), rd(0x1295 * 4), 0};
+        rnPublish(this, "after-smu-probe", hn, hv, 3);
+    }
     sdmaTest();
     publishFramebuffer();
     registerService();

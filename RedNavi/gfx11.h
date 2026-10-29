@@ -10,7 +10,8 @@
 struct rn_gmc {
     u64 fb_start, fb_end;                     // VRAM in MC addresses
     u64 gart_start, gart_end;                 // GART aperture (VMID 0 page table)
-    u64 pt_vram_offset;                       // VRAM offset of the VMID 0 page table (zero filled here, nothing is mapped yet)
+    u64 pt_vram_offset;                       // VRAM offset of the VMID 0 page table; rn_gfxhub_enable fills it with PTEs mapping
+                                              // each GART page to the VRAM offset equal to its address (identity window)
     u64 scratch_vram_offset;                  // pages used as default and fault pages
     u64 dummy_vram_offset;
 };
@@ -35,7 +36,8 @@ void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc);
 
 // Starts SDMA0 on a ring of ring_bytes at ring_vram_offset (the read and write pointer shadows follow in the same page) and
 // asks it to write a magic value to target_vram_offset. Everything lives in VRAM, so no GART mapping is needed.
-void rn_sdma0_test(struct rn_device *adev, u64 ring_vram_offset, u32 ring_bytes, u64 target_vram_offset, struct rn_sdma_result *res);
+// va_base is added to the offsets to form the addresses the SDMA uses: RN_VRAM_MC_BASE (system aperture) or 0 (the identity GART window).
+void rn_sdma0_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 target_vram_offset, struct rn_sdma_result *res);
 
 #ifdef __cplusplus
 }
