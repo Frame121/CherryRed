@@ -21,6 +21,9 @@ CXXFLAGS := $(ARCH) $(OPT) -std=c++17 -fno-rtti -fno-exceptions -fno-builtin -fn
 ifneq ($(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h),)
 CXXFLAGS += -DRN_HAVE_PSP_FW
 endif
+ifneq ($(wildcard RedNavi/smu_fw.h),)
+CXXFLAGS += -DRN_HAVE_SMU_FW
+endif
 ifneq ($(wildcard RedNavi/dmub_fw.h),)
 CXXFLAGS += -DRN_HAVE_DMUB_FW
 endif
@@ -29,7 +32,7 @@ LDFLAGS := $(ARCH) -Xlinker -kext -nostdlib -lkmod -L$(SDK)/Library -lkmodc++ -l
 
 all: $(KEXT) $(FBKEXT)
 
-$(OUT)/kern_probe.o: RedNavi/kern_probe.cpp $(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h RedNavi/smu13.h compat/include/*/*.h)
+$(OUT)/kern_probe.o: RedNavi/kern_probe.cpp $(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h RedNavi/smu_fw.h RedNavi/smu13.h compat/include/*/*.h)
 	@mkdir -p $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 

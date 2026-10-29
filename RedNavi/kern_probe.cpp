@@ -91,6 +91,9 @@
 #ifdef RN_HAVE_PSP_FW
 #include "psp_fw.h"
 #endif
+#ifdef RN_HAVE_SMU_FW
+#include "smu_fw.h"
+#endif
 #ifdef RN_HAVE_DMUB_FW
 #include "dmub_fw.h"
 #endif
@@ -150,6 +153,7 @@
 #define kRNDmubBlockVramOff   0x50000000ull    // 1.25 GB into VRAM
 #define kRNPspCmdLoadIpFw     0x06u            // GFX_CMD_ID_LOAD_IP_FW
 #define kRNPspFwTypeDmub      51u              // GFX_FW_TYPE_DMUB
+#define kRNPspFwTypeSmu       18u              // GFX_FW_TYPE_SMU
 #define kRNDmubGpintStopFw    0x10020000u      // status 1, command DMUB_GPINT__STOP_FW (2)
 #define kRNDmubStopResponse   0xDEADDEADu
 #define kRNDmubCw0Base        0x60000000u
@@ -270,6 +274,7 @@ class RedNaviProbe : public IOService {
     void dumpDiscovery();
     void dumpVbios();
     void loadDmcub();
+    void loadSmuFw();
     void probeAux();
     bool dmubSend(const uint8_t *cmd, uint32_t len, uint32_t reply[16]);
     void dpInit();
@@ -1398,6 +1403,37 @@ void RedNaviProbe::dmcubSnapshot(const char *property) {
     out->release();
 }
 
+// psp_load_smu_fw (first thing psp_load_non_psp_fw does when autoload is supported): hand the SMU firmware to the sOS. Opt-in,
+// boot-arg rednavi_smu_load=1, needs RedNavi/smu_fw.h (tools/gen_smu_fw_header.py). Linux does this after SETUP_TMR and
+// before the other firmware; its SMU only answers messages afterwards.
+void RedNaviProbe::loadSmuFw() {
+#ifdef RN_HAVE_SMU_FW
+    uint32_t arg = 0;
+    if (!PE_parse_boot_argn("rednavi_smu_load", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: SMU firmware load not requested (boot-arg rednavi_smu_load=1)\n");
+        return;
+    }
+    if (kRNSmuFwSize > kRNPspBufSize) { IOLog("RedNavi: SMU firmware does not fit the staging buffer\n"); return; }
+    for (uint32_t off = 0; off < kRNPspBufSize; off += 4) vramWrite(kRNPspBufVramOffset + off, 0);
+    for (uint32_t off = 0; off < kRNSmuFwSize; off += 4) {
+        uint32_t v = 0;
+        for (uint32_t k = 0; k < 4 && off + k < kRNSmuFwSize; k++) v |= static_cast<uint32_t>(kRNSmuFw[off + k]) << (8 * k);
+        vramWrite(kRNPspBufVramOffset + off, v);
+    }
+    uint64_t mc = kRNVramMcBase + kRNPspBufVramOffset;
+    uint32_t args[4] = {static_cast<uint32_t>(mc), static_cast<uint32_t>(mc >> 32), kRNSmuFwSize, kRNPspFwTypeSmu};
+    uint32_t resp[4] = {};
+    bool ok = pspSubmit(kRNPspCmdLoadIpFw, args, 4, resp, 4);
+    IOLog("RedNavi: PSP LOAD_IP_FW SMU (%u bytes, version 0x%x): fence %s, status = 0x%08x, fw_addr = 0x%08x%08x\n", kRNSmuFwSize, kRNSmuFwVersion, ok ? "ok" : "missing", resp[0], resp[3], resp[2]);
+    const char *pn[5] = {"fence_ok", "status", "fw_addr_lo", "fw_addr_hi", "fw_version"};
+    uint32_t pv[5] = {ok, resp[0], resp[2], resp[3], kRNSmuFwVersion};
+    rnPublish(this, "psp-load-smu", pn, pv, 5);
+    IOSleep(100);                                                           // let the SMU firmware come up
+#else
+    IOLog("RedNavi: built without RedNavi/smu_fw.h, SMU firmware load unavailable\n");
+#endif
+}
+
 void RedNaviProbe::loadDmcub() {
 #ifdef RN_HAVE_DMUB_FW
     uint32_t arg = 0;
@@ -1626,6 +1662,7 @@ bool RedNaviProbe::start(IOService *provider) {
         sendPspBootCfgGet();
         sendPspLoadToc();
         sendPspSetupTmr();
+        loadSmuFw();
     }
     loadDmcub();
     dpInit();

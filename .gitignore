@@ -5,3 +5,5 @@ RedNavi/dmub_*.h
 
 # Personal notes and local agent state, not for the public repo
 *.local.md
+RedNavi/smu_*.h
+!RedNavi/smu13.h
