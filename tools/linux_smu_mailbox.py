@@ -4,6 +4,11 @@ RedNavi sends on macOS, to compare behaviour (run as root, amdgpu loaded, debugf
 
     sudo python3 linux_smu_mailbox.py read  out.txt        # registers only
     sudo python3 linux_smu_mailbox.py send  out.txt        # registers, then GetSmuVersion, GetDriverIfVersion, TestMessage
+    sudo python3 linux_smu_mailbox.py send  out.txt bar5   # same, but through BAR5 (sysfs resource5), amdgpu NOT loaded
+
+The 'bar5' variant is the one that matches RedNavi: boot Linux with the kernel parameter modprobe.blacklist=amdgpu
+(the screen stays on the iGPU or the firmware framebuffer), so nothing but this script touches the card. A
+dpm=0 boot is not usable on this card (black screen).
 
 Every line is fsynced before the next access, so a lock-up leaves a trail. 'send' follows the Linux protocol
 (smu_msg_v1_send_msg): wait for a non-zero response, clear C2PMSG_90, write the argument to C2PMSG_82, the
@@ -38,10 +43,20 @@ def find_card():
     raise SystemExit("no amdgpu debugfs for 1002:747e (amdgpu loaded? debugfs mounted? root?)")
 
 
+def find_bar5():
+    for d in sorted(glob.glob("/sys/bus/pci/devices/*")):
+        try:
+            if open(d + "/vendor").read().strip() == "0x1002" and open(d + "/device").read().strip() == "0x747e":
+                return d
+        except OSError:
+            pass
+    raise SystemExit("no 1002:747e on the PCI bus")
+
+
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in ("read", "send"):
+    if len(sys.argv) not in (3, 4) or sys.argv[1] not in ("read", "send") or (len(sys.argv) == 4 and sys.argv[3] != "bar5"):
         sys.exit(__doc__)
-    card = find_card()
+    bar5 = len(sys.argv) == 4
     out = open(sys.argv[2], "a")
     mode = sys.argv[1]
 
@@ -50,13 +65,29 @@ def main():
         out.flush()
         os.fsync(out.fileno())
 
-    fd = os.open(card + "/amdgpu_regs", os.O_RDWR if mode == "send" else os.O_RDONLY)
+    if bar5:
+        import mmap
+        dev = find_bar5()
+        with open(dev + "/enable", "w") as f:           # memory decode on, no driver bound
+            f.write("1")
+        rfd = os.open(dev + "/resource5", os.O_RDWR | os.O_SYNC)
+        mm = mmap.mmap(rfd, 512 * 1024)
+        emit("# BAR5 via " + dev)
 
-    def rd(dword):
-        return struct.unpack("<I", os.pread(fd, 4, dword * 4))[0]
+        def rd(dword):
+            return struct.unpack_from("<I", mm, dword * 4)[0]
 
-    def wr(dword, v):
-        os.pwrite(fd, struct.pack("<I", v), dword * 4)
+        def wr(dword, v):
+            struct.pack_into("<I", mm, dword * 4, v)
+    else:
+        card = find_card()
+        fd = os.open(card + "/amdgpu_regs", os.O_RDWR if mode == "send" else os.O_RDONLY)
+
+        def rd(dword):
+            return struct.unpack("<I", os.pread(fd, 4, dword * 4))[0]
+
+        def wr(dword, v):
+            os.pwrite(fd, struct.pack("<I", v), dword * 4)
 
     emit("# kernel cmdline: " + open("/proc/cmdline").read().strip())
     emit("# date: " + time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -64,8 +95,13 @@ def main():
     for name, off in REGS:
         emit("%s 0x%05x 0x%08x" % (name, off, rd(off)))
 
-    pcie = card + "/amdgpu_regs_pcie"
-    if os.path.exists(pcie):
+    if bar5:
+        NBIF1 = 0x14                                    # NBIF base index 1: RSMU_INDEX at +0, RSMU_DATA at +1
+        wr(NBIF1, SMN_FW_FLAGS)
+        v = rd(NBIF1 + 1)
+        emit("MP1_FIRMWARE_FLAGS (SMN 0x%08x) 0x%08x  interrupts_enabled=%d" % (SMN_FW_FLAGS, v, v & 1))
+    elif os.path.exists(card + "/amdgpu_regs_pcie"):
+        pcie = card + "/amdgpu_regs_pcie"
         fp = os.open(pcie, os.O_RDONLY)
         v = struct.unpack("<I", os.pread(fp, 4, SMN_FW_FLAGS))[0]
         emit("MP1_FIRMWARE_FLAGS (SMN 0x%08x) 0x%08x  interrupts_enabled=%d" % (SMN_FW_FLAGS, v, v & 1))

@@ -40,9 +40,9 @@ Put it under `compat/include/linux/` only if Linux code includes it by that name
 
 ### Linux comparison run
 
-`tools/linux_smu_mailbox.py` reads the MP1 mailbox on Linux and, with `send`, sends the same three messages with the same protocol. Run it twice on the card: once on a normal boot (the driver has initialised the SMU) and once with the kernel parameter `amdgpu.dpm=0` (the driver leaves the SMU alone, like RedNavi does). If the SMU answers on Linux in the second case, the difference is in what RedNavi does around the mailbox; if it does not, it needs something the Linux driver does during its power-management init. Results go to `docs/logs/linux-reference/`.
+`tools/linux_smu_mailbox.py` reads the MP1 mailbox on Linux and, with `send`, sends the same three messages with the same protocol. Two runs on the card:
 
-```
-sudo python3 linux_smu_mailbox.py send smu_mailbox_normal.txt
-sudo python3 linux_smu_mailbox.py send smu_mailbox_dpm0.txt
-```
+1. Normal boot (the driver has initialised the SMU): `sudo python3 linux_smu_mailbox.py send smu_mailbox_normal.txt`.
+2. Boot with the kernel parameter `modprobe.blacklist=amdgpu` so no driver touches the card, then read BAR5 directly, like RedNavi does: `sudo python3 linux_smu_mailbox.py send smu_mailbox_nodriver.txt bar5`. (`amdgpu.dpm=0` gives a black screen on this card and is not usable.)
+
+If the SMU answers in run 2, the difference is in what RedNavi does around the mailbox; if it does not but answers in run 1, it needs something the Linux driver does during its power-management init. Results go to `docs/logs/linux-reference/`.
