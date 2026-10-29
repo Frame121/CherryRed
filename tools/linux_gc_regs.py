@@ -61,7 +61,14 @@ def main():
         if not card:
             sys.exit("no amdgpu debugfs (driver loaded? root?)")
         fd = os.open(card + "/amdgpu_regs", os.O_RDONLY)
+        # At idle the GC is power-gated (GFXOFF) and every GC/SDMA register reads 0: keep it awake while reading.
+        gfxoff = None
+        if os.path.exists(card + "/amdgpu_gfxoff"):
+            gfxoff = os.open(card + "/amdgpu_gfxoff", os.O_RDWR)
+            os.write(gfxoff, struct.pack("<I", 0))
         read = lambda dword: struct.unpack("<I", os.pread(fd, 4, dword * 4))[0]
+    if len(sys.argv) == 3:
+        emit("# gfxoff control: " + ("disabled" if gfxoff is not None else "amdgpu_gfxoff debugfs file not found; boot with amdgpu.ppfeaturemask=0xffff7fff"))
     emit("# kernel cmdline: " + open("/proc/cmdline").read().strip())
     for name, dword in regs:
         if dword * 4 + 4 > 512 * 1024:
