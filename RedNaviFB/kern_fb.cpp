@@ -1,9 +1,11 @@
 // RedNaviFB: IOFramebuffer on top of the DCN scanout the probe brings up.
 //
-// The display hardware is already lit by RedNaviProbe::dcnReplay() (fixed 1920x1080 at 60 Hz, linear XRGB8888,
-// pitch 7680). This class only tells WindowServer where that surface is: an aperture over BAR0, which macOS
-// maps as 256 MB, so the surface lives in the first 256 MB of VRAM. There is no mode setting, no cursor, no
-// gamma and no vertical blank interrupt yet.
+// The display hardware is lit by RedNaviProbe (linear XRGB8888). This class tells WindowServer where the surface
+// is: an aperture over BAR0, which macOS maps as 256 MB, so the surface lives in the first 256 MB of VRAM. It lists
+// the modes of the monitor's EDID (fb-modes, published by the probe) and a mode change is a platform function call
+// to the probe ("rednavi-set-mode"), which reprograms the pipe. There is no cursor plane, no gamma and no vertical
+// blank interrupt yet. The firmware boot framebuffer (IONDRVFramebuffer) on the same PCI device is terminated at start,
+// otherwise macOS lists it as a second display and makes it the main one.
 //
 // This is a separate kext because IOGraphicsFamily sits in the system kernel collection and OpenCore can only
 // link injected kexts against the boot collection. It matches the property RedNaviProbe sets after the replay
@@ -14,14 +16,24 @@
 #include <IOKit/IOTimerEventSource.h>
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/graphics/IOFramebuffer.h>
+#include <pexpert/pexpert.h>
 
-#define kRNFbModeId   1u
+#define kRNFbMaxModes 32
 
 class RedNaviFB : public IOFramebuffer {
     OSDeclareDefaultStructors(RedNaviFB)
 
     uint64_t scanoutPhys {0};          // CPU physical address of the surface (BAR0 + offset)
-    uint32_t fbWidth {1920}, fbHeight {1080}, fbPitch {7680}, fbRefresh {60};   // the mode the probe lit, from its properties
+    uint32_t fbWidth {1920}, fbHeight {1080}, fbPitch {7680}, fbRefresh {60};   // the mode on the wire
+
+    struct ModeEntry { uint32_t w, h, refresh, probeIndex; };
+    ModeEntry modes[kRNFbMaxModes] {};
+    uint32_t modeCount {0};
+    uint32_t ghostTries {0};
+    bool ghostGone {false};
+    uint32_t curMode {0};              // index into modes[]; the mode id WindowServer sees is index + 1
+
+    static uint32_t pitchBytes(uint32_t w) { return ((w + 63u) & ~63u) * 4u; }       // matches rn_pitch_pixels in the probe
 
     // Diagnostics, published as the fb-diag property: what WindowServer asks and whether the surface changes.
     IOTimerEventSource *diagTimer {nullptr};
@@ -79,6 +91,42 @@ class RedNaviFB : public IOFramebuffer {
         return true;
     }
 
+    // The firmware's framebuffer (GOP/VESA) sits on the same PCI device as an IONDRVFramebuffer. Left alone, macOS lists it as
+    // a second display, makes it the main one and puts the desktop on it, where the monitor does not show it.
+    // Returns how many it asked to terminate. The boot framebuffer is registered a little after this kext starts, so the timer
+    // calls this again every second until it has been found.
+    unsigned removeBootFramebuffer(IOService *probe) {
+        uint32_t keep = 0;
+        if (PE_parse_boot_argn("rednavi_keep_boot_fb", &keep, sizeof(keep)) && keep) return 0;
+        IOService *pci = probe ? probe->getProvider() : nullptr;
+        if (!pci) return 0;
+        OSDictionary *match = IOService::serviceMatching("IONDRVFramebuffer");
+        OSIterator *it = match ? IOService::getMatchingServices(match) : nullptr;
+        unsigned found = 0, asked = 0, other = 0;
+        if (it) {
+            OSObject *o;
+            while ((o = it->getNextObject())) {
+                IOService *svc = OSDynamicCast(IOService, o);
+                if (!svc) continue;
+                found++;
+                if (svc->getProvider() == pci) {
+                    IOLog("RedNaviFB: terminating the firmware boot framebuffer\n");
+                    if (svc->terminate(kIOServiceRequired)) asked++;     // required: the clients (WindowServer) must let go
+                } else {
+                    other++;
+                }
+            }
+            it->release();
+        }
+        if (match) match->release();
+        char msg[64];
+        snprintf(msg, sizeof(msg), "try %u: found %u, terminate accepted for %u, other provider %u", ghostTries, found, asked, other);
+        OSString *str = OSString::withCString(msg);
+        if (str && (asked || ghostTries % 30 == 0)) setProperty("boot-fb-removal", str);
+        if (str) str->release();
+        return asked;
+    }
+
 public:
     bool start(IOService *provider) APPLE_KEXT_OVERRIDE {
         if (!readNumber(provider, "fb-scanout-phys", &scanoutPhys)) {
@@ -90,6 +138,20 @@ public:
         if (readNumber(provider, "fb-height", &v)) fbHeight = static_cast<uint32_t>(v);
         if (readNumber(provider, "fb-pitch", &v)) fbPitch = static_cast<uint32_t>(v);
         if (readNumber(provider, "fb-refresh", &v)) fbRefresh = static_cast<uint32_t>(v);
+        uint64_t curIndex = 0;
+        readNumber(provider, "fb-current-mode", &curIndex);
+        OSData *list = OSDynamicCast(OSData, provider->getProperty("fb-modes"));
+        if (list) {
+            modeCount = static_cast<uint32_t>(list->getLength() / sizeof(ModeEntry));
+            if (modeCount > kRNFbMaxModes) modeCount = kRNFbMaxModes;
+            memcpy(modes, list->getBytesNoCopy(), modeCount * sizeof(ModeEntry));
+            for (uint32_t i = 0; i < modeCount; i++) if (modes[i].probeIndex == curIndex) curMode = i;
+        }
+        if (modeCount == 0) {                                    // old probe: the one mode it lit
+            modes[0] = {fbWidth, fbHeight, fbRefresh, 0};
+            modeCount = 1;
+        }
+        removeBootFramebuffer(provider);
         if (!IOFramebuffer::start(provider)) return false;
         IOMemoryDescriptor *md = IOMemoryDescriptor::withPhysicalAddress(scanoutPhys, fbPitch * fbHeight, kIODirectionInOut);
         if (md) { diagMap = md->map(kIOMapInhibitCache); md->release(); }
@@ -149,6 +211,10 @@ public:
         if (wl) {
             diagTimer = IOTimerEventSource::timerEventSource(this, [](OSObject *o, IOTimerEventSource *t) {
                 RedNaviFB *self = static_cast<RedNaviFB *>(o);
+                if (!self->ghostGone && self->ghostTries < 300) {
+                    self->ghostTries++;
+                    if (self->removeBootFramebuffer(self->getProvider())) self->ghostGone = true;
+                }
                 self->publishDiag();
                 t->setTimeoutMS(1000);
             });
@@ -174,21 +240,22 @@ public:
 
     const char *getPixelFormats() APPLE_KEXT_OVERRIDE { return IO32BitDirectPixels; }
 
-    IOItemCount getDisplayModeCount() APPLE_KEXT_OVERRIDE { return 1; }
+    IOItemCount getDisplayModeCount() APPLE_KEXT_OVERRIDE { return modeCount; }
 
-    IOReturn getDisplayModes(IODisplayModeID *modes) APPLE_KEXT_OVERRIDE {
-        modes[0] = kRNFbModeId;
+    IOReturn getDisplayModes(IODisplayModeID *ids) APPLE_KEXT_OVERRIDE {
+        for (uint32_t i = 0; i < modeCount; i++) ids[i] = static_cast<IODisplayModeID>(i + 1);
         return kIOReturnSuccess;
     }
 
     IOReturn getInformationForDisplayMode(IODisplayModeID mode, IODisplayModeInformation *info) APPLE_KEXT_OVERRIDE {
-        if (mode != kRNFbModeId) return kIOReturnUnsupportedMode;
+        if (mode < 1 || static_cast<uint32_t>(mode) > modeCount) return kIOReturnUnsupportedMode;
+        const ModeEntry &m = modes[mode - 1];
         bzero(info, sizeof(*info));
-        info->nominalWidth = fbWidth;
-        info->nominalHeight = fbHeight;
-        info->refreshRate = fbRefresh << 16;
+        info->nominalWidth = m.w;
+        info->nominalHeight = m.h;
+        info->refreshRate = m.refresh << 16;
         info->maxDepthIndex = 0;
-        info->flags = kDisplayModeValidFlag | kDisplayModeSafeFlag;
+        info->flags = kDisplayModeValidFlag | kDisplayModeSafeFlag | (mode == 1 ? kDisplayModeDefaultFlag : 0);
         return kIOReturnSuccess;
     }
 
@@ -196,7 +263,8 @@ public:
 
     IOReturn getPixelInformation(IODisplayModeID mode, IOIndex depth, IOPixelAperture aperture,
                                  IOPixelInformation *pi) APPLE_KEXT_OVERRIDE {
-        if (mode != kRNFbModeId || depth != 0 || aperture != kIOFBSystemAperture) return kIOReturnUnsupportedMode;
+        if (mode < 1 || static_cast<uint32_t>(mode) > modeCount || depth != 0 || aperture != kIOFBSystemAperture) return kIOReturnUnsupportedMode;
+        const ModeEntry &m = modes[mode - 1];
         bzero(pi, sizeof(*pi));
         strlcpy(pi->pixelFormat, IO32BitDirectPixels, sizeof(pi->pixelFormat));
         pi->flags = 0;
@@ -204,9 +272,9 @@ public:
         pi->componentCount = 3;
         pi->bitsPerComponent = 8;
         pi->bitsPerPixel = 32;
-        pi->bytesPerRow = fbPitch;
-        pi->activeWidth = fbWidth;
-        pi->activeHeight = fbHeight;
+        pi->bytesPerRow = pitchBytes(m.w);
+        pi->activeWidth = m.w;
+        pi->activeHeight = m.h;
         pi->componentMasks[0] = 0x00ff0000;
         pi->componentMasks[1] = 0x0000ff00;
         pi->componentMasks[2] = 0x000000ff;
@@ -214,15 +282,35 @@ public:
     }
 
     IOReturn getCurrentDisplayMode(IODisplayModeID *mode, IOIndex *depth) APPLE_KEXT_OVERRIDE {
-        if (mode) *mode = kRNFbModeId;
+        if (mode) *mode = static_cast<IODisplayModeID>(curMode + 1);
         if (depth) *depth = 0;
         return kIOReturnSuccess;
     }
 
-    // The only mode is already on the wire, so accepting it again is all a mode set can mean for now.
+    IOReturn getStartupDisplayMode(IODisplayModeID *mode, IOIndex *depth) APPLE_KEXT_OVERRIDE { return getCurrentDisplayMode(mode, depth); }
+    IOReturn setStartupDisplayMode(IODisplayModeID, IOIndex) APPLE_KEXT_OVERRIDE { return kIOReturnSuccess; }
+
+    // A mode change: ask the probe to reprogram the pipe (quiesce, DISPCLK, link training if needed, mode registers),
+    // then follow its geometry. WindowServer reads the aperture and pixel information again afterwards.
     IOReturn setDisplayMode(IODisplayModeID mode, IOIndex depth) APPLE_KEXT_OVERRIDE {
         calls[5]++;
-        return (mode == kRNFbModeId && depth == 0) ? kIOReturnSuccess : kIOReturnUnsupportedMode;
+        if (mode < 1 || static_cast<uint32_t>(mode) > modeCount || depth != 0) return kIOReturnUnsupportedMode;
+        if (static_cast<uint32_t>(mode - 1) == curMode) return kIOReturnSuccess;
+        IOService *probe = getProvider();
+        if (!probe) return kIOReturnNotReady;
+        const ModeEntry &m = modes[mode - 1];
+        IOLog("RedNaviFB: mode change to %ux%u@%u\n", m.w, m.h, m.refresh);
+        IOReturn r = probe->callPlatformFunction("rednavi-set-mode", true, reinterpret_cast<void *>(static_cast<uintptr_t>(m.probeIndex)), nullptr, nullptr, nullptr);
+        if (r != kIOReturnSuccess) {
+            IOLog("RedNaviFB: the probe refused the mode change (0x%x)\n", r);
+            return r;
+        }
+        curMode = static_cast<uint32_t>(mode - 1);
+        fbWidth = m.w; fbHeight = m.h; fbRefresh = m.refresh; fbPitch = pitchBytes(m.w);
+        if (diagMap) { diagMap->release(); diagMap = nullptr; }
+        IOMemoryDescriptor *md = IOMemoryDescriptor::withPhysicalAddress(scanoutPhys, fbPitch * fbHeight, kIODirectionInOut);
+        if (md) { diagMap = md->map(kIOMapInhibitCache); md->release(); }
+        return kIOReturnSuccess;
     }
 };
 
