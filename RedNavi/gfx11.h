@@ -28,6 +28,12 @@ struct rn_sdma_result {
 };
 
 // Program counter start of the RS64 CP firmware, from the firmware headers (gfx_firmware_header_v2_0.ucode_start_addr_lo/hi).
+struct rn_sdma_run_result {
+    u32 rptr, wptr, rptr_shadow;
+    u32 fault_status, fault_addr_lo, fault_addr_hi;   // GCVM_L2_PROTECTION_FAULT_*
+    int ok;                                           // the read pointer reached the end of the packets
+};
+
 struct rn_cp_start {
     u32 pfp_lo, pfp_hi, me_lo, me_hi, mec_lo, mec_hi;
 };
@@ -74,6 +80,17 @@ extern "C" {
 // Programs the GC memory hub: system aperture on the VRAM range, VMID 0 enabled with its page table, L1 TLB and L2 cache.
 void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc);
 
+// The VMID 0 page table (VRAM, at gmc.pt_vram_offset) maps the GART window gmc.gart_start..gart_end in 4 KB pages. rn_gfxhub_enable
+// zeroes it; rn_gart_map_page then makes page `page` of the window point at a system memory page (bus address as the IOMMU or the
+// physical address gives it: valid, system, snooped, readable, writeable). Do this before rn_gfxhub_enable, which also flushes the TLBs.
+void rn_gart_map_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 bus_addr);
+void rn_gart_clear(struct rn_device *adev, const struct rn_gmc *gmc);
+
+// Runs a packet list on SDMA0's gfx ring (the setup of rn_sdma0_test, reprogrammed) and waits for the read pointer to reach its end.
+// Addresses inside the packets are whatever the SDMA can translate: MC addresses in the VRAM aperture, or GART addresses.
+void rn_sdma0_run(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, const u32 *pkt, u32 dwords,
+                  struct rn_sdma_run_result *res);
+
 // Starts SDMA0 on a ring of ring_bytes at ring_vram_offset (the read and write pointer shadows follow in the same page) and
 // asks it to write a magic value to target_vram_offset. Everything lives in VRAM, so no GART mapping is needed.
 // va_base is added to the offsets to form the addresses the SDMA uses: RN_VRAM_MC_BASE (system aperture) or 0 (the identity GART window).
@@ -97,7 +114,10 @@ void rn_compute_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_off
 // With target_vram_offset nonzero the shader is not just s_endpgm: it stores 0x600DC0DE to that VRAM dword (global_store_b32, the
 // instruction words hand-assembled from the encodings in LLVM's MC tests, llvm/test/MC/AMDGPU/gfx11_asm_*.s).
 void rn_compute_dispatch_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u64 shader_vram_offset, u64 fence_vram_offset,
-                              u64 target_vram_offset, u32 int_sel, struct rn_dispatch_result *res);
+                              u64 target_vram_offset, u64 target_gpu_va, volatile u32 *host_target, u32 int_sel,
+                              struct rn_dispatch_result *res);
+// (With target_gpu_va and host_target set, the shader stores to that GPU address instead - a GART-mapped host page - and the result is
+// read from host_target; target_vram_offset is then ignored.)
 
 // Interrupt handler (ih_v6_0_irq_init, simplified): ring 0 of OSSSYS in VRAM, its write pointer written back to memory, no MSI and no
 // doorbell; the CP's end-of-pipe timestamp interrupt for MEC pipe 0 is enabled. A RELEASE_MEM with int_sel 2 then makes the CP

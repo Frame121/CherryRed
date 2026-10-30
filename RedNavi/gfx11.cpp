@@ -24,16 +24,21 @@ inline u32 sdmaReg(struct rn_device *adev, u32 reg, u32 baseIdx) {
 
 extern "C" {
 
+void rn_gart_clear(struct rn_device *adev, const struct rn_gmc *gmc) {
+    const u64 pages = ((gmc->gart_end - gmc->gart_start) >> 12) + 1;
+    for (u64 o = 0; o < pages * 8; o += 4) rn_vram_wr32(adev, gmc->pt_vram_offset + o, 0);   // every PTE invalid
+}
+
+void rn_gart_map_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 bus) {
+    // AMDGPU_PTE_VALID | SYSTEM | SNOOPED | READABLE | WRITEABLE, address in bits 47:12
+    const u64 pte = (bus & 0x0000FFFFFFFFF000ull) | 0x1ull | 0x2ull | 0x4ull | 0x20ull | 0x40ull;
+    const u64 slot = gmc->pt_vram_offset + (u64)page * 8;
+    rn_vram_wr32(adev, slot, lower_32_bits(pte));
+    rn_vram_wr32(adev, slot + 4, upper_32_bits(pte));
+}
+
 void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc) {
     u32 tmp;
-
-    // One 8-byte PTE per 4 KB GART page; the page at GART address A maps to VRAM offset A (valid | readable | writeable).
-    for (u64 va = gmc->gart_start; va <= gmc->gart_end; va += 4096) {
-        u64 pte = va | 0x1ull | 0x20ull | 0x40ull;
-        u64 slot = gmc->pt_vram_offset + ((va - gmc->gart_start) >> 12) * 8;
-        rn_vram_wr32(adev, slot, lower_32_bits(pte));
-        rn_vram_wr32(adev, slot + 4, upper_32_bits(pte));
-    }
 
     // init_gart_aperture_regs: the VMID 0 page table (physical VRAM offset | valid) and the GART range in 4 KB pages
     u64 pt_base = gmc->pt_vram_offset | 1ull;
@@ -551,8 +556,8 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
 #define RN_COMPUTE_RESOURCE_LIMITS 0x1bb5u
 #define RN_COMPUTE_PGM_RSRC3 0x1bc8u
 
-void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u64 shaderOff, u64 fenceOff, u64 targetOff, u32 intSel,
-                              struct rn_dispatch_result *res) {
+void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u64 shaderOff, u64 fenceOff, u64 targetOff, u64 targetVaOverride,
+                              volatile u32 *hostTarget, u32 intSel, struct rn_dispatch_result *res) {
     memset(res, 0, sizeof(*res));
     const u64 shaderVa = vaBase + shaderOff, fenceVa = vaBase + fenceOff;
     const u64 wptrOff = ringOff + 0x1008;
@@ -562,16 +567,16 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u
     // the shader: s_endpgm (GFX11 SOPP opcode 48) alone, or a store of one dword followed by s_endpgm; s_code_end padding up to 256 bytes
     u32 code[16];
     u32 nc = 0;
-    if (targetOff) {
-        const u64 targetVa = vaBase + targetOff;
+    if (targetOff || hostTarget) {
+        const u64 targetVa = hostTarget ? targetVaOverride : vaBase + targetOff;
         code[nc++] = 0xBE8000FFu; code[nc++] = lower_32_bits(targetVa);     // s_mov_b32 s0, <address low>
         code[nc++] = 0xBE8100FFu; code[nc++] = upper_32_bits(targetVa);     // s_mov_b32 s1, <address high>
         code[nc++] = 0x7E020280u;                                           // v_mov_b32 v1, 0           (offset)
         code[nc++] = 0x7E0402FFu; code[nc++] = 0x600DC0DEu;                 // v_mov_b32 v2, 0x600DC0DE  (data)
         code[nc++] = 0xDC6A0000u; code[nc++] = 0x00000201u;                 // global_store_b32 v1, v2, s[0:1]
         code[nc++] = 0xBC7C0000u;                                           // s_waitcnt_vscnt null, 0x0
-        rn_vram_wr32(adev, targetOff, 0xDEAD0000u);
-        res->target_before = rn_vram_rd32(adev, targetOff);
+        if (hostTarget) { *hostTarget = 0xDEAD0000u; res->target_before = *hostTarget; }
+        else { rn_vram_wr32(adev, targetOff, 0xDEAD0000u); res->target_before = rn_vram_rd32(adev, targetOff); }
     }
     code[nc++] = 0xBFB00000u;                                               // s_endpgm
     for (u32 i = 0; i < nc; i++) rn_vram_wr32(adev, shaderOff + i * 4, code[i]);
@@ -630,7 +635,8 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u
     res->wptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
     res->active = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
     res->scratch = RREG32_SOC15(RN_GC, 0, regSCRATCH_REG0);
-    if (targetOff) res->target = rn_vram_rd32(adev, targetOff);
+    if (hostTarget) res->target = *hostTarget;
+    else if (targetOff) res->target = rn_vram_rd32(adev, targetOff);
     res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
     res->fault_addr_lo = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
     res->fault_addr_hi = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
@@ -708,6 +714,69 @@ void rn_ih_read(struct rn_device *adev, u64 ringOff, u64 wptrShadowOff, struct r
     res->cp_int_rd = RREG32_SOC15(RN_GC, 0, regCP_ME1_PIPE0_INT_CNTL);
     res->wptr_shadow = rn_vram_rd32(adev, wptrShadowOff);
     for (u32 i = 0; i < 16; i++) res->entry[i] = rn_vram_rd32(adev, ringOff + i * 4);
+}
+
+void rn_sdma0_run(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, const u32 *pkt, u32 dwords, struct rn_sdma_run_result *res) {
+    memset(res, 0, sizeof(*res));
+    const u64 ringMc = vaBase + ringOff;
+    const u64 rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008;
+    u32 tmp;
+
+    tmp = SDR(regSDMA0_QUEUE0_RB_CNTL);                                     // stop the queue before it is reprogrammed
+    tmp = REG_SET_FIELD(tmp, SDMA0_QUEUE0_RB_CNTL, RB_ENABLE, 0);
+    SDW(regSDMA0_QUEUE0_RB_CNTL, tmp);
+    for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
+    for (u32 i = 0; i < dwords; i++) rn_vram_wr32(adev, ringOff + i * 4, pkt[i]);
+    rn_vram_wr32(adev, rptrOff, 0); rn_vram_wr32(adev, rptrOff + 4, 0);
+    rn_vram_wr32(adev, wptrOff, 0); rn_vram_wr32(adev, wptrOff + 4, 0);
+
+    SDW(regSDMA0_SEM_WAIT_FAIL_TIMER_CNTL, 0);
+    u32 rbBufsz = 0;
+    while ((4u << rbBufsz) < ringBytes) rbBufsz++;
+    u32 rbCntl = SDR(regSDMA0_QUEUE0_RB_CNTL);
+    rbCntl = REG_SET_FIELD(rbCntl, SDMA0_QUEUE0_RB_CNTL, RB_SIZE, rbBufsz);
+    rbCntl = REG_SET_FIELD(rbCntl, SDMA0_QUEUE0_RB_CNTL, RB_PRIV, 1);
+    SDW(regSDMA0_QUEUE0_RB_CNTL, rbCntl);
+    SDW(regSDMA0_QUEUE0_RB_RPTR, 0);
+    SDW(regSDMA0_QUEUE0_RB_RPTR_HI, 0);
+    SDW(regSDMA0_QUEUE0_RB_WPTR, 0);
+    SDW(regSDMA0_QUEUE0_RB_WPTR_HI, 0);
+    SDW(regSDMA0_QUEUE0_RB_WPTR_POLL_ADDR_LO, lower_32_bits(vaBase + wptrOff));
+    SDW(regSDMA0_QUEUE0_RB_WPTR_POLL_ADDR_HI, upper_32_bits(vaBase + wptrOff));
+    SDW(regSDMA0_QUEUE0_RB_RPTR_ADDR_HI, upper_32_bits(vaBase + rptrOff));
+    SDW(regSDMA0_QUEUE0_RB_RPTR_ADDR_LO, lower_32_bits(vaBase + rptrOff) & 0xFFFFFFFCu);
+    rbCntl = REG_SET_FIELD(rbCntl, SDMA0_QUEUE0_RB_CNTL, RPTR_WRITEBACK_ENABLE, 1);
+    rbCntl = REG_SET_FIELD(rbCntl, SDMA0_QUEUE0_RB_CNTL, WPTR_POLL_ENABLE, 0);
+    rbCntl = REG_SET_FIELD(rbCntl, SDMA0_QUEUE0_RB_CNTL, F32_WPTR_POLL_ENABLE, 1);
+    SDW(regSDMA0_QUEUE0_RB_BASE, (u32)(ringMc >> 8));
+    SDW(regSDMA0_QUEUE0_RB_BASE_HI, (u32)(ringMc >> 40));
+    SDW(regSDMA0_QUEUE0_MINOR_PTR_UPDATE, 1);
+    SDW(regSDMA0_QUEUE0_RB_WPTR, 0);
+    SDW(regSDMA0_QUEUE0_RB_WPTR_HI, 0);
+    tmp = SDR(regSDMA0_QUEUE0_DOORBELL);
+    tmp = REG_SET_FIELD(tmp, SDMA0_QUEUE0_DOORBELL, ENABLE, 0);
+    SDW(regSDMA0_QUEUE0_DOORBELL, tmp);
+    SDW(regSDMA0_QUEUE0_MINOR_PTR_UPDATE, 0);
+    tmp = SDR(regSDMA0_F32_CNTL);
+    tmp = REG_SET_FIELD(tmp, SDMA0_F32_CNTL, HALT, 0);
+    tmp = REG_SET_FIELD(tmp, SDMA0_F32_CNTL, TH1_RESET, 0);
+    SDW(regSDMA0_F32_CNTL, tmp);
+    rbCntl = REG_SET_FIELD(rbCntl, SDMA0_QUEUE0_RB_CNTL, RB_ENABLE, 1);
+    SDW(regSDMA0_QUEUE0_RB_CNTL, rbCntl);
+
+    rn_vram_wr32(adev, wptrOff, dwords << 2);
+    SDW(regSDMA0_QUEUE0_RB_WPTR, dwords << 2);
+    SDW(regSDMA0_QUEUE0_RB_WPTR_HI, 0);
+    for (int i = 0; i < 2000; i++) {
+        res->rptr = SDR(regSDMA0_QUEUE0_RB_RPTR);
+        if (res->rptr == (dwords << 2)) { res->ok = 1; break; }
+        msleep(1);
+    }
+    res->wptr = SDR(regSDMA0_QUEUE0_RB_WPTR);
+    res->rptr_shadow = rn_vram_rd32(adev, rptrOff);
+    res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
+    res->fault_addr_lo = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
+    res->fault_addr_hi = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
 }
 
 }

@@ -87,6 +87,8 @@
 #include "edid.h"
 #include "mode_regs.h"
 #include "smu13.h"
+#include <IOKit/IODMACommand.h>
+#include <IOKit/IOBufferMemoryDescriptor.h>
 #include "gfx11.h"
 #include "gc_regs.h"
 
@@ -256,6 +258,10 @@ class RedNaviProbe : public IOService {
 
     IOPCIDevice *pci {nullptr};
     IOMemoryMap *regs {nullptr};
+    IOBufferMemoryDescriptor *hostBuf {nullptr};   // system memory the GPU reaches through the GART (rednavi_gart_test)
+    IODMACommand *hostDma {nullptr};
+    uint64_t hostBus {0};                          // its bus address as the device must use it
+    uint32_t hostBusLen {0};
     OSData *disc {nullptr};   // copy of the IP discovery table
     OSData *vbiosCopy {nullptr};   // VBIOS image read from the PCI ROM
     bool dmubUp {false};           // our DMCUB is running and its mailbox is set up
@@ -1631,7 +1637,9 @@ void RedNaviProbe::sdmaTest() {
     }
     // VRAM offsets: the first ~8 MB hold the firmware boot framebuffer that macOS draws into, the scanout is at 0x08000000, so the
     // engines work at 192 MB: page table 0x0C100000, default and fault pages 0x0C200000/0x0C201000, SDMA ring 0x0C000000, target 0x0C002000.
-    struct rn_gmc gmc = {kRNVramMcBase, kRNVramMcBase + 0x3FFFFFFFFull, 0x0C000000, 0x0C3FFFFF, 0x0C100000, 0x0C200000, 0x0C201000};   // GART window over VRAM 0x0C000000..0x0C3FFFFF
+    // The GART window: 256 pages at GPU address 0x2000000000 (outside the VRAM aperture), the page table at VRAM 0x0C100000.
+    const uint64_t kGartVa = 0x2000000000ull;
+    struct rn_gmc gmc = {kRNVramMcBase, kRNVramMcBase + 0x3FFFFFFFFull, kGartVa, kGartVa + 256 * 4096 - 1, 0x0C100000, 0x0C200000, 0x0C201000};
     
     // Does CPU access to VRAM through MM_INDEX/MM_DATA survive the memory hub being switched on? Two probe locations, read right
     // after writing and again 50 ms later, before and after rn_gfxhub_enable.
@@ -1643,6 +1651,31 @@ void RedNaviProbe::sdmaTest() {
     trace[3] = rd(0x1295 * 4);
     // Proof that the 11.0.3 hub offsets are right: before we write anything, FB_LOCATION_BASE/TOP should hold what the VBIOS left (0x8000/0x83ff).
     const uint32_t fbBefore = RREG32_SOC15(RN_GC, 0, regGCMC_VM_FB_LOCATION_BASE), fbTopBefore = RREG32_SOC15(RN_GC, 0, regGCMC_VM_FB_LOCATION_TOP);
+    rn_gart_clear(&gpu, &gmc);
+    // Opt-in (rednavi_gart_test=1): four pages of host memory, mapped into the GART before the hub is switched on.
+    uint32_t gartArg = 0;
+    const bool gartTest = PE_parse_boot_argn("rednavi_gart_test", &gartArg, sizeof(gartArg)) && gartArg == 1;
+    if (gartTest && !hostBuf) {
+        hostBuf = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task, kIODirectionInOut | kIOMemoryPhysicallyContiguous, 4 * 4096, 4096);
+        if (hostBuf) {
+            hostBuf->prepare();
+            memset(hostBuf->getBytesNoCopy(), 0, 4 * 4096);
+            hostDma = IODMACommand::withSpecification(kIODMACommandOutputHost64, 64, 0, IODMACommand::kMapped, 0, 1, nullptr, 0);
+            if (hostDma && hostDma->setMemoryDescriptor(hostBuf) == kIOReturnSuccess) {
+                IODMACommand::Segment64 seg = {};
+                UInt64 off = 0;
+                UInt32 nseg = 1;
+                if (hostDma->genIOVMSegments(&off, &seg, &nseg) == kIOReturnSuccess && nseg == 1) {
+                    hostBus = seg.fIOVMAddr;
+                    hostBusLen = static_cast<uint32_t>(seg.fLength);
+                }
+            }
+            const char *hn[5] = {"buf_ok", "dma_ok", "bus_lo", "bus_hi", "seg_len"};
+            uint32_t hv[5] = {1, hostDma != nullptr, static_cast<uint32_t>(hostBus), static_cast<uint32_t>(hostBus >> 32), hostBusLen};
+            rnPublish(this, "gart-info", hn, hv, 5);
+        }
+        for (uint32_t pg = 0; hostBus && pg < 4 && (pg + 1) * 4096u <= hostBusLen; pg++) rn_gart_map_page(&gpu, &gmc, pg, hostBus + pg * 4096ull);
+    }
     rn_gfxhub_enable(&gpu, &gmc);
     trace[4] = rd(0x1295 * 4);
     {   // do the GCVM writes stick? (they read 0 on a healthy Linux system too, so this may tell nothing)
@@ -1687,6 +1720,25 @@ void RedNaviProbe::sdmaTest() {
     uint32_t v[25] = {static_cast<uint32_t>(res.ok), res.step, res.value, res.pre_value, res.rptr, res.wptr, res.f32_cntl, res.rb_cntl, res.fault_status, res.fault_addr_lo, res.fault_addr_hi, res.sdma_status, res.sdma_status1, res.ctx_status,
                       res.version, res.cntl, res.power_cntl, res.checksum, res.freeze, res.chicken, res.program, res.ring0, res.ring3, res.rptr_shadow, res.wptr_shadow};
     rnPublish(this, "sdma-test", n, v, 25);
+
+    if (gartTest && hostBus) {
+        // System memory through the GART: SDMA writes a dword into the host page, and copies another one from it into VRAM.
+        volatile uint32_t *host = static_cast<volatile uint32_t *>(hostBuf->getBytesNoCopy());
+        host[0] = 0xAAAA0000u; host[1] = 0x55667788u;
+        const uint64_t vramDst = 0x0C0A0000;
+        rn_vram_wr32(&gpu, vramDst, 0);
+        const uint64_t dstMc = kRNVramMcBase + vramDst;
+        const uint32_t pkt[12] = {
+            2u, lower_32_bits(kGartVa), upper_32_bits(kGartVa), 0u, 0x11223344u,                       // WRITE_LINEAR one dword to host[0]
+            1u, 3u, 0u, lower_32_bits(kGartVa + 4), upper_32_bits(kGartVa + 4), lower_32_bits(dstMc), upper_32_bits(dstMc),   // COPY_LINEAR 4 bytes host[1] to VRAM
+        };
+        struct rn_sdma_run_result sr;
+        rn_sdma0_run(&gpu, kRNVramMcBase, 0x0C0B0000, 4096, pkt, 12, &sr);
+        const char *gn2[12] = {"run_ok", "rptr", "wptr", "host0", "host1", "vram_dst", "fault_status", "fault_addr_lo", "fault_addr_hi", "write_ok", "copy_ok", "rptr_shadow"};
+        uint32_t gv2[12] = {static_cast<uint32_t>(sr.ok), sr.rptr, sr.wptr, host[0], host[1], rn_vram_rd32(&gpu, vramDst), sr.fault_status, sr.fault_addr_lo,
+                            sr.fault_addr_hi, host[0] == 0x11223344u, rn_vram_rd32(&gpu, vramDst) == 0x55667788u, sr.rptr_shadow};
+        rnPublish(this, "gart-test", gn2, gv2, 12);
+    }
 
 #ifdef RN_HAVE_GC_FW
     // Opt-in (rednavi_gfx_test=1, on top of rednavi_sdma_test=1, which turns the memory hub on): a first command on the graphics
@@ -1757,7 +1809,11 @@ void RedNaviProbe::sdmaTest() {
                 if (ih) rn_ih_enable(&gpu, kRNVramMcBase, 0x0C040000, 4096, 0x0C041000);
                 uint32_t store = 0;
                 PE_parse_boot_argn("rednavi_dispatch_store", &store, sizeof(store));   // 1: the shader stores a dword, 0: s_endpgm only
-                rn_compute_dispatch_test(&gpu, kRNVramMcBase, 0x0C020000, 0x0C030000, 0x0C031000, store == 1 ? 0x0C032000 : 0, ih ? 2 : 0, &dr);
+                uint32_t dispGart = 0;
+                const bool toHost = gartTest && hostBus && PE_parse_boot_argn("rednavi_dispatch_gart", &dispGart, sizeof(dispGart)) && dispGart == 1;
+                volatile uint32_t *hostWord = toHost ? static_cast<volatile uint32_t *>(hostBuf->getBytesNoCopy()) + 2 : nullptr;   // dword 2 of the host page
+                rn_compute_dispatch_test(&gpu, kRNVramMcBase, 0x0C020000, 0x0C030000, 0x0C031000, store == 1 ? 0x0C032000 : 0,
+                                         toHost ? kGartVa + 8 : 0, hostWord, ih ? 2 : 0, &dr);
                 const char *dn[26] = {"step", "ok", "fence", "fence_before", "rptr", "wptr", "active", "scratch", "fault_status", "fault_addr_lo", "fault_addr_hi",
                                       "t0_rptr", "t0_fence", "t1_rptr", "t1_fence", "t5_rptr", "t5_fence", "t20_rptr", "t20_fence",
                                       "t100_rptr", "t100_fence", "t500_rptr", "t500_fence", "target", "target_before"};
@@ -2051,6 +2107,8 @@ void RedNaviProbe::stop(IOService *provider) {
     if (modeLock) { IOLockFree(modeLock); modeLock = nullptr; }
     if (disc) { disc->release(); disc = nullptr; }
     if (vbiosCopy) { vbiosCopy->release(); vbiosCopy = nullptr; }
+    if (hostDma) { hostDma->complete(); hostDma->clearMemoryDescriptor(); hostDma->release(); hostDma = nullptr; }
+    if (hostBuf) { hostBuf->release(); hostBuf = nullptr; }
     if (regs) { regs->release(); regs = nullptr; }
     IOService::stop(provider);
 }

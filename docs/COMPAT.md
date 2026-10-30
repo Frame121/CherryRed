@@ -164,3 +164,13 @@ Not done: delivering the interrupt to the CPU. There is no MSI yet, so the CPU s
 What cost the time: the S2A registers are about 20 MB into the register space, past the 512 KB BAR. The compat layer reached such registers through `MM_INDEX`/`MM_DATA`, which does not reach them (they read `0xffffffff`), and writing through it blanked the display, so the first attempt looked like "the doorbell breaks the screen". Registers past the BAR are reached through the NBIO's RSMU index/data pair (BAR bytes 0x50 and 0x54, what amdgpu uses on these ASICs); with that, the S2A entries read `0x0` before the write (not configured by the VBIOS) and the write is harmless. `rn_rreg32`/`rn_wreg32` now use it.
 
 Not done: doorbells for the gfx queue, SDMA and the IH read pointer; delivering interrupts to the CPU (MSI); the doorbell index assignment for more than one queue.
+
+## M4 step 8: system memory through the GART (2026-10-30)
+
+`rednavi_gart_test=1` allocates four pages of host memory (`IOBufferMemoryDescriptor`, physically contiguous), gets the address the device must use from an `IODMACommand` (`kIODMACommandOutputHost64`, mapped through the system mapper if there is one; here the bus address is `0x2f383000`, a plain physical address), and writes four system PTEs into the VMID 0 page table in VRAM before `rn_gfxhub_enable`. The GART window is 256 pages at GPU address `0x2000000000`, outside the VRAM aperture, and the PTE flags are `VALID | SYSTEM | SNOOPED | READABLE | WRITEABLE` with the page address in bits 47:12.
+
+Verified on the RX 7800 XT (`gart-test`, `rn_sdma0_run`): SDMA0 writes `0x11223344` to the first dword of the host page (WRITE_LINEAR, CPU reads it back from the buffer), and COPY_LINEAR copies the second dword `0x55667788` from the host page into VRAM; `GCVM_L2_PROTECTION_FAULT_STATUS` stays 0. With `rednavi_dispatch_gart=1` the compute shader of step 5 stores `0x600DC0DE` to GPU address `0x2000000008`, and the CPU reads it from the host buffer (`dispatch-test.target`); the shader and the ring stay in VRAM.
+
+Notes: the page table is cleared before the pages are mapped and not by `rn_gfxhub_enable`, which flushes the L1 TLBs and the L2 when it switches the hub on, so the mapping has to be in place first. COPY_LINEAR layout (`sdma_v6_0_emit_copy_buffer`): header (op 1, sub-op 0), byte count minus one, a flags dword, source address, destination address.
+
+Not done: mapping and unmapping at runtime (a TLB invalidation through `GCVM_INVALIDATE_ENG*_REQ` is needed when a PTE changes after the hub is on), more than a few pages, per-process page tables (VMID > 0), the ring and the IH ring in system memory.
