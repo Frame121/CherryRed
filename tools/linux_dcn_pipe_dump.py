@@ -16,6 +16,7 @@ the DIG4/HPD4 registers read as idle (DIG4_DIG_FE_CNTL 0). The DMU register base
 """
 import glob
 import os
+import re
 import struct
 import sys
 
@@ -24,28 +25,30 @@ DEFAULT = ["hpd_aux4", "dig4_dp4", "clocks", "otg0", "opp0", "mpc"]
 
 
 def find_card():
-    """Returns (debugfs dir, PCI device id string) of the first amdgpu card."""
+    """Returns (debugfs dir, PCI device id string, PCI address) of the first amdgpu card. The debugfs name file reads
+    'amdgpu dev=0000:04:00.0 unique=...'; the device id comes from the PCI device in sysfs."""
     for d in sorted(glob.glob("/sys/kernel/debug/dri/*")):
         try:
-            if "amdgpu" in open(d + "/name").read() and os.path.exists(d + "/amdgpu_regs"):
-                dev = open(d + "/device/device").read().strip() if os.path.exists(d + "/device/device") else ""
-                return d, dev
+            name = open(d + "/name").read()
+            if "amdgpu" not in name or not os.path.exists(d + "/amdgpu_regs"):
+                continue
+            m = re.search(r"dev=([0-9a-fA-F:.]+)", name)
+            bdf = m.group(1) if m else ""
+            dev = open("/sys/bus/pci/devices/%s/device" % bdf).read().strip() if bdf else ""
+            return d, dev, bdf
         except OSError:
             pass
     raise SystemExit("no amdgpu debugfs (amdgpu loaded? debugfs mounted? root?)")
 
 
-def dmu_bases(dev):
-    """DMU (hw_id 271) base addresses from /sys/class/drm/cardN/device/ip_discovery, or None."""
-    for card in sorted(glob.glob("/sys/class/drm/card[0-9]*/device")):
-        try:
-            if open(card + "/device").read().strip() != dev:
-                continue
-            for inst in sorted(glob.glob(card + "/ip_discovery/die/0/*/[0-9]*")):
-                if open(inst + "/hw_id").read().strip() == "271":
-                    return {i: int(l, 16) for i, l in enumerate(open(inst + "/base_addr").read().split())}
-        except (OSError, ValueError):
-            pass
+def dmu_bases(bdf):
+    """DMU (hw_id 271) base addresses from /sys/bus/pci/devices/<bdf>/ip_discovery, or None."""
+    try:
+        for inst in sorted(glob.glob("/sys/bus/pci/devices/%s/ip_discovery/die/0/*/[0-9]*" % bdf)):
+            if open(inst + "/hw_id").read().strip() == "271":
+                return {i: int(l, 16) for i, l in enumerate(open(inst + "/base_addr").read().split())}
+    except (OSError, ValueError):
+        pass
     return None
 
 
@@ -96,9 +99,9 @@ def main():
             groups.append(a)
     if len(groups) >= 2 and groups[0].endswith(".txt") and groups[1].endswith(".txt"):   # the old form: REGLIST OUT [GROUP...]
         reglist, out_path, groups = groups[0], groups[1], groups[2:]
-    card, dev = find_card()
+    card, dev, bdf = find_card()
     out_path = out_path or "dcn_pipe_%s.txt" % (dev or "unknown")
-    bases = dmu_bases(dev)
+    bases = dmu_bases(bdf)
     if bases is None:
         bases = NAVI32_BASES
         print("warning: no ip_discovery in sysfs, using Navi 32's DMU bases %s" % {i: hex(b) for i, b in bases.items()}, file=sys.stderr)

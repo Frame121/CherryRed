@@ -58,7 +58,7 @@ def main():
     if os.geteuid() != 0:
         sys.exit("run as root: sudo python3 tools/linux_collect.py")
     dump = load("linux_dcn_pipe_dump")
-    card, dev = dump.find_card()
+    card, dev, bdf = dump.find_card()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
     out = "rednavi_report_%s_%s" % (dev, stamp)
     os.makedirs(out)
@@ -92,7 +92,7 @@ def main():
     write(out + "/amdgpu_dmesg.txt", "\n".join(l for l in log.splitlines() if re.search(r"amdgpu|\[drm\]", l, re.I)) + "\n")
 
     # the DCN registers: clocks first (which DIG is lit), then that DIG
-    bases = dump.dmu_bases(dev) or dump.NAVI32_BASES
+    bases = dump.dmu_bases(bdf) or dump.NAVI32_BASES
     reglist = os.path.join(HERE, "dcn32_pipe_reglist.txt")
     pipe = out + "/dcn_pipe.txt"
     values = dump.dump(card, dev, reglist, pipe, ["clocks"], bases)

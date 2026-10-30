@@ -89,3 +89,21 @@ From a community capture on Linux (issue #6; `docs/logs/navi33/ip_discovery.txt`
 The register bases are the same as on Navi 32: GC `0x1260 0xa000 0x1c000 0x2402c00`, MP0/MP1 `0x16000`, DMU `0x12 0xc0 0x34c0 0x9000`, NBIF `0x0 0x14 ...`. All 538 registers of the Navi 32 pipe list have the same addresses in the Navi 33 DCN capture, so the display engine registers carry over.
 
 What does not carry over: the firmware (every file above), and the connector. The reporter's monitor is on HDMI-A-2 (the two DisplayPort connectors read `disconnected`), and `SYMCLKB_CLOCK_ENABLE` is the one enabled (`0x101`, front end 1), so the lit path is DIG1, not DIG4, and it is HDMI. The DisplayPort bring-up in this repository does not cover HDMI (TMDS/HDMI output, DDC over I2C instead of AUX). The Linux dump script has the groups `hpd_aux1 dig1_hdmi` for that path.
+
+## Navi 31 (RX 7900 XTX, `1002:744C`) compared with Navi 32
+
+From a community capture on Linux (issue #1; `docs/logs/navi31/`). 24 GB of VRAM (`0x8000000000` to `0x85feffffff`), 32 GB BAR0, six memory channels (UMC x6).
+
+| Block | Navi 32 (7800 XT) | Navi 31 (7900 XTX) | Consequence |
+|---|---|---|---|
+| GC | 11.0.3 | 11.0.0 | `gc_11_0_0_*.bin`; the memory hub is `gfxhub_v3_0`, so the `gc_11_0_0` register offsets apply (what `gc_regs.h` had before it was moved to 11.0.3) |
+| SDMA | 6.0.3 | 6.0.0 | `sdma_6_0_0.bin` |
+| MP0 (PSP), MP1 (SMU) | 13.0.10 | 13.0.0 | `psp_13_0_0_*.bin`, `smu_13_0_0.bin`; Linux reports SMU firmware 78.135.0 |
+| DMU (DCN) | 3.2.0 | 3.2.0 | the same, and Linux loads the same DMCUB file (`dcn_3_2_0_dmcub.bin`, version 0x07003300 there) |
+| NBIF, OSSSYS, MMHUB, HDP | 4.3.0, 6.0.0, 3.0.0, 6.0.0 | 4.3.0, 6.0.0, 3.0.0, 6.0.0 | the same |
+
+The register bases of GC, MP0/MP1, DMU and NBIF are the same as on Navi 32.
+
+The reporter's monitor is on DisplayPort and the lit path is the same as on the development board: `SYMCLKE_CLOCK_ENABLE` 0x401, `DIG4_DIG_FE_CNTL` 0x01000100, `DIG4_DIG_BE_CNTL` 0x40001000, `HPD4` connected, `MPC_OUT0_MUX` 0x100. So this is the card where our DisplayPort bring-up has the best chance of carrying over, with the PSP and SMU firmware being the open part. The capture is of a 3840x2160 mode (`OTG0_OTG_H_TOTAL` 0xf9f, `V_TOTAL` 0x8ad, about 533 MHz, so 60 Hz) with two pipes combined (`ODM0_OPTC_WIDTH_CONTROL` 0x03c00780): our replay and mode code is single pipe, so a 4K mode is a separate piece of work; 1080p on this card would be the first target.
+
+PSP TMR: Linux reserves `0x1300000` bytes at MC `0x85fc000000` (VRAM offset `0x5fc000000`), a different size and place than on the 7800 XT (`0xa700000` at offset `0x3e0000000`), so the TMR placement has to come from each card's own `dmesg` line (`reserve ... for PSP TMR`), not from a formula.
