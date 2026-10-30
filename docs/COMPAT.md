@@ -88,3 +88,17 @@ What it took, in order of how long each cost:
 - The ring and the target are addressed by MC address (`0x8000000000 + VRAM offset`) through the system aperture; no GART mapping is used. The SDMA firmware polls the wptr shadow in memory (`F32_WPTR_POLL_ENABLE`), which is written together with the register.
 
 Not done: a graphics ring (KIQ/MES), system memory (GART), interrupts, doorbells, and getting the SMU mailbox to answer after the enable.
+
+## M4 step 3: the first graphics ring command (2026-10-30)
+
+`rednavi_gfx_test=1` (on top of `rednavi_sdma_test=1`, which turns the memory hub on) starts the command processor and runs `SET_UCONFIG_REG SCRATCH_REG0 = 0xDEADBEEF` from a ring in VRAM, as `gfx_v11_0_ring_test_ring` does. Verified on the RX 7800 XT: `SCRATCH_REG0` reads `0xDEADBEEF`, the CP stays up (`CP_ME_CNTL` 0x01000000, only CE_HALT left), no VM fault (`gfx-test`, `gfx-trace`).
+
+The sequence (from `gfx_v11_0.c`): the RS64 entry points of PFP, ME and MEC from the firmware headers (`ucode_start_addr_lo/hi`, now emitted into `gc_fw.h`) with a reset pulse of each pipe (`gfx_v11_0_config_gfx_rs64`); the hardware queue registers; unhalt PFP and ME; write the wptr.
+
+What it took:
+
+- **The CP starts halted** (`CP_ME_CNTL` 0x15000000: CE, PFP and ME halt) after the RLC autoload, and it accepts the unhalt write.
+- **The ring is a hardware queue, not `CP_RB0_*`.** The first attempt programmed `CP_RB0_*` as `gfx_v11_0_cp_gfx_resume` does. The CP unhalted, ran for under a millisecond and halted itself, with a VM fault (`GCVM_L2_PROTECTION_FAULT_STATUS` 0xd32: client CPG, mapping error, read, address 0). In GC 11 the gfx queue is `CP_GFX_HQD_*`, filled by Linux from an MQD (`gfx_v11_0_gfx_mqd_init`), and the CP reads the MQD at `CP_GFX_MQD_BASE_ADDR`, which was 0. Writing the HQD registers with the values the MQD would hold, and pointing `CP_GFX_MQD_BASE_ADDR` at a zeroed page, fixed it. (Linux's default path maps the queue through the KIQ or MES instead; this is the same state reached by registers.)
+- Decoding a fault: `CID` indexes the client list in `gfxhub_v3_0_3.c` (6 = CPG), `RW` 0 is a read.
+
+Not done: KIQ/MES, compute rings, doorbells, the GFX clear state and golden registers, interrupts, and doing any of this from system memory (GART). A page-sized zeroed MQD works for one ring; real queue management needs the MQD filled in.

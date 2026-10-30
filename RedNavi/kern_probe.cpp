@@ -1692,10 +1692,20 @@ void RedNaviProbe::sdmaTest() {
         struct rn_cp_start pc = {kRNGcPfpStartLo, kRNGcPfpStartHi, kRNGcMeStartLo, kRNGcMeStartHi, kRNGcMecStartLo, kRNGcMecStartHi};
         struct rn_gfx_result gr;
         rn_gfx_ring_test(&gpu, kRNVramMcBase, 0x0C010000, 4096, &pc, &gr);
-        const char *gn[11] = {"step", "me_cntl_before", "cp_stat_before", "me_cntl", "cp_stat", "rptr", "wptr", "scratch", "rptr_shadow", "ring0", "ok"};
-        uint32_t gv[11] = {gr.step, gr.me_cntl_before, gr.cp_stat_before, gr.me_cntl, gr.cp_stat, gr.rptr, gr.wptr, gr.scratch,
-                           gr.rptr_shadow, gr.ring0, static_cast<uint32_t>(gr.ok)};
-        rnPublish(this, "gfx-test", gn, gv, 11);
+        const char *gn[21] = {"step", "me_cntl_before", "cp_stat_before", "me_cntl", "cp_stat", "rptr", "wptr", "scratch", "rptr_shadow", "ring0", "ok",
+                              "me_cntl_imm", "me_cntl_10ms", "rb0_cntl_rd", "rb0_base_rd", "rb0_base_hi_rd", "rb_active_rd", "max_ctx_rd",
+                              "device_id_rd", "pfp_pc_rd", "me_pc_rd"};
+        uint32_t gv[21] = {gr.step, gr.me_cntl_before, gr.cp_stat_before, gr.me_cntl, gr.cp_stat, gr.rptr, gr.wptr, gr.scratch,
+                           gr.rptr_shadow, gr.ring0, static_cast<uint32_t>(gr.ok), gr.me_cntl_imm, gr.me_cntl_10ms, gr.rb0_cntl_rd,
+                           gr.rb0_base_rd, gr.rb0_base_hi_rd, gr.rb_active_rd, gr.max_ctx_rd, gr.device_id_rd, gr.pfp_pc_rd, gr.me_pc_rd};
+        rnPublish(this, "gfx-test", gn, gv, 21);
+        const char *tn[27] = {"t0_me", "t0_stat", "t0_rptr", "t1_me", "t1_stat", "t1_rptr", "t2_me", "t2_stat", "t2_rptr", "t5_me", "t5_stat", "t5_rptr",
+                              "t10_me", "t10_stat", "t10_rptr", "t20_me", "t20_stat", "t20_rptr", "t50_me", "t50_stat", "t50_rptr",
+                              "t100_me", "t100_stat", "t100_rptr", "fault_status", "fault_addr_lo", "fault_addr_hi"};
+        uint32_t tv[27];
+        for (int i = 0; i < 8; i++) for (int j = 0; j < 3; j++) tv[i * 3 + j] = gr.trace[i][j];
+        tv[24] = gr.fault_status; tv[25] = gr.fault_addr_lo; tv[26] = gr.fault_addr_hi;
+        rnPublish(this, "gfx-trace", tn, tv, 27);
     }
 #endif
 }

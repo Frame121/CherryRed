@@ -289,30 +289,45 @@ void rn_gfx_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringB
     rn_vram_wr32(adev, wptrOff, 0); rn_vram_wr32(adev, wptrOff + 4, 0);
     WREG32_SOC15(RN_GC, 0, regSCRATCH_REG0, 0xCAFEDEADu);
 
-    // gfx_v11_0_cp_gfx_resume: ring 0 of pipe 0
-    WREG32_SOC15(RN_GC, 0, regCP_RB_WPTR_DELAY, 0);
-    WREG32_SOC15(RN_GC, 0, regCP_RB_VMID, 0);
+    // The gfx queue of GC 11 is a hardware queue (CP_GFX_HQD_*) that Linux fills from an in-memory MQD (gfx_v11_0_gfx_mqd_init);
+    // the legacy CP_RB0_* registers are not what the CP runs, and with CP_GFX_MQD_BASE_ADDR at 0 the CP reads the MQD at address 0
+    // when it starts and faults (CPG, GCVM_L2_PROTECTION_FAULT_STATUS 0xd32, seen on hardware). So the same values go straight
+    // into the HQD registers, and a zeroed MQD page stands behind it.
+    const u64 mqdVa = vaBase + ringOff + 0x2000;
+    for (u32 o = 0; o < 0x1000; o += 4) rn_vram_wr32(adev, ringOff + 0x2000 + o, 0);
     grbmSelect(adev, 0, 0, 0, 0);
-    u32 rbBufsz = 0;
-    while ((8u << rbBufsz) < ringBytes) rbBufsz++;                           // order_base_2(ring_size / 8)
-    u32 rbCntl = REG_SET_FIELD(0, CP_RB0_CNTL, RB_BUFSZ, rbBufsz);
-    rbCntl = REG_SET_FIELD(rbCntl, CP_RB0_CNTL, RB_BLKSZ, rbBufsz - 2);
-    rbCntl = REG_SET_FIELD(rbCntl, CP_RB0_CNTL, KMD_QUEUE, 1);
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_CNTL, rbCntl);
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR, 0);
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR_HI, 0);
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_RPTR_ADDR, lower_32_bits(vaBase + rptrOff));
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_RPTR_ADDR_HI, upper_32_bits(vaBase + rptrOff) & 0xFFFFu);
-    WREG32_SOC15(RN_GC, 0, regCP_RB_WPTR_POLL_ADDR_LO, lower_32_bits(vaBase + wptrOff));
-    WREG32_SOC15(RN_GC, 0, regCP_RB_WPTR_POLL_ADDR_HI, upper_32_bits(vaBase + wptrOff));
-    mdelay(1);
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_CNTL, rbCntl);
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_BASE, lower_32_bits(ringVa >> 8));
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_BASE_HI, upper_32_bits(ringVa >> 8));
-    WREG32_SOC15(RN_GC, 0, regCP_RB_ACTIVE, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_ACTIVE, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_MQD_BASE_ADDR, lower_32_bits(mqdVa) & 0xfffffffcu);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_MQD_BASE_ADDR_HI, upper_32_bits(mqdVa));
+    tmp = regCP_GFX_MQD_CONTROL_DEFAULT;
+    tmp = REG_SET_FIELD(tmp, CP_GFX_MQD_CONTROL, VMID, 0);
+    tmp = REG_SET_FIELD(tmp, CP_GFX_MQD_CONTROL, PRIV_STATE, 1);
+    tmp = REG_SET_FIELD(tmp, CP_GFX_MQD_CONTROL, CACHE_POLICY, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_MQD_CONTROL, tmp);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_VMID, 0);
+    tmp = regCP_GFX_HQD_QUANTUM_DEFAULT;
+    tmp = REG_SET_FIELD(tmp, CP_GFX_HQD_QUANTUM, QUANTUM_EN, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_QUANTUM, tmp);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_BASE, lower_32_bits(ringVa >> 8));
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_BASE_HI, upper_32_bits(ringVa >> 8));
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_RPTR_ADDR, lower_32_bits(vaBase + rptrOff) & 0xfffffffcu);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_RPTR_ADDR_HI, upper_32_bits(vaBase + rptrOff) & 0xFFFFu);
+    WREG32_SOC15(RN_GC, 0, regCP_RB_WPTR_POLL_ADDR_LO, lower_32_bits(vaBase + wptrOff) & 0xfffffffcu);
+    WREG32_SOC15(RN_GC, 0, regCP_RB_WPTR_POLL_ADDR_HI, upper_32_bits(vaBase + wptrOff) & 0xFFFFu);
+    u32 qOrder = 0;
+    while ((4u << qOrder) < ringBytes) qOrder++;                             // order_base_2(queue_size / 4)
+    tmp = regCP_GFX_HQD_CNTL_DEFAULT;
+    tmp = REG_SET_FIELD(tmp, CP_GFX_HQD_CNTL, RB_BUFSZ, qOrder - 1);
+    tmp = REG_SET_FIELD(tmp, CP_GFX_HQD_CNTL, RB_BLKSZ, qOrder - 3);
+    tmp = REG_SET_FIELD(tmp, CP_GFX_HQD_CNTL, KMD_QUEUE, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_CNTL, tmp);
     tmp = RREG32_SOC15(RN_GC, 0, regCP_RB_DOORBELL_CONTROL);                 // no doorbell: the wptr register is written directly
     tmp = REG_SET_FIELD(tmp, CP_RB_DOORBELL_CONTROL, DOORBELL_EN, 0);
     WREG32_SOC15(RN_GC, 0, regCP_RB_DOORBELL_CONTROL, tmp);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_RPTR, regCP_GFX_HQD_RPTR_DEFAULT);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_WPTR, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_WPTR_HI, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_ACTIVE, 1);
     res->step = 2;
 
     // gfx_v11_0_cp_gfx_start, without the clear state: MAX_CONTEXT, DEVICE_ID, then unhalt PFP and ME
@@ -322,15 +337,37 @@ void rn_gfx_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringB
     tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, ME_HALT, 0);
     tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, PFP_HALT, 0);
     WREG32_SOC15(RN_GC, 0, regCP_ME_CNTL, tmp);
+    res->me_cntl_imm = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
+    mdelay(10);
+    res->me_cntl_10ms = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
+    res->rb0_cntl_rd = RREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_CNTL);
+    res->rb0_base_rd = RREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_BASE);
+    res->rb0_base_hi_rd = RREG32_SOC15(RN_GC, 0, regCP_GFX_MQD_BASE_ADDR);
+    res->rb_active_rd = RREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_ACTIVE);
+    res->max_ctx_rd = RREG32_SOC15(RN_GC, 0, regCP_MAX_CONTEXT);
+    res->device_id_rd = RREG32_SOC15(RN_GC, 0, regCP_DEVICE_ID);
+    res->pfp_pc_rd = RREG32_SOC15(RN_GC, 0, regCP_PFP_PRGRM_CNTR_START);
+    res->me_pc_rd = RREG32_SOC15(RN_GC, 0, regCP_ME_PRGRM_CNTR_START);
     for (int i = 0; i < 1000; i++) {                                         // CP_STAT reads 0 once the CP is idle and up
         if (RREG32_SOC15(RN_GC, 0, regCP_STAT) == 0) break;
         udelay(1);
     }
     res->step = 3;
 
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR, 8);                               // 8 dwords
-    WREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR_HI, 0);
+    rn_vram_wr32(adev, wptrOff, 8);                                          // the polled shadow as well as the register
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_WPTR, 8);                           // 8 dwords
+    WREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_WPTR_HI, 0);
     res->step = 4;
+    static const u32 sampleDelayMs[8] = {0, 1, 1, 3, 5, 10, 30, 50};        // cumulative: 0, 1, 2, 5, 10, 20, 50, 100 ms
+    for (u32 i = 0; i < 8; i++) {
+        if (sampleDelayMs[i]) msleep(sampleDelayMs[i]);
+        res->trace[i][0] = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
+        res->trace[i][1] = RREG32_SOC15(RN_GC, 0, regCP_STAT);
+        res->trace[i][2] = RREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_RPTR);
+    }
+    res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
+    res->fault_addr_lo = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
+    res->fault_addr_hi = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
     for (int i = 0; i < 2000; i++) {                                         // up to 2 s
         res->scratch = RREG32_SOC15(RN_GC, 0, regSCRATCH_REG0);
         if (res->scratch == 0xDEADBEEFu) { res->ok = 1; break; }
@@ -338,8 +375,8 @@ void rn_gfx_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringB
     }
     res->me_cntl = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
     res->cp_stat = RREG32_SOC15(RN_GC, 0, regCP_STAT);
-    res->rptr = RREG32_SOC15(RN_GC, 0, regCP_RB0_RPTR);
-    res->wptr = RREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR);
+    res->rptr = RREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_RPTR);
+    res->wptr = RREG32_SOC15(RN_GC, 0, regCP_GFX_HQD_WPTR);
     res->rptr_shadow = rn_vram_rd32(adev, rptrOff);
     res->ring0 = rn_vram_rd32(adev, ringOff);
 }

@@ -37,6 +37,10 @@ struct rn_gfx_result {
     u32 me_cntl_before, cp_stat_before;       // CP_ME_CNTL and CP_STAT before the CP is touched
     u32 me_cntl, cp_stat, rptr, wptr, scratch;
     u32 rptr_shadow, ring0;                   // memory read back after the test
+    u32 trace[8][3];                          // CP_ME_CNTL, CP_STAT, CP_RB0_RPTR at 0, 1, 2, 5, 10, 20, 50, 100 ms after the wptr write
+    u32 fault_status, fault_addr_lo, fault_addr_hi;   // GCVM_L2_PROTECTION_FAULT_*, after the test
+    u32 me_cntl_imm, me_cntl_10ms;            // CP_ME_CNTL right after the unhalt write, and 10 ms later
+    u32 rb0_cntl_rd, rb0_base_rd, rb0_base_hi_rd, rb_active_rd, max_ctx_rd, device_id_rd, pfp_pc_rd, me_pc_rd;   // read back of what was written
     int ok;
 };
 
