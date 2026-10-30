@@ -1108,6 +1108,7 @@ void rn_mes_state(struct rn_device *adev, u32 out[15]) {
 // pipe 0, firmware mes_2). Both are halted after the PSP has loaded their images; the steps below follow mes_v11_0_kiq_hw_init and
 // mes_v11_0_hw_init, with a progress callback before each so that the last one that ran is known if the machine stops.
 static const u32 kMesRingBytes = 4096;
+static const u32 kMesDbStart = 1024;      // mes->db_start_dw_offset: the page after the kernel doorbells (amdgpu_doorbell_create_kernel_doorbells)
 static const u32 kMesKiqDoorbell = 0x0C << 1, kMesSchedDoorbell = 0x0B << 1;      // AMDGPU_NAVI10_DOORBELL_MES_RING1/0, in dwords
 
 // mes_v11_0_queue_init_register: one MES queue into the HQD registers of (ME 3, pipe).
@@ -1185,6 +1186,20 @@ void rn_scan_hqds(struct rn_device *adev, u32 out[33]) {
         }
     grbmSelect(adev, 0, 0, 0, 0);
     out[32] = n;
+}
+
+// CP_MES_DOORBELL_CONTROL1..6 as seen from each MES pipe (they may be banked per pipe): out[0..5] pipe 0, out[6..11] pipe 1.
+void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]) {
+    for (u32 pipe = 0; pipe < 2; pipe++) {
+        grbmSelect(adev, 3, pipe, 0, 0);
+        out[pipe * 6 + 0] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL1);
+        out[pipe * 6 + 1] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL2);
+        out[pipe * 6 + 2] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL3);
+        out[pipe * 6 + 3] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL4);
+        out[pipe * 6 + 4] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL5);
+        out[pipe * 6 + 5] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL6);
+    }
+    grbmSelect(adev, 0, 0, 0, 0);
 }
 
 void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_gmc *gmc, const u32 start[4], u32 maxStep, void (*progress)(void *, u32), void *ctx,
@@ -1320,7 +1335,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         p.query_status_fence_gpu_mc_ptr = vaBase + queryFenceOff;
         for (int i = 0; i < 4; i++) p.compute_hqd_mask[i] = 0xf0;                      // queues 4..7 of each pipe; 0..3 stay with the hand-programmed ones
         p.gfx_hqd_mask[0] = 0; p.sdma_hqd_mask[0] = 0xfc; p.sdma_hqd_mask[1] = 0xfc;
-        for (int i = 0; i < AMD_PRIORITY_NUM_LEVELS; i++) p.aggregated_doorbells[i] = 100 + i * 2;   // one doorbell per priority level, inside the MEC doorbell range (amdgpu_mes_doorbell_init)
+        for (int i = 0; i < AMD_PRIORITY_NUM_LEVELS; i++) p.aggregated_doorbells[i] = kMesDbStart + i * 2;   // one doorbell per priority level, in the page after the kernel doorbells (amdgpu_mes_doorbell_init)
         for (int i = 0; i < 5; i++) {
             p.gc_base[i] = adev->reg_offset[RN_GC_HWIP][0][i];
             p.mmhub_base[i] = adev->reg_offset[RN_MMHUB_HWIP][0][i];
@@ -1373,7 +1388,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         const u64 procCtxOff = sharedOff + 0x2000, gangCtxOff = sharedOff + 0x3000;
         // The process runs in a VM context, so the queue's ring, write-back words, MQD and EOP buffer need virtual addresses it can translate: map
         // the six VRAM pages of the queue (ring, rptr/wptr page, MQD, EOP) into the GART window and use those addresses everywhere.
-        const u32 procDoorbell = 40;                                    // inside the user queue doorbell range, where the MES watches
+        const u32 procDoorbell = kMesDbStart + 64;                      // in the MES kernel page, clear of the aggregated doorbells
         gMappedDoorbell = procDoorbell;
         const u32 gartPage = 12000;
         for (u32 k = 0; k < 6; k++) rn_gart_map_vram_page(adev, gmc, gartPage + k, vaBase + qOff + k * 4096ull);
@@ -1462,6 +1477,12 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     grbmSelect(adev, 3, 1, 0, 0);
     res->kiq_version = RREG32_SOC15(RN_GC, 0, regCP_MES_GP3_LO);
     grbmSelect(adev, 0, 0, 0, 0);
+    res->mes_db[0] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL1);
+    res->mes_db[1] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL2);
+    res->mes_db[2] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL3);
+    res->mes_db[3] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL4);
+    res->mes_db[4] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL5);
+    res->mes_db[5] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL6);
     for (u32 i = 0; i < 16; i++) { res->log_hist[i] = rn_vram_rd32(adev, logOff + i * 4); res->log_scratch[i] = rn_vram_rd32(adev, logOff + 0x4000 + i * 4); }
     // what the hung scheduler leaves behind: a series of instruction pointers, the queue's MQD and write-back words, the cleaner shader fence
     grbmSelect(adev, 3, 0, 0, 0);

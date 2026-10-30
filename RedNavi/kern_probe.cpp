@@ -2265,6 +2265,10 @@ void RedNaviProbe::sdmaTest() {
                         snprintf(ln[16 + i], 12, "s%d", i); lp[16 + i] = ln[16 + i]; lv[16 + i] = mr.log_scratch[i];
                     }
                     rnPublish(this, "mes-log", lp, lv, 32);
+                    {
+                        const char *dn[6] = {"c1", "c2", "c3", "c4", "c5", "c6"};
+                        rnPublish(this, "mes-db", dn, mr.mes_db, 6);
+                    }
                 }
                 if ((mr.q_active & 1u) || mr.add_ok) computeRingOff = 0x0C0A0000 + 0x30000;   // the queue the MES mapped
             }
@@ -2327,6 +2331,10 @@ void RedNaviProbe::sdmaTest() {
                         for (int i = 0; i < 32; i++) { snprintf(hn[i], 8, "%c%d", "qdrw"[i % 4], i / 4); hp[i] = hn[i]; }
                         snprintf(hn[32], 8, "count"); hp[32] = hn[32];
                         rnPublish(this, "hqd-scan", hp, h, 33);
+                        uint32_t md[12];
+                        rn_mes_doorbell_regs(&gpu, md);
+                        const char *mdn[12] = {"p0c1", "p0c2", "p0c3", "p0c4", "p0c5", "p0c6", "p1c1", "p1c2", "p1c3", "p1c4", "p1c5", "p1c6"};
+                        rnPublish(this, "mes-db-after", mdn, md, 12);
                     }
                     watchBoA = a; watchBoB = b; watchIbDwords = nib;
                 }

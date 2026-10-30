@@ -161,6 +161,7 @@ void rn_compute_diag(struct rn_device *adev, u32 out[11]);   // out[8..10]: SDMA
 // MEC doorbell range (lower, upper), NBIO DOORBELL_APER_EN, HQD PQ base, PQ control, MQD base.
 void rn_compute_diag2(struct rn_device *adev, u32 out[8]);
 void rn_mes_state(struct rn_device *adev, u32 out[15]);
+void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]);   // CP_MES_DOORBELL_CONTROL1..6 per MES pipe
 void rn_scan_hqds(struct rn_device *adev, u32 out[33]);   // the active ME 1 queues: 8 x {pipe*8+queue, doorbell control, rptr, wptr}, count
 
 struct rn_mes_result {
@@ -171,6 +172,7 @@ struct rn_mes_result {
     u32 ring_fence, api_status;                    // QUERY_SCHEDULER_STATUS fence and the last frame's completion word
     int hw_res_ok, add_ok;
     u32 hw_res1_status;
+    u32 mes_db[6];                                // CP_MES_DOORBELL_CONTROL1..6 after the queue was added
     int sched_cfg_ok;
     u32 q_pipe, q_queue;                          // the hardware queue the MES gave ours
     u32 log_hist[16], log_scratch[16];            // first dwords of the two halves of the MES event log
