@@ -29,6 +29,10 @@ make test                   # host tests for the compat layer
 
 ## Hard-won facts
 
+- The GC memory hub registers (`GCMC_VM_*`, `GCVM_*`) have different offsets in GC 11.0.3 (`gfxhub_v3_0_3`) than in 11.0.0; `RedNavi/gc_regs.h` is generated from the 11.0.3 headers. Check which `gc_11_0_x` header a Linux file includes before copying register numbers.
+- GC and SDMA registers read 0 while the GC is in GFXOFF (also on Linux, unless `amdgpu_gfxoff` is written 0). A read of 0 from a block that must have a nonzero ID register means "powered down" or "wrong offset", not "works".
+- The compat layer's `gpu.reg_offset` bases are only valid after the IP discovery table is parsed; set them just before use.
+
 - OpenCore refuses to inject a kext whose `OSBundleLibraries` is incomplete or names a library outside the boot kernel collection. The only trace is `Prelinked injection ... - Invalid Parameter` in the OpenCore log.
 - `IOLog` output may not show up in `log show`; read the properties on the `RedNaviProbe` node (`ioreg -rn RedNaviProbe -l -x`).
 - Reading all registers of the DCN list (`tools/dcn32_reglist.txt`) hangs the machine (clock- or power-gated blocks). Read only registers of live blocks.
