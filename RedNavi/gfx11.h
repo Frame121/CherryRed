@@ -34,6 +34,14 @@ struct rn_sdma_run_result {
     int ok;                                           // the read pointer reached the end of the packets
 };
 
+struct rn_kiq_result {
+    u32 step;
+    u32 kiq_active, kiq_rptr, kiq_wptr;           // the KIQ queue after the commands
+    u32 map_active, map_pq_control, map_doorbell_ctl, map_rptr, map_wptr;   // the mapped compute queue, read from its HQD
+    u32 fault_status, fault_addr_lo;
+    int ok;
+};
+
 struct rn_cp_start {
     u32 pfp_lo, pfp_hi, me_lo, me_hi, mec_lo, mec_hi;
 };
@@ -137,6 +145,32 @@ void rn_doorbell_aperture_enable(struct rn_device *adev, int write_s2a, u32 befo
 void rn_set_doorbell(volatile void *base, u32 dword_index);
 
 // msi: IH_RB_CNTL.RPTR_REARM, the ring re-arms the message-signalled interrupt when the read pointer is written.
+// Command submission on the compute queue that rn_compute_ring_test programmed (through its doorbell if one is set): appends an
+// INDIRECT_BUFFER packet for the command buffer at ib_va (ib_dwords PM4 dwords) and a RELEASE_MEM that writes fence_value to fence_va
+// (a GPU address, VRAM aperture or GART) when the buffer has executed. The ring is addressed by the running wptr counter, so it wraps.
+int rn_compute_submit_ib(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 ib_va, u32 ib_dwords,
+                         u64 fence_va, u32 fence_value);
+// Fills ib with the PM4 of a 1x1x1 dispatch of the shader at shader_va (the packets of rn_compute_dispatch_test, without the fence)
+// and returns the number of dwords.
+// What the compute queue and the memory hub say now: HQD read pointer, wptr, active, CP_STAT, the VM fault status and address.
+void rn_compute_diag(struct rn_device *adev, u32 out[11]);   // out[8..10]: SDMA0_VERSION (0x600 when the GC is powered), GRBM_STATUS, RLC_GPM_STAT
+// RLC safe mode (gfx_v11_0_set_safe_mode): keeps the graphics block out of GFXOFF while it is being used; enter 0 leaves it again.
+// The doorbell and queue registers as they are now (compare with the values that were programmed): HQD doorbell control, CP_PQ_STATUS, the
+// MEC doorbell range (lower, upper), NBIO DOORBELL_APER_EN, HQD PQ base, PQ control, MQD base.
+void rn_compute_diag2(struct rn_device *adev, u32 out[8]);
+void rn_gc_safe_mode(struct rn_device *adev, int enter);
+u32 rn_build_dispatch_ib(struct rn_device *adev, u32 *ib, u64 shader_va);
+
+// The way Linux runs compute queues (gfx_v11_0_kiq_* and gfx11_kiq_map_queues): the KIQ, a queue the firmware knows (ME 1, pipe 3,
+// queue 0, announced to the RLC with RLC_CP_SCHEDULERS), is programmed through the CP_HQD_* registers; the compute queue is then handed to
+// the firmware with SET_RESOURCES and MAP_QUEUES from a complete MQD in memory (ME 1, pipe 0, queue 3, doorbell slot mec_ring0 + 1 =
+// dword 8). Afterwards rn_compute_submit_ib and rn_compute_diag work on that mapped queue. Needs a doorbell (rn_set_doorbell).
+// kiq_off and queue_off are VRAM offsets of two 24 KB areas (ring, MQD at +0x2000, EOP at +0x4000).
+// max_step stops early, to find a step that hangs the machine: 1 RLC_CP_SCHEDULERS, 2 + program the KIQ registers, 3 + the compute queue's
+// MQD, 4 + SET_RESOURCES/MAP_QUEUES and the KIQ doorbell. progress (if set) receives the step about to run, before it runs.
+void rn_kiq_map_compute(struct rn_device *adev, u64 va_base, u64 kiq_off, u64 queue_off, u32 max_step, void (*progress)(void *ctx, u32 step),
+                        void *progress_ctx, struct rn_kiq_result *res);
+
 void rn_ih_enable(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 wptr_shadow_vram_offset, int msi);
 // Acknowledge: the read pointer is set to the current write pointer (which re-arms the next MSI). Returns the write pointer.
 u32 rn_ih_ack(struct rn_device *adev, u32 ring_bytes);

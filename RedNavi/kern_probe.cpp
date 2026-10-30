@@ -89,6 +89,8 @@
 #include "smu13.h"
 #include <IOKit/IODMACommand.h>
 #include <IOKit/IOInterruptEventSource.h>
+#include <IOKit/IOUserClient.h>
+#include <IOKit/IOTimerEventSource.h>
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include "gfx11.h"
@@ -264,6 +266,35 @@ class RedNaviProbe : public IOService {
     IODMACommand *hostDma {nullptr};
     uint64_t hostBus {0};                          // its bus address as the device must use it
     uint32_t hostBusLen {0};
+    // Buffer objects: pages of host memory with an address in the GART window that is never reused (see docs/COMPAT.md on remapping).
+    struct RNBo { IOBufferMemoryDescriptor *md; IODMACommand *dma; uint64_t gpuVa; uint32_t size; };
+    RNBo bos[64] {};
+    uint32_t boCount {0};
+    uint32_t gartNextPage {16};                    // the first pages of the window are used by the boot-time tests
+    struct rn_gmc gmcLive {};
+    bool gpuLive {false};                          // the memory hub is on and the GART window is set up
+    int createHostBo(uint32_t size);
+    friend class RedNaviClient;
+public:
+    IOReturn newUserClient(task_t owningTask, void *securityID, UInt32 type, IOUserClient **handler) APPLE_KEXT_OVERRIDE;
+private:
+    IOMemoryMap *doorbellKeep {nullptr};           // the doorbell BAR mapping, kept while the compute queue is in use
+    // rednavi_queue_watch=1: samples the compute queue every 250 ms for two minutes and records every change of its doorbell/control state.
+    IOTimerEventSource *watchTimer {nullptr};
+    uint32_t watchTick {0};
+    uint32_t watchPrev[5] {};
+    uint32_t watchEvents {0};
+    uint32_t watchLog[8][7] {};                    // tick, doorbell control, pq control, pq status, rptr, wptr, cp_stat
+    int watchBoA {-1}, watchBoB {-1};
+    uint32_t watchIbDwords {0};
+    uint64_t computeRingOff {0x0C020000};         // the ring of the queue that submissions go to (the mapped one after rn_kiq_map_compute)
+    uint32_t watchPciCmd {0xFFFFFFFFu};
+    bool keepAlive {false};                        // rednavi_keepalive=1: resubmit every tick to see whether idleness is what breaks the queue
+    uint32_t kaSent {0}, kaOk {0}, kaFirstFail {0}, kaDbctl {0};              // the buffers of the kernel buffer test, reused for timed resubmissions
+    uint32_t resubLog[3][7] {};
+    uint32_t resubCount {0};
+    void mqdSnapshot(const char *property);
+    void watchStep();
     IOInterruptEventSource *msiSrc {nullptr};      // the message-signalled interrupt of the GPU (rednavi_msi_test)
     volatile uint32_t msiCount {0};
     volatile uint32_t msiLastWptr {0};
@@ -1605,6 +1636,273 @@ int RedNaviProbe::waitMsi(void *ctx, uint32_t timeoutMs) {
     return self->msiCount != 0;
 }
 
+// The door from user space (docs/COMPAT.md, "The user client"): buffers in host memory that the GPU reaches through the GART, a way to
+// hand the compute queue a command buffer, and a fence wait. The caller is trusted with the whole GPU: it needs administrator
+// privilege unless boot-arg rednavi_uc_anyone=1 is set.
+class RedNaviClient : public IOUserClient {
+    OSDeclareDefaultStructors(RedNaviClient)
+    RedNaviProbe *gpuOwner {nullptr};
+    IOLock *lock {nullptr};
+
+    bool inBo(uint64_t va, uint64_t len) const {
+        for (uint32_t i = 0; i < gpuOwner->boCount; i++)
+            if (va >= gpuOwner->bos[i].gpuVa && va + len <= gpuOwner->bos[i].gpuVa + gpuOwner->bos[i].size) return true;
+        return false;
+    }
+
+public:
+    bool start(IOService *provider) APPLE_KEXT_OVERRIDE {
+        gpuOwner = OSDynamicCast(RedNaviProbe, provider);
+        lock = IOLockAlloc();
+        return gpuOwner && lock && IOUserClient::start(provider);
+    }
+    void free() APPLE_KEXT_OVERRIDE {
+        if (lock) { IOLockFree(lock); lock = nullptr; }
+        IOUserClient::free();
+    }
+    IOReturn clientClose() APPLE_KEXT_OVERRIDE {
+        if (!isInactive()) terminate();
+        return kIOReturnSuccess;
+    }
+
+    // The buffer `type` as the memory to map into the caller (IOConnectMapMemory64 with that type).
+    IOReturn clientMemoryForType(UInt32 type, IOOptionBits *options, IOMemoryDescriptor **memory) APPLE_KEXT_OVERRIDE {
+        if (!gpuOwner || type >= gpuOwner->boCount) return kIOReturnBadArgument;
+        IOBufferMemoryDescriptor *md = gpuOwner->bos[type].md;
+        md->retain();
+        *options = 0;
+        *memory = md;
+        return kIOReturnSuccess;
+    }
+
+    // 0 create buffer: in size                        -> out handle, gpu address, size
+    // 1 submit:        in ib va, ib dwords, fence va, fence value
+    // 2 wait fence:    in handle, byte offset, value, timeout ms -> out 1 if reached
+    // 3 info:                                           -> out gart base, buffers in use, doorbell mapped
+    // 4 diag:                                           -> out hqd rptr, wptr, active, cp stat, fault status, fault address low and high, ring wptr
+    IOReturn externalMethod(uint32_t selector, IOExternalMethodArguments *args, IOExternalMethodDispatch *, OSObject *, void *) APPLE_KEXT_OVERRIDE {
+        if (!gpuOwner || !args) return kIOReturnBadArgument;
+        IOLockLock(lock);
+        IOReturn rc = kIOReturnBadArgument;
+        switch (selector) {
+        case 0:
+            if (args->scalarInputCount == 1 && args->scalarOutputCount == 3) {
+                const uint64_t size = args->scalarInput[0];
+                const int h = size <= (1u << 20) ? gpuOwner->createHostBo(static_cast<uint32_t>(size)) : -1;
+                if (h >= 0) {
+                    args->scalarOutput[0] = static_cast<uint64_t>(h);
+                    args->scalarOutput[1] = gpuOwner->bos[h].gpuVa;
+                    args->scalarOutput[2] = gpuOwner->bos[h].size;
+                    rc = kIOReturnSuccess;
+                } else {
+                    rc = kIOReturnNoResources;
+                }
+            }
+            break;
+        case 1:
+            if (args->scalarInputCount == 4) {
+                const uint64_t ibVa = args->scalarInput[0], fenceVa = args->scalarInput[2];
+                const uint32_t ibDw = static_cast<uint32_t>(args->scalarInput[1]), fenceVal = static_cast<uint32_t>(args->scalarInput[3]);
+                if (ibDw == 0 || ibDw > 4096 || !inBo(ibVa, ibDw * 4ull) || !inBo(fenceVa, 4)) {
+                    rc = kIOReturnBadArgument;
+                } else {
+                    rn_gc_safe_mode(&gpuOwner->gpu, 1);                  // the graphics block stays awake until the wait returns
+                    rc = rn_compute_submit_ib(&gpuOwner->gpu, kRNVramMcBase, gpuOwner->computeRingOff, 4096, ibVa, ibDw, fenceVa, fenceVal) == 0 ? kIOReturnSuccess : kIOReturnNoSpace;
+                }
+            }
+            break;
+        case 2:
+            if (args->scalarInputCount == 4 && args->scalarOutputCount == 1) {
+                const uint64_t h = args->scalarInput[0], off = args->scalarInput[1];
+                const uint32_t value = static_cast<uint32_t>(args->scalarInput[2]);
+                uint32_t timeout = static_cast<uint32_t>(args->scalarInput[3]);
+                if (h >= gpuOwner->boCount || off + 4 > gpuOwner->bos[h].size || (off & 3)) break;
+                if (timeout > 10000) timeout = 10000;
+                volatile uint32_t *w = reinterpret_cast<volatile uint32_t *>(static_cast<uint8_t *>(gpuOwner->bos[h].md->getBytesNoCopy()) + off);
+                uint32_t ms = 0;
+                while (ms < timeout && *w != value) { IOSleep(1); ms++; }
+                args->scalarOutput[0] = *w == value;
+                rn_gc_safe_mode(&gpuOwner->gpu, 0);
+                rc = kIOReturnSuccess;
+            }
+            break;
+        case 4:
+            if (args->scalarOutputCount == 11) {
+                uint32_t dg[11];
+                rn_compute_diag(&gpuOwner->gpu, dg);
+                for (int i = 0; i < 11; i++) args->scalarOutput[i] = dg[i];
+                rc = kIOReturnSuccess;
+            }
+            break;
+        case 5:
+            if (args->scalarOutputCount == 8) {
+                uint32_t d2[8];
+                rn_compute_diag2(&gpuOwner->gpu, d2);
+                for (int i = 0; i < 8; i++) args->scalarOutput[i] = d2[i];
+                rc = kIOReturnSuccess;
+            }
+            break;
+        case 3:
+            if (args->scalarOutputCount == 3) {
+                args->scalarOutput[0] = 0x2000000000ull;
+                args->scalarOutput[1] = gpuOwner->boCount;
+                args->scalarOutput[2] = gpuOwner->doorbellKeep != nullptr;
+                rc = kIOReturnSuccess;
+            }
+            break;
+        }
+        IOLockUnlock(lock);
+        return rc;
+    }
+};
+OSDefineMetaClassAndStructors(RedNaviClient, IOUserClient)
+
+IOReturn RedNaviProbe::newUserClient(task_t owningTask, void *securityID, UInt32 type, IOUserClient **handler) {
+    if (!gpuLive || !doorbellKeep || !handler) return kIOReturnNotReady;
+    uint32_t anyone = 0;
+    if (!(PE_parse_boot_argn("rednavi_uc_anyone", &anyone, sizeof(anyone)) && anyone == 1) &&
+        IOUserClient::clientHasPrivilege(securityID, kIOClientPrivilegeAdministrator) != kIOReturnSuccess)
+        return kIOReturnNotPrivileged;
+    RedNaviClient *c = OSTypeAlloc(RedNaviClient);
+    if (!c) return kIOReturnNoMemory;
+    if (!c->initWithTask(owningTask, securityID, type) || !c->attach(this) || !c->start(this)) {
+        c->detach(this);
+        c->release();
+        return kIOReturnError;
+    }
+    *handler = c;
+    return kIOReturnSuccess;
+}
+
+int RedNaviProbe::createHostBo(uint32_t size) {
+    if (!gpuLive || boCount >= 64 || size == 0) return -1;
+    size = (size + 4095u) & ~4095u;
+    const uint32_t pages = size / 4096;
+    if (gartNextPage + pages > 16384) return -1;
+    IOBufferMemoryDescriptor *md = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task, kIODirectionInOut, size, 4096);
+    if (!md) return -1;
+    md->prepare();
+    memset(md->getBytesNoCopy(), 0, size);
+    IODMACommand *dma = IODMACommand::withSpecification(kIODMACommandOutputHost64, 64, 0, IODMACommand::kMapped, 0, 1, nullptr, 0);
+    if (!dma || dma->setMemoryDescriptor(md) != kIOReturnSuccess) {
+        if (dma) dma->release();
+        md->release();
+        return -1;
+    }
+    uint32_t page = gartNextPage;
+    UInt64 off = 0;
+    while (off < size) {
+        IODMACommand::Segment64 segs[8] = {};
+        UInt32 nseg = 8;
+        if (dma->genIOVMSegments(&off, segs, &nseg) != kIOReturnSuccess || nseg == 0) break;
+        for (UInt32 i = 0; i < nseg; i++)
+            for (uint64_t p = 0; p < segs[i].fLength / 4096; p++) rn_gart_map_page(&gpu, &gmcLive, page++, segs[i].fIOVMAddr + p * 4096);
+    }
+    if (page != gartNextPage + pages) {                      // a short mapping: give up on this buffer (its pages stay unused in the window)
+        gartNextPage = page;
+        dma->complete(); dma->clearMemoryDescriptor(); dma->release();
+        md->release();
+        return -1;
+    }
+    rn_gart_flush(&gpu);
+    const int idx = static_cast<int>(boCount++);
+    bos[idx] = {md, dma, 0x2000000000ull + static_cast<uint64_t>(gartNextPage) * 4096, size};
+    gartNextPage += pages;
+    return idx;
+}
+
+// The memory image of the compute queue (MQD at VRAM 0x0C022000): the dwords the firmware may save and restore the queue state through.
+void RedNaviProbe::mqdSnapshot(const char *property) {
+    static const uint32_t dw[12] = {130, 132, 136, 137, 138, 139, 143, 145, 162, 167, 182, 183};
+    static const char *nm[12] = {"active", "persist", "pq_base_lo", "pq_base_hi", "rptr", "rptr_addr_lo", "doorbell_ctl", "pq_control", "mqd_control", "eop_control", "wptr_lo", "wptr_hi"};
+    uint32_t v[12];
+    for (int i = 0; i < 12; i++) v[i] = rn_vram_rd32(&gpu, 0x0C022000ull + dw[i] * 4);
+    rnPublish(this, property, nm, v, 12);
+}
+
+void RedNaviProbe::watchStep() {
+    uint32_t d1[11], d2[8];
+    rn_compute_diag(&gpu, d1);
+    rn_compute_diag2(&gpu, d2);
+    const uint32_t cur[5] = {d2[0], d2[6], d2[1], d1[0], d1[1]};   // doorbell control, pq control, pq status, rptr, wptr
+    const bool first = watchTick == 0;
+    bool changed = first;
+    // the rptr/wptr move with the work; the control state is what must not change by itself
+    if (cur[0] != watchPrev[0] || cur[1] != watchPrev[1] || cur[2] != watchPrev[2]) changed = true;
+    {   // the PCI command register (bit 2: bus master) and status, at every change and at the start
+        const uint32_t cmd = pci->configRead16(kIOPCIConfigCommand), st = pci->configRead16(kIOPCIConfigStatus);
+        if (first || cmd != watchPciCmd) {
+            const char *pn[3] = {"tick", "command", "status"};
+            uint32_t pv[3] = {watchTick, cmd, st};
+            rnPublish(this, first ? "pci-cmd-start" : "pci-cmd-changed", pn, pv, 3);
+            watchPciCmd = cmd;
+        }
+    }
+    if (first) mqdSnapshot("queue-mqd-before");
+    if (changed && !first && watchEvents < 8 && watchEvents == 1) mqdSnapshot("queue-mqd-after");
+    if (changed && watchEvents < 8) {
+        uint32_t *e = watchLog[watchEvents++];
+        e[0] = watchTick; e[1] = cur[0]; e[2] = cur[1]; e[3] = cur[2]; e[4] = cur[3]; e[5] = cur[4]; e[6] = d1[3];
+        char names[56][16];
+        const char *np[56];
+        uint32_t vals[56];
+        for (uint32_t k = 0; k < watchEvents; k++)
+            for (int j = 0; j < 7; j++) {
+                static const char *f[7] = {"tick", "dbctl", "pqctl", "pqst", "rptr", "wptr", "cpstat"};
+                snprintf(names[k * 7 + j], 16, "e%u_%s", k, f[j]);
+                np[k * 7 + j] = names[k * 7 + j];
+                vals[k * 7 + j] = watchLog[k][j];
+            }
+        rnPublish(this, "queue-watch", np, vals, watchEvents * 7);
+    }
+    for (int i = 0; i < 5; i++) watchPrev[i] = cur[i];
+    // Timed resubmissions of the same command buffer from the kernel (10, 30 and 80 s after the test): does an idle queue still work
+    // without a user client in between? The result is read 2 s later.
+    if (watchBoA >= 0 && watchBoB >= 0 && !keepAlive) {
+        volatile uint32_t *B = static_cast<volatile uint32_t *>(bos[watchBoB].md->getBytesNoCopy());
+        static const uint32_t at[3] = {40, 120, 320};
+        for (uint32_t k = 0; k < 3; k++) {
+            if (watchTick == at[k]) {
+                B[0] = 0xDEAD0000u; B[1] = 0;
+                resubLog[k][0] = at[k];
+                uint32_t ib[48];
+                (void)ib;
+                rn_gc_safe_mode(&gpu, 1);
+                // the command buffer in buffer A is still intact; run it again with a new fence value
+                rn_compute_submit_ib(&gpu, kRNVramMcBase, computeRingOff, 4096, bos[watchBoA].gpuVa, watchIbDwords, bos[watchBoB].gpuVa + 4, 0xBEEF0000u + k);
+            }
+            if (watchTick == at[k] + 8) {
+                resubLog[k][1] = B[0]; resubLog[k][2] = B[1];
+                resubLog[k][3] = d2[0]; resubLog[k][4] = d1[0]; resubLog[k][5] = d1[1]; resubLog[k][6] = d2[6];
+                rn_gc_safe_mode(&gpu, 0);
+                resubCount = k + 1;
+                const char *f[7] = {"tick", "b0", "b1", "dbctl", "rptr", "wptr", "pqctl"};
+                char names[21][16];
+                const char *np[21];
+                uint32_t vals[21];
+                for (uint32_t kk = 0; kk < resubCount; kk++)
+                    for (int j = 0; j < 7; j++) { snprintf(names[kk * 7 + j], 16, "r%u_%s", kk, f[j]); np[kk * 7 + j] = names[kk * 7 + j]; vals[kk * 7 + j] = resubLog[kk][j]; }
+                rnPublish(this, "queue-resubmit", np, vals, resubCount * 7);
+            }
+        }
+    }
+    if (keepAlive && watchBoA >= 0 && watchBoB >= 0 && watchTick >= 4 && watchTick < 440) {
+        volatile uint32_t *B = static_cast<volatile uint32_t *>(bos[watchBoB].md->getBytesNoCopy());
+        if (kaSent && B[1] == 0xCAFE0000u + kaSent) kaOk++;                       // the previous one finished
+        else if (kaSent && !kaFirstFail) { kaFirstFail = watchTick; kaDbctl = d2[0]; }
+        if (!kaFirstFail) {
+            kaSent++;
+            B[0] = 0xDEAD0000u;
+            rn_compute_submit_ib(&gpu, kRNVramMcBase, computeRingOff, 4096, bos[watchBoA].gpuVa, watchIbDwords, bos[watchBoB].gpuVa + 4, 0xCAFE0000u + kaSent);
+        }
+        const char *kn[5] = {"sent", "ok", "first_fail_tick", "dbctl_at_fail", "tick"};
+        uint32_t kv[5] = {kaSent, kaOk, kaFirstFail, kaDbctl, watchTick};
+        if ((watchTick & 7) == 0 || kaFirstFail) rnPublish(this, "keepalive", kn, kv, 5);
+    }
+    watchTick++;
+    if (watchTimer && watchTick < 480) watchTimer->setTimeoutMS(250);
+}
+
 void RedNaviProbe::sdmaTest() {
     uint32_t arg = 0;
     if (!PE_parse_boot_argn("rednavi_sdma_test", &arg, sizeof(arg)) || arg != 1) return;
@@ -1615,6 +1913,7 @@ void RedNaviProbe::sdmaTest() {
     // With the SMU features on, GFXOFF powers the graphics block down when it is idle and its registers read back as zero (the SDMA
     // status did). Linux brackets register access with amdgpu_gfx_off_ctrl; here GFXOFF is simply disallowed for the test.
     struct rn_device *adev = &gpu;                                         // the RREG32 macros expect this name
+    pci->setBusMasterEnable(true);                                         // the GPU reads and writes host memory (GART buffers, interrupt vectors)
     // The IP bases are only known once the discovery table is parsed, which is after rn_device_init in start(): fill them in here.
     // (They were all 0 until now, so every macro access in this test hit the wrong register.)
     for (uint32_t i = 0; i < 4; i++) ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i);
@@ -1658,9 +1957,9 @@ void RedNaviProbe::sdmaTest() {
     }
     // VRAM offsets: the first ~8 MB hold the firmware boot framebuffer that macOS draws into, the scanout is at 0x08000000, so the
     // engines work at 192 MB: page table 0x0C100000, default and fault pages 0x0C200000/0x0C201000, SDMA ring 0x0C000000, target 0x0C002000.
-    // The GART window: 256 pages at GPU address 0x2000000000 (outside the VRAM aperture), the page table at VRAM 0x0C100000.
+    // The GART window: 16384 pages (64 MB) at GPU address 0x2000000000 (outside the VRAM aperture), the page table at VRAM 0x0C100000.
     const uint64_t kGartVa = 0x2000000000ull;
-    struct rn_gmc gmc = {kRNVramMcBase, kRNVramMcBase + 0x3FFFFFFFFull, kGartVa, kGartVa + 256 * 4096 - 1, 0x0C100000, 0x0C200000, 0x0C201000};
+    struct rn_gmc gmc = {kRNVramMcBase, kRNVramMcBase + 0x3FFFFFFFFull, kGartVa, kGartVa + 16384ull * 4096 - 1, 0x0C100000, 0x0C200000, 0x0C201000};
     
     // Does CPU access to VRAM through MM_INDEX/MM_DATA survive the memory hub being switched on? Two probe locations, read right
     // after writing and again 50 ms later, before and after rn_gfxhub_enable.
@@ -1698,6 +1997,8 @@ void RedNaviProbe::sdmaTest() {
         for (uint32_t pg = 0; hostBus && pg < 4 && (pg + 1) * 4096u <= hostBusLen; pg++) rn_gart_map_page(&gpu, &gmc, pg, hostBus + pg * 4096ull);
     }
     rn_gfxhub_enable(&gpu, &gmc);
+    gmcLive = gmc;
+    gpuLive = true;
     trace[4] = rd(0x1295 * 4);
     {   // do the GCVM writes stick? (they read 0 on a healthy Linux system too, so this may tell nothing)
         const char *gn[10] = {"l2_cntl", "ctx0_cntl", "aperture_low", "aperture_high", "l1_tlb", "pt_base_lo", "pt_end_lo", "fb_base", "fb_base_before", "fb_top_before"};
@@ -1925,6 +2226,77 @@ void RedNaviProbe::sdmaTest() {
                     }
                 }
             }
+            // Opt-in (rednavi_kiq_test=1): the way Linux runs compute queues. The queue programmed by hand above is reset by the
+            // firmware on the next doorbell after the boot-time tests; a queue mapped through the KIQ is the firmware's own.
+            uint32_t kiqArg = 0;
+            if (cr.ok && PE_parse_boot_argn("rednavi_kiq_test", &kiqArg, sizeof(kiqArg)) && kiqArg == 1) {
+                struct rn_kiq_result kr;
+                uint32_t kiqStep = 4;
+                PE_parse_boot_argn("rednavi_kiq_step", &kiqStep, sizeof(kiqStep));
+                rn_kiq_map_compute(&gpu, kRNVramMcBase, 0x0C080000, 0x0C090000, kiqStep,
+                                   [](void *ctx, uint32_t step) {
+                                       // the step about to run, published first: if the machine stops here, this is the last one that said so
+                                       RedNaviProbe *self = static_cast<RedNaviProbe *>(ctx);
+                                       const char *pn[1] = {"about_to_run"};
+                                       uint32_t pv[1] = {step};
+                                       rnPublish(self, "kiq-progress", pn, pv, 1);
+                                       IOLog("RedNavi: KIQ step %u\n", step);
+                                       IOSleep(100);
+                                   }, this, &kr);
+                if (kr.ok) computeRingOff = 0x0C090000;
+                const char *kn[11] = {"step", "ok", "kiq_active", "kiq_rptr", "kiq_wptr", "map_active", "map_pq_control", "map_doorbell_ctl", "map_rptr", "map_wptr", "fault_status"};
+                uint32_t kv[11] = {kr.step, static_cast<uint32_t>(kr.ok), kr.kiq_active, kr.kiq_rptr, kr.kiq_wptr, kr.map_active, kr.map_pq_control,
+                                   kr.map_doorbell_ctl, kr.map_rptr, kr.map_wptr, kr.fault_status};
+                rnPublish(this, "kiq-test", kn, kv, 11);
+            }
+            // Opt-in (rednavi_bo_test=1): two buffers in host memory, a shader and its command buffer in the first, the result and the fence in
+            // the second; the command buffer is submitted through an INDIRECT_BUFFER packet and the fence is read from host memory.
+            uint32_t boArg = 0;
+            if (cr.ok && gartTest && hostBus && PE_parse_boot_argn("rednavi_bo_test", &boArg, sizeof(boArg)) && boArg == 1) {
+                const int a = createHostBo(4096), b = createHostBo(4096);
+                uint32_t r[8] = {static_cast<uint32_t>(a), static_cast<uint32_t>(b), 0, 0, 0, 0, 0, 0};
+                if (a >= 0 && b >= 0) {
+                    volatile uint32_t *A = static_cast<volatile uint32_t *>(bos[a].md->getBytesNoCopy());
+                    volatile uint32_t *B = static_cast<volatile uint32_t *>(bos[b].md->getBytesNoCopy());
+                    const uint64_t bva = bos[b].gpuVa;
+                    const uint32_t code[11] = {0xBE8000FFu, lower_32_bits(bva), 0xBE8100FFu, upper_32_bits(bva), 0x7E020280u, 0x7E0402FFu, 0x600DC0DEu,
+                                               0xDC6A0000u, 0x00000201u, 0xBC7C0000u, 0xBFB00000u};
+                    for (int i = 0; i < 64; i++) A[0x100 / 4 + i] = i < 11 ? code[i] : 0xBF9F0000u;
+                    uint32_t ib[48];
+                    const uint32_t nib = rn_build_dispatch_ib(&gpu, ib, bos[a].gpuVa + 0x100);
+                    for (uint32_t i = 0; i < nib; i++) A[i] = ib[i];
+                    B[0] = 0xDEAD0000u; B[1] = 0;
+                    const int sub = rn_compute_submit_ib(&gpu, kRNVramMcBase, computeRingOff, 4096, bos[a].gpuVa, nib, bos[b].gpuVa + 4, 0xFEEDFACEu);
+                    for (int ms = 0; ms < 1500 && B[1] != 0xFEEDFACEu; ms++) IOSleep(1);
+                    r[2] = static_cast<uint32_t>(sub); r[3] = B[0]; r[4] = B[1]; r[5] = lower_32_bits(bos[a].gpuVa); r[6] = lower_32_bits(bva);
+                    r[7] = B[0] == 0x600DC0DEu && B[1] == 0xFEEDFACEu;
+                    watchBoA = a; watchBoB = b; watchIbDwords = nib;
+                }
+                const char *bn[8] = {"bo_a", "bo_b", "submit_rc", "result", "fence", "a_va_lo", "b_va_lo", "ok"};
+                rnPublish(this, "bo-test", bn, r, 8);
+                uint32_t dg[11];
+                rn_compute_diag(&gpu, dg);
+                const char *dgn[11] = {"hqd_rptr", "hqd_wptr", "hqd_active", "cp_stat", "fault_status", "fault_addr_lo", "fault_addr_hi", "ring_wptr", "sdma_version", "grbm_status", "rlc_gpm_stat"};
+                rnPublish(this, "bo-diag", dgn, dg, 11);
+                uint32_t d2[8];
+                rn_compute_diag2(&gpu, d2);
+                const char *d2n[8] = {"doorbell_ctl", "pq_status", "range_lo", "range_hi", "aper_en", "pq_base", "pq_control", "mqd_base"};
+                rnPublish(this, "bo-diag2", d2n, d2, 8);
+            }
+            uint32_t kaArg = 0;
+            keepAlive = PE_parse_boot_argn("rednavi_keepalive", &kaArg, sizeof(kaArg)) && kaArg == 1;
+            uint32_t watchArg = 0;
+            if (cr.ok && PE_parse_boot_argn("rednavi_queue_watch", &watchArg, sizeof(watchArg)) && watchArg == 1) {
+                IOWorkLoop *wl = getWorkLoop();
+                if (wl) {
+                    watchTimer = IOTimerEventSource::timerEventSource(this, [](OSObject *o, IOTimerEventSource *) {
+                        RedNaviProbe *self = OSDynamicCast(RedNaviProbe, o);
+                        if (self) self->watchStep();
+                    });
+                    if (watchTimer && wl->addEventSource(watchTimer) == kIOReturnSuccess) watchTimer->setTimeoutMS(250);
+                }
+            }
+            if (doorbellMap && !doorbellKeep) { doorbellKeep = doorbellMap; doorbellMap = nullptr; }   // kept for later submissions (the user client)
             if (doorbellMap) { rn_set_doorbell(nullptr, 0); doorbellMap->release(); }
         }
     }
@@ -2199,7 +2571,11 @@ void RedNaviProbe::stop(IOService *provider) {
     if (modeLock) { IOLockFree(modeLock); modeLock = nullptr; }
     if (disc) { disc->release(); disc = nullptr; }
     if (vbiosCopy) { vbiosCopy->release(); vbiosCopy = nullptr; }
+    if (watchTimer) { watchTimer->cancelTimeout(); if (getWorkLoop()) getWorkLoop()->removeEventSource(watchTimer); watchTimer->release(); watchTimer = nullptr; }
     if (msiSrc) { msiSrc->disable(); if (getWorkLoop()) getWorkLoop()->removeEventSource(msiSrc); msiSrc->release(); msiSrc = nullptr; }
+    for (uint32_t i = 0; i < boCount; i++) { if (bos[i].dma) { bos[i].dma->complete(); bos[i].dma->clearMemoryDescriptor(); bos[i].dma->release(); } if (bos[i].md) bos[i].md->release(); }
+    boCount = 0;
+    if (doorbellKeep) { rn_set_doorbell(nullptr, 0); doorbellKeep->release(); doorbellKeep = nullptr; }
     if (hostDma) { hostDma->complete(); hostDma->clearMemoryDescriptor(); hostDma->release(); hostDma = nullptr; }
     if (hostBuf) { hostBuf->release(); hostBuf = nullptr; }
     if (regs) { regs->release(); regs = nullptr; }

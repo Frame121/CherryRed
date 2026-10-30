@@ -66,8 +66,9 @@ int rn_gart_update_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 pa
 }
 
 void rn_gart_map_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 bus) {
-    // AMDGPU_PTE_VALID | SYSTEM | SNOOPED | READABLE | WRITEABLE, address in bits 47:12
-    const u64 pte = (bus & 0x0000FFFFFFFFF000ull) | 0x1ull | 0x2ull | 0x4ull | 0x20ull | 0x40ull;
+    // AMDGPU_PTE_VALID | SYSTEM | SNOOPED | EXECUTABLE | READABLE | WRITEABLE, address in bits 47:12. EXECUTABLE matters: the command
+    // processor fetching an indirect buffer, or the shader array fetching instructions, from a page without it takes a permission fault.
+    const u64 pte = (bus & 0x0000FFFFFFFFF000ull) | 0x1ull | 0x2ull | 0x4ull | 0x10ull | 0x20ull | 0x40ull;
     const u64 slot = gmc->pt_vram_offset + (u64)page * 8;
     rn_vram_wr32(adev, slot, lower_32_bits(pte));
     rn_vram_wr32(adev, slot + 4, upper_32_bits(pte));
@@ -424,6 +425,10 @@ void rn_gfx_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringB
     res->ring0 = rn_vram_rd32(adev, ringOff);
 }
 
+static bool gMapped;                    // the compute queue in use was mapped through the KIQ (rn_kiq_map_compute)
+static u32 gMappedWptr;
+static const u32 kMappedDoorbellDword = 8;
+static u32 gComputeWptr;                // running write pointer of the compute queue, in dwords
 static volatile u8 *gDoorbellBase;      // mapped doorbell BAR, or null for plain register submission
 static u32 gDoorbellDword;              // the compute queue's doorbell, in dwords
 
@@ -449,6 +454,7 @@ void rn_doorbell_aperture_enable(struct rn_device *adev, int writeS2a, u32 befor
 
 // Tells the compute queue (selected by grbmSelect) that the ring now ends at wptr dwords.
 static void computeSubmit(struct rn_device *adev, u64 wptrShadowOff, u32 wptr) {
+    gComputeWptr = wptr;
     if (gDoorbellBase) {
         *reinterpret_cast<volatile u64 *>(gDoorbellBase + gDoorbellDword * 4) = wptr;     // the doorbell carries the wptr
         return;
@@ -487,7 +493,6 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
     for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
     for (u32 i = 0; i < 8; i++) rn_vram_wr32(adev, ringOff + i * 4, pkt[i]);
     for (u32 o = 0; o < 0x1000; o += 4) rn_vram_wr32(adev, mqdOff + o, 0);
-    rn_vram_wr32(adev, mqdOff, 0xC0310800u);                                 // mqd->header
     for (u32 o = 0; o < 2048; o += 4) rn_vram_wr32(adev, eopOff + o, 0);
     rn_vram_wr32(adev, rptrOff, 0); rn_vram_wr32(adev, rptrOff + 4, 0);
     rn_vram_wr32(adev, wptrOff, 0); rn_vram_wr32(adev, wptrOff + 4, 0);
@@ -543,6 +548,45 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
     tmp = regCP_HQD_PERSISTENT_STATE_DEFAULT;
     tmp = REG_SET_FIELD(tmp, CP_HQD_PERSISTENT_STATE, PRELOAD_SIZE, 0x55);
     WREG32_SOC15(RN_GC, 0, regCP_HQD_PERSISTENT_STATE, tmp);
+    // The memory image of the queue (v11_compute_mqd, 512 dwords): the firmware of the MEC saves the queue state here and restores it when
+    // the queue is switched back in, so with an empty page the queue came back empty after some idle time. These are the values of
+    // gfx_v11_0_compute_mqd_init, the same that went into the registers above; offsets are those of struct v11_compute_mqd.
+    {
+        u32 doorbellCtl = regCP_HQD_PQ_DOORBELL_CONTROL_DEFAULT;
+        if (gDoorbellBase) {
+            doorbellCtl = REG_SET_FIELD(doorbellCtl, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_OFFSET, gDoorbellDword);
+            doorbellCtl = REG_SET_FIELD(doorbellCtl, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_EN, 1);
+        }
+        u32 eopCtl = regCP_HQD_EOP_CONTROL_DEFAULT;
+        eopCtl = REG_SET_FIELD(eopCtl, CP_HQD_EOP_CONTROL, EOP_SIZE, 8);
+        u32 mqdCtl = regCP_MQD_CONTROL_DEFAULT;
+        mqdCtl = REG_SET_FIELD(mqdCtl, CP_MQD_CONTROL, VMID, 0);
+        u32 pqCtl = regCP_HQD_PQ_CONTROL_DEFAULT;
+        pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, QUEUE_SIZE, qOrder - 1);
+        pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, RPTR_BLOCK_SIZE, 9);
+        pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, UNORD_DISPATCH, 1);
+        pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 0);
+        pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, PRIV_STATE, 1);
+        pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, KMD_QUEUE, 1);
+        u32 persist = regCP_HQD_PERSISTENT_STATE_DEFAULT;
+        persist = REG_SET_FIELD(persist, CP_HQD_PERSISTENT_STATE, PRELOAD_SIZE, 0x55);
+        u32 ibCtl = regCP_HQD_IB_CONTROL_DEFAULT;
+        ibCtl = REG_SET_FIELD(ibCtl, CP_HQD_IB_CONTROL, MIN_IB_AVAIL_SIZE, 3);
+        u32 quantum = 0;
+        quantum = REG_SET_FIELD(quantum, CP_HQD_QUANTUM, QUANTUM_EN, 1);
+        quantum = REG_SET_FIELD(quantum, CP_HQD_QUANTUM, QUANTUM_SCALE, 1);
+        quantum = REG_SET_FIELD(quantum, CP_HQD_QUANTUM, QUANTUM_DURATION, 1);
+        struct { u32 dw; u32 v; } mqd[] = {
+            {0, 0xC0310800u}, {11, 1}, {23, 0xffffffffu}, {24, 0xffffffffu}, {26, 0xffffffffu}, {27, 0xffffffffu}, {32, 7},
+            {165, lower_32_bits(eopBase)}, {166, upper_32_bits(eopBase)}, {167, eopCtl}, {143, doorbellCtl},
+            {128, lower_32_bits(vaBase + mqdOff) & 0xfffffffcu}, {129, upper_32_bits(vaBase + mqdOff)}, {162, mqdCtl},
+            {136, lower_32_bits(ringVa >> 8)}, {137, upper_32_bits(ringVa >> 8)}, {145, pqCtl},
+            {139, lower_32_bits(vaBase + rptrOff) & 0xfffffffcu}, {140, upper_32_bits(vaBase + rptrOff) & 0xFFFFu},
+            {141, lower_32_bits(vaBase + wptrOff) & 0xfffffffcu}, {142, upper_32_bits(vaBase + wptrOff) & 0xFFFFu},
+            {132, persist}, {149, ibCtl}, {135, quantum}, {130, 1},
+        };
+        for (u32 i = 0; i < sizeof(mqd) / sizeof(mqd[0]); i++) rn_vram_wr32(adev, mqdOff + mqd[i].dw * 4, mqd[i].v);
+    }
     WREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE, 1);
     if (gDoorbellBase) {                                                     // CP_PQ_STATUS.DOORBELL_ENABLE after the queue is active
         tmp = RREG32_SOC15(RN_GC, 0, regCP_PQ_STATUS);
@@ -825,6 +869,271 @@ void rn_sdma0_run(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes
     res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
     res->fault_addr_lo = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
     res->fault_addr_hi = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
+}
+
+u32 rn_build_dispatch_ib(struct rn_device *adev, u32 *ring, u64 shaderVa) {
+    const u32 gcBase = adev->reg_offset[RN_GC_HWIP][0][0];
+    #define SHREG(reg) (gcBase + (reg) - RN_PACKET3_SET_SH_REG_START)
+    u32 n = 0;
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 2); ring[n++] = SHREG(RN_COMPUTE_PGM_LO);
+    ring[n++] = lower_32_bits(shaderVa >> 8); ring[n++] = upper_32_bits(shaderVa >> 8);
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 2); ring[n++] = SHREG(RN_COMPUTE_PGM_RSRC1);
+    ring[n++] = 0x002C0000u; ring[n++] = 0x00000080u;
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 1); ring[n++] = SHREG(RN_COMPUTE_PGM_RSRC3); ring[n++] = 0;
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 3); ring[n++] = SHREG(RN_COMPUTE_START_X);
+    ring[n++] = 0; ring[n++] = 0; ring[n++] = 0;
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 3); ring[n++] = SHREG(RN_COMPUTE_NUM_THREAD_X);
+    ring[n++] = 1; ring[n++] = 1; ring[n++] = 1;
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 6); ring[n++] = SHREG(RN_COMPUTE_RESOURCE_LIMITS);
+    ring[n++] = 0; ring[n++] = 0xFFFFFFFFu; ring[n++] = 0xFFFFFFFFu; ring[n++] = 0; ring[n++] = 0xFFFFFFFFu; ring[n++] = 0xFFFFFFFFu;
+    ring[n++] = RN_PACKET3(RN_PACKET3_DISPATCH_DIRECT, 3);
+    ring[n++] = 1; ring[n++] = 1; ring[n++] = 1;
+    ring[n++] = 0x00000001u | 0x00000004u | 0x00000040u | 0x00008000u;
+    #undef SHREG
+    return n;
+}
+
+int rn_compute_submit_ib(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, u64 ibVa, u32 ibDwords, u64 fenceVa, u32 fenceValue) {
+    (void)vaBase;
+    const u32 mask = ringBytes / 4 - 1;
+    const u64 wptrOff = ringOff + 0x1008;
+    u32 pk[24];
+    u32 n = 0;
+    // gfx_v11_0_ring_emit_ib_compute: INDIRECT_BUFFER, address (dword aligned), upper 16 bits, size | VALID | VMID << 24
+    pk[n++] = RN_PACKET3(0x3Fu, 2);
+    pk[n++] = lower_32_bits(ibVa) & 0xfffffffcu;
+    pk[n++] = upper_32_bits(ibVa) & 0xFFFFu;
+    pk[n++] = (1u << 23) | (ibDwords & 0xFFFFFu);
+    pk[n++] = RN_PACKET3(RN_PACKET3_RELEASE_MEM, 6);
+    pk[n++] = (1u << 22) | (1u << 21) | (1u << 13) | (1u << 12) | (3u << 25) | RN_CACHE_FLUSH_AND_INV_TS_EVENT | (5u << 8);
+    pk[n++] = (1u << 29);
+    pk[n++] = lower_32_bits(fenceVa); pk[n++] = upper_32_bits(fenceVa);
+    pk[n++] = fenceValue; pk[n++] = 0; pk[n++] = 0;
+    while ((n & 7) != 0) { pk[n++] = RN_PACKET3(RN_PACKET3_NOP, 0); pk[n++] = 0; }
+    if (n + gComputeWptr - gComputeWptr > mask) return -1;
+    if (gMapped) {                                                           // the queue mapped through the KIQ: ring and wptr are its own
+        const u32 w = gMappedWptr;
+        for (u32 i = 0; i < n; i++) rn_vram_wr32(adev, ringOff + ((w + i) & mask) * 4, pk[i]);
+        gMappedWptr = w + n;
+        *reinterpret_cast<volatile u64 *>(gDoorbellBase + kMappedDoorbellDword * 4) = w + n;
+        return 0;
+    }
+    const u32 w = gComputeWptr;
+    for (u32 i = 0; i < n; i++) rn_vram_wr32(adev, ringOff + ((w + i) & mask) * 4, pk[i]);
+    grbmSelect(adev, 1, 0, 0, 2);
+    computeSubmit(adev, wptrOff, w + n);
+    grbmSelect(adev, 0, 0, 0, 0);
+    return 0;
+}
+
+void rn_gc_safe_mode(struct rn_device *adev, int enter) {
+    if (!enter) { WREG32_SOC15(RN_GC, 0, regRLC_SAFE_MODE, RLC_SAFE_MODE__CMD_MASK); return; }
+    WREG32_SOC15(RN_GC, 0, regRLC_SAFE_MODE, RLC_SAFE_MODE__CMD_MASK | (1u << RLC_SAFE_MODE__MESSAGE__SHIFT));
+    for (int i = 0; i < 100000; i++) {                                       // the RLC clears CMD when the GC is awake
+        if (!(RREG32_SOC15(RN_GC, 0, regRLC_SAFE_MODE) & RLC_SAFE_MODE__CMD_MASK)) break;
+        udelay(1);
+    }
+}
+
+void rn_compute_diag(struct rn_device *adev, u32 out[11]) {
+    grbmSelect(adev, 1, 0, 0, gMapped ? 3 : 2);
+    out[0] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
+    out[1] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
+    out[2] = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
+    grbmSelect(adev, 0, 0, 0, 0);
+    out[3] = RREG32_SOC15(RN_GC, 0, regCP_STAT);
+    out[4] = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
+    out[5] = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
+    out[6] = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
+    out[7] = gComputeWptr;
+    out[8] = rn_rreg32(adev, adev->reg_offset[RN_GC_HWIP][0][0] + 0x35);                  // SDMA0_VERSION
+    out[9] = rn_rreg32(adev, adev->reg_offset[RN_GC_HWIP][0][0] + 0xda4);                 // GRBM_STATUS
+    out[10] = rn_rreg32(adev, adev->reg_offset[RN_GC_HWIP][0][1] + 0x4e6b);               // RLC_GPM_STAT
+}
+
+void rn_compute_diag2(struct rn_device *adev, u32 out[8]) {
+    grbmSelect(adev, 1, 0, 0, gMapped ? 3 : 2);
+    out[0] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL);
+    out[1] = RREG32_SOC15(RN_GC, 0, regCP_PQ_STATUS);
+    out[2] = RREG32_SOC15(RN_GC, 0, regCP_MEC_DOORBELL_RANGE_LOWER);
+    out[3] = RREG32_SOC15(RN_GC, 0, regCP_MEC_DOORBELL_RANGE_UPPER);
+    out[4] = RREG32_SOC15(RN_NBIO, 0, regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN);
+    out[5] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_BASE);
+    out[6] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_CONTROL);
+    out[7] = RREG32_SOC15(RN_GC, 0, regCP_MQD_BASE_ADDR);
+    grbmSelect(adev, 0, 0, 0, 0);
+}
+
+// MQD image for a compute queue (struct v11_compute_mqd, offsets in dwords), as gfx_v11_0_compute_mqd_init fills it.
+static void writeComputeMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, u64 mqdOff, u64 eopOff, u32 doorbellDword) {
+    const u64 ringVa = vaBase + ringOff, rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008;
+    const u64 eopBase = (vaBase + eopOff) >> 8;
+    u32 qOrder = 0;
+    while ((4u << qOrder) < ringBytes) qOrder++;
+    u32 doorbellCtl = regCP_HQD_PQ_DOORBELL_CONTROL_DEFAULT;
+    doorbellCtl = REG_SET_FIELD(doorbellCtl, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_OFFSET, doorbellDword);
+    doorbellCtl = REG_SET_FIELD(doorbellCtl, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_EN, 1);
+    u32 eopCtl = regCP_HQD_EOP_CONTROL_DEFAULT;
+    eopCtl = REG_SET_FIELD(eopCtl, CP_HQD_EOP_CONTROL, EOP_SIZE, 8);
+    u32 mqdCtl = regCP_MQD_CONTROL_DEFAULT;
+    mqdCtl = REG_SET_FIELD(mqdCtl, CP_MQD_CONTROL, VMID, 0);
+    u32 pqCtl = regCP_HQD_PQ_CONTROL_DEFAULT;
+    pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, QUEUE_SIZE, qOrder - 1);
+    pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, RPTR_BLOCK_SIZE, 9);
+    pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, UNORD_DISPATCH, 1);
+    pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 0);
+    pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, PRIV_STATE, 1);
+    pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, KMD_QUEUE, 1);
+    u32 persist = regCP_HQD_PERSISTENT_STATE_DEFAULT;
+    persist = REG_SET_FIELD(persist, CP_HQD_PERSISTENT_STATE, PRELOAD_SIZE, 0x55);
+    u32 ibCtl = regCP_HQD_IB_CONTROL_DEFAULT;
+    ibCtl = REG_SET_FIELD(ibCtl, CP_HQD_IB_CONTROL, MIN_IB_AVAIL_SIZE, 3);
+    u32 quantum = 0;
+    quantum = REG_SET_FIELD(quantum, CP_HQD_QUANTUM, QUANTUM_EN, 1);
+    quantum = REG_SET_FIELD(quantum, CP_HQD_QUANTUM, QUANTUM_SCALE, 1);
+    quantum = REG_SET_FIELD(quantum, CP_HQD_QUANTUM, QUANTUM_DURATION, 1);
+    for (u32 o = 0; o < 512 * 4; o += 4) rn_vram_wr32(adev, mqdOff + o, 0);
+    for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
+    for (u32 o = 0; o < 2048; o += 4) rn_vram_wr32(adev, eopOff + o, 0);
+    rn_vram_wr32(adev, rptrOff, 0); rn_vram_wr32(adev, rptrOff + 4, 0);
+    rn_vram_wr32(adev, wptrOff, 0); rn_vram_wr32(adev, wptrOff + 4, 0);
+    struct { u32 dw; u32 v; } mqd[] = {
+        {0, 0xC0310800u}, {11, 1}, {23, 0xffffffffu}, {24, 0xffffffffu}, {26, 0xffffffffu}, {27, 0xffffffffu}, {32, 7},
+        {165, lower_32_bits(eopBase)}, {166, upper_32_bits(eopBase)}, {167, eopCtl}, {143, doorbellCtl},
+        {128, lower_32_bits(vaBase + mqdOff) & 0xfffffffcu}, {129, upper_32_bits(vaBase + mqdOff)}, {162, mqdCtl},
+        {136, lower_32_bits(ringVa >> 8)}, {137, upper_32_bits(ringVa >> 8)}, {145, pqCtl},
+        {139, lower_32_bits(vaBase + rptrOff) & 0xfffffffcu}, {140, upper_32_bits(vaBase + rptrOff) & 0xFFFFu},
+        {141, lower_32_bits(vaBase + wptrOff) & 0xfffffffcu}, {142, upper_32_bits(vaBase + wptrOff) & 0xFFFFu},
+        {132, persist}, {149, ibCtl}, {135, quantum}, {130, 1},
+    };
+    for (u32 i = 0; i < sizeof(mqd) / sizeof(mqd[0]); i++) rn_vram_wr32(adev, mqdOff + mqd[i].dw * 4, mqd[i].v);
+}
+
+// gfx_v11_0_kiq_init_register: copy the MQD values into the CP_HQD_* registers of the queue selected by grbmSelect and activate it.
+static void programHqdFromMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, u64 mqdOff, u64 eopOff, u32 doorbellDword) {
+    const u64 ringVa = vaBase + ringOff, rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008;
+    const u64 eopBase = (vaBase + eopOff) >> 8;
+    u32 qOrder = 0;
+    while ((4u << qOrder) < ringBytes) qOrder++;
+    u32 tmp;
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_PQ_WPTR_POLL_CNTL);
+    tmp = REG_SET_FIELD(tmp, CP_PQ_WPTR_POLL_CNTL, EN, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_PQ_WPTR_POLL_CNTL, tmp);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_EOP_BASE_ADDR, lower_32_bits(eopBase));
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_EOP_BASE_ADDR_HI, upper_32_bits(eopBase));
+    tmp = regCP_HQD_EOP_CONTROL_DEFAULT;
+    tmp = REG_SET_FIELD(tmp, CP_HQD_EOP_CONTROL, EOP_SIZE, 8);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_EOP_CONTROL, tmp);
+    tmp = regCP_HQD_PQ_DOORBELL_CONTROL_DEFAULT;
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_OFFSET, doorbellDword);
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_EN, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_MEC_DOORBELL_RANGE_LOWER, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_MEC_DOORBELL_RANGE_UPPER, 0x8A * 2 * 4);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL, tmp);
+    WREG32_SOC15(RN_GC, 0, regCP_MQD_BASE_ADDR, lower_32_bits(vaBase + mqdOff) & 0xfffffffcu);
+    WREG32_SOC15(RN_GC, 0, regCP_MQD_BASE_ADDR_HI, upper_32_bits(vaBase + mqdOff));
+    tmp = regCP_MQD_CONTROL_DEFAULT;
+    tmp = REG_SET_FIELD(tmp, CP_MQD_CONTROL, VMID, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_MQD_CONTROL, tmp);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_BASE, lower_32_bits(ringVa >> 8));
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_BASE_HI, upper_32_bits(ringVa >> 8));
+    tmp = regCP_HQD_PQ_CONTROL_DEFAULT;
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, QUEUE_SIZE, qOrder - 1);
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, RPTR_BLOCK_SIZE, 9);
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, UNORD_DISPATCH, 1);
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 0);
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, PRIV_STATE, 1);
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, KMD_QUEUE, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_CONTROL, tmp);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR_REPORT_ADDR, lower_32_bits(vaBase + rptrOff) & 0xfffffffcu);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR_REPORT_ADDR_HI, upper_32_bits(vaBase + rptrOff) & 0xFFFFu);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_POLL_ADDR, lower_32_bits(vaBase + wptrOff) & 0xfffffffcu);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_POLL_ADDR_HI, upper_32_bits(vaBase + wptrOff) & 0xFFFFu);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_HI, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_VMID, 0);
+    tmp = regCP_HQD_PERSISTENT_STATE_DEFAULT;
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PERSISTENT_STATE, PRELOAD_SIZE, 0x55);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PERSISTENT_STATE, tmp);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE, 1);
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_PQ_STATUS);
+    tmp = REG_SET_FIELD(tmp, CP_PQ_STATUS, DOORBELL_ENABLE, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_PQ_STATUS, tmp);
+}
+
+void rn_kiq_map_compute(struct rn_device *adev, u64 vaBase, u64 kiqOff, u64 queueOff, u32 maxStep, void (*progress)(void *, u32),
+                        void *progressCtx, struct rn_kiq_result *res) {
+    memset(res, 0, sizeof(*res));
+    const u32 kiqMe = 1, kiqPipe = 3, kiqQueue = 0, kiqDoorbellDword = 0;
+    const u32 qMe = 1, qPipe = 0, qQueue = 3;
+    const u32 ringBytes = 4096;
+
+    // gfx_v11_0_kiq_setting: tell the RLC which queue is the KIQ
+    if (progress) progress(progressCtx, 1);
+    u32 tmp = RREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS);
+    tmp &= 0xffffff00u;
+    tmp |= (kiqMe << 5) | (kiqPipe << 3) | kiqQueue;
+    WREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS, tmp | 0x80);
+    res->step = 1;
+    if (maxStep < 2) return;
+
+    // the KIQ itself: MQD image, then the registers
+    if (progress) progress(progressCtx, 2);
+    writeComputeMqd(adev, vaBase, kiqOff, ringBytes, kiqOff + 0x2000, kiqOff + 0x4000, kiqDoorbellDword);
+    grbmSelect(adev, kiqMe, kiqPipe, 0, kiqQueue);
+    programHqdFromMqd(adev, vaBase, kiqOff, ringBytes, kiqOff + 0x2000, kiqOff + 0x4000, kiqDoorbellDword);
+    grbmSelect(adev, 0, 0, 0, 0);
+    res->step = 2;
+    if (maxStep < 3) return;
+
+    // the compute queue's complete MQD (not activated through registers: the firmware will load it)
+    if (progress) progress(progressCtx, 3);
+    writeComputeMqd(adev, vaBase, queueOff, ringBytes, queueOff + 0x2000, queueOff + 0x4000, kMappedDoorbellDword);
+    res->step = 3;
+    if (maxStep < 4) return;
+
+    // KIQ commands: SET_RESOURCES (which queues it may map), MAP_QUEUES (this one)
+    u32 pk[24];
+    u32 n = 0;
+    pk[n++] = RN_PACKET3(0xA0u, 6);                                           // PACKET3_SET_RESOURCES
+    pk[n++] = (0u << 0) | (0xau << 16) | (0u << 29);                         // vmid mask 0, unmap latency 0xa, queue type 0 (KIQ)
+    pk[n++] = (1u << qQueue) | 0u; pk[n++] = 0;                              // queue mask: pipe 0 queue 3
+    pk[n++] = 0; pk[n++] = 0; pk[n++] = 0; pk[n++] = 0;                      // no cleaner shader, oac, gds
+    pk[n++] = RN_PACKET3(0xA2u, 5);                                           // PACKET3_MAP_QUEUES
+    pk[n++] = (0u << 4) | (0u << 8) | (qQueue << 13) | (qPipe << 16) | (qMe << 18) | (0u << 21) | (0u << 24) | (0u << 26) | (1u << 29);
+    pk[n++] = kMappedDoorbellDword << 2;
+    const u64 mqdVa = vaBase + queueOff + 0x2000, wptrVa = vaBase + queueOff + 0x1008;
+    pk[n++] = lower_32_bits(mqdVa); pk[n++] = upper_32_bits(mqdVa);
+    pk[n++] = lower_32_bits(wptrVa); pk[n++] = upper_32_bits(wptrVa);
+    while ((n & 7) != 0) { pk[n++] = RN_PACKET3(RN_PACKET3_NOP, 0); pk[n++] = 0; }
+    for (u32 i = 0; i < n; i++) rn_vram_wr32(adev, kiqOff + i * 4, pk[i]);
+    if (progress) progress(progressCtx, 4);
+    res->step = 4;
+    *reinterpret_cast<volatile u64 *>(gDoorbellBase + kiqDoorbellDword * 4) = n;     // the KIQ's own doorbell (slot 0)
+
+    for (int i = 0; i < 1000; i++) {                                         // until the firmware has loaded the queue
+        grbmSelect(adev, qMe, qPipe, 0, qQueue);
+        res->map_active = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
+        grbmSelect(adev, 0, 0, 0, 0);
+        if (res->map_active & 1u) break;
+        msleep(1);
+    }
+    grbmSelect(adev, qMe, qPipe, 0, qQueue);
+    res->map_pq_control = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_CONTROL);
+    res->map_doorbell_ctl = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL);
+    res->map_rptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
+    res->map_wptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
+    grbmSelect(adev, kiqMe, kiqPipe, 0, kiqQueue);
+    res->kiq_active = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
+    res->kiq_rptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
+    res->kiq_wptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
+    grbmSelect(adev, 0, 0, 0, 0);
+    res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
+    res->fault_addr_lo = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
+    res->ok = (res->map_active & 1u) != 0;
+    if (res->ok) { gMapped = true; gMappedWptr = 0; }                        // later rn_compute_submit_ib calls use the mapped queue
 }
 
 }
