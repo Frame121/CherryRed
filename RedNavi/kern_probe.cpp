@@ -1724,6 +1724,22 @@ void RedNaviProbe::sdmaTest() {
                                cr.trace[4][0], cr.trace[4][1], cr.trace[4][2], cr.trace[5][0], cr.trace[5][1], cr.trace[5][2],
                                cr.trace[6][0], cr.trace[7][0]};
             rnPublish(this, "compute-test", cn, cv, 33);
+
+            // Opt-in (rednavi_dispatch_test=1, after the compute test, whose queue it reuses): a first shader dispatch, an s_endpgm,
+            // finished by a RELEASE_MEM fence. Written from the Linux headers, not yet run on hardware.
+            uint32_t disp = 0;
+            if (cr.ok && PE_parse_boot_argn("rednavi_dispatch_test", &disp, sizeof(disp)) && disp == 1) {
+                struct rn_dispatch_result dr;
+                rn_compute_dispatch_test(&gpu, kRNVramMcBase, 0x0C020000, 0x0C030000, 0x0C031000, &dr);
+                const char *dn[24] = {"step", "ok", "fence", "fence_before", "rptr", "wptr", "active", "scratch", "fault_status", "fault_addr_lo", "fault_addr_hi",
+                                      "t0_rptr", "t0_fence", "t1_rptr", "t1_fence", "t5_rptr", "t5_fence", "t20_rptr", "t20_fence",
+                                      "t100_rptr", "t100_fence", "t500_rptr", "t500_fence"};
+                uint32_t dv[24] = {dr.step, static_cast<uint32_t>(dr.ok), dr.fence, dr.fence_before, dr.rptr, dr.wptr, dr.active, dr.scratch,
+                                   dr.fault_status, dr.fault_addr_lo, dr.fault_addr_hi,
+                                   dr.trace[0][0], dr.trace[0][1], dr.trace[1][0], dr.trace[1][1], dr.trace[2][0], dr.trace[2][1],
+                                   dr.trace[3][0], dr.trace[3][1], dr.trace[4][0], dr.trace[4][1], dr.trace[5][0], dr.trace[5][1]};
+                rnPublish(this, "dispatch-test", dn, dv, 23);
+            }
         }
     }
 #endif

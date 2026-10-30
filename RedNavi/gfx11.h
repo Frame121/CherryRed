@@ -52,6 +52,14 @@ struct rn_compute_result {
     int ok;
 };
 
+struct rn_dispatch_result {
+    u32 step;
+    u32 fence, fence_before, rptr, wptr, active, scratch;
+    u32 trace[6][2];                          // CP_HQD_PQ_RPTR and the fence at 0, 1, 5, 20, 100, 500 ms after the wptr write
+    u32 fault_status, fault_addr_lo, fault_addr_hi;
+    int ok;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -74,6 +82,13 @@ void rn_gfx_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset,
 // into the CP_HQD_* registers the way gfx_v11_0_kiq_init_register does for the KIQ, then SET_UCONFIG_REG writes SCRATCH_REG0.
 // Needs rn_gfx_ring_test to have run first (it points the MEC at its firmware). Written from the Linux sources.
 void rn_compute_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, struct rn_compute_result *res);
+
+// First shader dispatch: on the compute queue that rn_compute_ring_test left active, a shader that is a single s_endpgm is set up
+// (SET_SH_REG: program address, resources, thread counts) and run as one workgroup of one thread (DISPATCH_DIRECT), followed by a
+// RELEASE_MEM that writes 0xF00DF00D to a fence in VRAM when the dispatch is done. Written from nvd.h and the register headers, and
+// from the packet layout of gfx_v11_0_ring_emit_fence; NOT yet run on hardware.
+void rn_compute_dispatch_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u64 shader_vram_offset, u64 fence_vram_offset,
+                              struct rn_dispatch_result *res);
 
 #ifdef __cplusplus
 }

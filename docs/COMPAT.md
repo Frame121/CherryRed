@@ -110,3 +110,13 @@ Not done: KIQ/MES, compute rings, doorbells, the GFX clear state and golden regi
 Notes: no doorbell (`CP_PQ_WPTR_POLL_CNTL.EN` on, the wptr is written into the polled shadow in memory and into `CP_HQD_PQ_WPTR_LO`); EOP buffer of 2 KB (`EOP_SIZE` 8); `CP_MQD_BASE_ADDR` points at a page with only the header (`0xC0310800`) set. Queue 2 of pipe 0 was chosen because MES leaves queues 2 and 3 of each MEC pipe to the driver (`compute_hqd_mask` 0xc in the Linux log); MES itself is not running here.
 
 Not done: a shader dispatch, KIQ/MES, doorbells, interrupts.
+
+## M4 step 5: the first shader dispatch (2026-10-30)
+
+`rednavi_dispatch_test=1` (after `rednavi_compute_test=1`, whose queue it reuses) runs a compute dispatch: a shader that is one `s_endpgm` (GFX11 SOPP opcode 48, `0xBFB00000`, followed by `s_code_end` padding to 256 bytes) in VRAM, `SET_SH_REG` packets for the program address (`COMPUTE_PGM_LO/HI`), `COMPUTE_PGM_RSRC1/2/3`, `COMPUTE_START_X..Z`, `COMPUTE_NUM_THREAD_X..Z`, the resource limits and the thread management masks, then `DISPATCH_DIRECT` 1x1x1 (initiator `COMPUTE_SHADER_EN | FORCE_START_AT_000 | ORDER_MODE | CS_W32_EN`) and a `RELEASE_MEM` (the layout of `gfx_v11_0_ring_emit_fence`) that writes `0xF00DF00D` to a fence in VRAM. Verified on the RX 7800 XT (`dispatch-test`): the fence changes from `0x0BADF00D` to `0xF00DF00D` within a millisecond, the read pointer reaches the end of the 48 dwords, no VM fault.
+
+The SET_SH_REG offset of a compute register is its absolute dword (GC segment 0 base `0x1260` plus the header offset, e.g. `COMPUTE_PGM_LO` 0x1bac) minus `0x2c00`. The `RELEASE_MEM` with `CACHE_FLUSH_AND_INV_TS_EVENT` (0x14) and `EVENT_INDEX` 5 runs when the dispatch has finished, which is what makes the fence mean "the shader is done".
+
+The `PGM_RSRC1/2` values (`0x002C0000`, `0x80`) are plausible defaults, not checked against compiler output; this shader touches no memory and no registers, so the first shader that does will test them.
+
+Not done: a shader that writes memory (needs GFX11 machine code for a global store and a VGPR address), shader memory configuration (`SH_MEM_*`), queue management through MES, GART, interrupts.

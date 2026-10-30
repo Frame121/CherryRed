@@ -489,4 +489,91 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
     grbmSelect(adev, 0, 0, 0, 0);
 }
 
+#define RN_PACKET3_SET_SH_REG 0x76u
+#define RN_PACKET3_SET_SH_REG_START 0x00002c00u
+#define RN_PACKET3_DISPATCH_DIRECT 0x15u
+#define RN_PACKET3_RELEASE_MEM 0x49u
+#define RN_CACHE_FLUSH_AND_INV_TS_EVENT 0x14u
+
+// Compute state registers (gc_11_0_x_offset.h, all in GC segment 0): the SET_SH_REG offset is the register's absolute dword minus 0x2c00.
+#define RN_COMPUTE_START_X 0x1ba4u
+#define RN_COMPUTE_NUM_THREAD_X 0x1ba7u
+#define RN_COMPUTE_PGM_LO 0x1bacu
+#define RN_COMPUTE_PGM_RSRC1 0x1bb2u
+#define RN_COMPUTE_RESOURCE_LIMITS 0x1bb5u
+#define RN_COMPUTE_PGM_RSRC3 0x1bc8u
+
+void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u64 shaderOff, u64 fenceOff, struct rn_dispatch_result *res) {
+    memset(res, 0, sizeof(*res));
+    const u64 shaderVa = vaBase + shaderOff, fenceVa = vaBase + fenceOff;
+    const u64 wptrOff = ringOff + 0x1008;
+    const u32 gcBase = adev->reg_offset[RN_GC_HWIP][0][0];
+    #define SHREG(reg) (gcBase + (reg) - RN_PACKET3_SET_SH_REG_START)
+
+    // the shader: s_endpgm (GFX11 SOPP opcode 48), then s_code_end padding up to 256 bytes
+    rn_vram_wr32(adev, shaderOff, 0xBFB00000u);
+    for (u32 o = 4; o < 256; o += 4) rn_vram_wr32(adev, shaderOff + o, 0xBF9F0000u);
+    rn_vram_wr32(adev, fenceOff, 0x0BADF00Du);
+    res->fence_before = rn_vram_rd32(adev, fenceOff);
+
+    u32 ring[64];
+    u32 n = 0;
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 2); ring[n++] = SHREG(RN_COMPUTE_PGM_LO);
+    ring[n++] = lower_32_bits(shaderVa >> 8); ring[n++] = upper_32_bits(shaderVa >> 8);
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 2); ring[n++] = SHREG(RN_COMPUTE_PGM_RSRC1);
+    ring[n++] = 0x002C0000u;                                                 // float mode 0xc0, DX10_CLAMP
+    ring[n++] = 0x00000080u;                                                 // TGID_X_EN
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 1); ring[n++] = SHREG(RN_COMPUTE_PGM_RSRC3); ring[n++] = 0;
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 3); ring[n++] = SHREG(RN_COMPUTE_START_X);
+    ring[n++] = 0; ring[n++] = 0; ring[n++] = 0;
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 3); ring[n++] = SHREG(RN_COMPUTE_NUM_THREAD_X);
+    ring[n++] = 1; ring[n++] = 1; ring[n++] = 1;
+    ring[n++] = RN_PACKET3(RN_PACKET3_SET_SH_REG, 6); ring[n++] = SHREG(RN_COMPUTE_RESOURCE_LIMITS);
+    ring[n++] = 0;                                                           // RESOURCE_LIMITS
+    ring[n++] = 0xFFFFFFFFu;                                                 // STATIC_THREAD_MGMT_SE0
+    ring[n++] = 0xFFFFFFFFu;                                                 // STATIC_THREAD_MGMT_SE1
+    ring[n++] = 0;                                                           // TMPRING_SIZE
+    ring[n++] = 0xFFFFFFFFu;                                                 // STATIC_THREAD_MGMT_SE2
+    ring[n++] = 0xFFFFFFFFu;                                                 // STATIC_THREAD_MGMT_SE3
+    ring[n++] = RN_PACKET3(RN_PACKET3_DISPATCH_DIRECT, 3);
+    ring[n++] = 1; ring[n++] = 1; ring[n++] = 1;
+    ring[n++] = 0x00000001u | 0x00000004u | 0x00000040u | 0x00008000u;      // COMPUTE_SHADER_EN | FORCE_START_AT_000 | ORDER_MODE | CS_W32_EN
+    // RELEASE_MEM as gfx_v11_0_ring_emit_fence: flush, then write a 32-bit value to the fence address
+    ring[n++] = RN_PACKET3(RN_PACKET3_RELEASE_MEM, 6);
+    ring[n++] = (1u << 22) | (1u << 21) | (1u << 13) | (1u << 12) | (3u << 25) | RN_CACHE_FLUSH_AND_INV_TS_EVENT | (5u << 8);
+    ring[n++] = (1u << 29);                                                  // DATA_SEL 1: 32-bit data, no interrupt
+    ring[n++] = lower_32_bits(fenceVa); ring[n++] = upper_32_bits(fenceVa);
+    ring[n++] = 0xF00DF00Du; ring[n++] = 0; ring[n++] = 0;
+    while (((8 + n) & 7) != 0) { ring[n++] = RN_PACKET3(RN_PACKET3_NOP, 0); ring[n++] = 0; }   // the ring already holds 8 dwords
+    res->step = 1;
+
+    const u32 start = 8;                                                     // after the SCRATCH_REG0 packet of the first test
+    for (u32 i = 0; i < n; i++) rn_vram_wr32(adev, ringOff + (start + i) * 4, ring[i]);
+    grbmSelect(adev, 1, 0, 0, 2);
+    rn_vram_wr32(adev, wptrOff, start + n);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO, start + n);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_HI, 0);
+    res->step = 2;
+    static const u32 sampleDelayMs[6] = {0, 1, 4, 15, 80, 400};              // cumulative: 0, 1, 5, 20, 100, 500 ms
+    for (u32 i = 0; i < 6; i++) {
+        if (sampleDelayMs[i]) msleep(sampleDelayMs[i]);
+        res->trace[i][0] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
+        res->trace[i][1] = rn_vram_rd32(adev, fenceOff);
+    }
+    for (int i = 0; i < 1500; i++) {                                         // up to 1.5 s more
+        res->fence = rn_vram_rd32(adev, fenceOff);
+        if (res->fence == 0xF00DF00Du) { res->ok = 1; break; }
+        msleep(1);
+    }
+    res->rptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
+    res->wptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
+    res->active = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
+    res->scratch = RREG32_SOC15(RN_GC, 0, regSCRATCH_REG0);
+    res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
+    res->fault_addr_lo = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
+    res->fault_addr_hi = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
+    grbmSelect(adev, 0, 0, 0, 0);
+    #undef SHREG
+}
+
 }
