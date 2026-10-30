@@ -2249,13 +2249,13 @@ void RedNaviProbe::sdmaTest() {
                                  IOLog("RedNavi: MES step %u\n", step);
                                  IOSleep(100);
                              }, this, &mr);
-                const char *mn[25] = {"step", "cntl", "p0_pc", "p0_pc10", "p1_pc", "p1_pc10", "kiq_active", "kiq_doorbell_ctl", "kiq_rptr", "sched_active",
-                                      "ring_fence", "api_status", "hw_res_ok", "add_ok", "q_active", "q_doorbell_ctl", "fault_status", "sched_version", "kiq_version", "sched_rptr", "sched_wptr", "mepc", "mcause", "ring_fence_late", "p0_pc_end"};
-                uint32_t mv[25] = {mr.step, mr.cntl, mr.p0_pc, mr.p0_pc10, mr.p1_pc, mr.p1_pc10, mr.kiq_active, mr.kiq_doorbell_ctl, mr.kiq_rptr,
+                const char *mn[27] = {"step", "cntl", "p0_pc", "p0_pc10", "p1_pc", "p1_pc10", "kiq_active", "kiq_doorbell_ctl", "kiq_rptr", "sched_active",
+                                      "ring_fence", "api_status", "hw_res_ok", "add_ok", "q_active", "q_doorbell_ctl", "fault_status", "sched_version", "kiq_version", "sched_rptr", "sched_wptr", "mepc", "mcause", "ring_fence_late", "p0_pc_end", "q_pipe", "q_queue"};
+                uint32_t mv[27] = {mr.step, mr.cntl, mr.p0_pc, mr.p0_pc10, mr.p1_pc, mr.p1_pc10, mr.kiq_active, mr.kiq_doorbell_ctl, mr.kiq_rptr,
                                    mr.sched_active, mr.ring_fence, mr.api_status, static_cast<uint32_t>(mr.hw_res_ok), static_cast<uint32_t>(mr.add_ok),
                                    mr.q_active, mr.q_doorbell_ctl, mr.fault_status,
-                                   mr.sched_version, mr.kiq_version, mr.sched_rptr, mr.sched_wptr, mr.mepc, mr.mcause, mr.ring_fence_late, mr.p0_pc_end};
-                rnPublish(this, "mes-start", mn, mv, 25);
+                                   mr.sched_version, mr.kiq_version, mr.sched_rptr, mr.sched_wptr, mr.mepc, mr.mcause, mr.ring_fence_late, mr.p0_pc_end, mr.q_pipe, mr.q_queue};
+                rnPublish(this, "mes-start", mn, mv, 27);
                 {
                     char ln[32][12];
                     const char *lp[32];
@@ -2266,7 +2266,7 @@ void RedNaviProbe::sdmaTest() {
                     }
                     rnPublish(this, "mes-log", lp, lv, 32);
                 }
-                if (mr.q_active & 1u) computeRingOff = 0x0C0A0000 + 0x30000;   // the queue the MES mapped
+                if ((mr.q_active & 1u) || mr.add_ok) computeRingOff = 0x0C0A0000 + 0x30000;   // the queue the MES mapped
             }
             // Opt-in (rednavi_kiq_test=1): the way Linux runs compute queues. The queue programmed by hand above is reset by the
             // firmware on the next doorbell after the boot-time tests; a queue mapped through the KIQ is the firmware's own.
@@ -2319,6 +2319,15 @@ void RedNaviProbe::sdmaTest() {
                     for (int ms = 0; ms < 1500 && B[1] != 0xFEEDFACEu; ms++) IOSleep(1);
                     r[2] = static_cast<uint32_t>(sub); r[3] = B[0]; r[4] = B[1]; r[5] = lower_32_bits(bos[a].gpuVa); r[6] = lower_32_bits(bva);
                     r[7] = B[0] == 0x600DC0DEu && B[1] == 0xFEEDFACEu;
+                    {
+                        uint32_t h[33];
+                        rn_scan_hqds(&gpu, h);
+                        char hn[33][8];
+                        const char *hp[33];
+                        for (int i = 0; i < 32; i++) { snprintf(hn[i], 8, "%c%d", "qdrw"[i % 4], i / 4); hp[i] = hn[i]; }
+                        snprintf(hn[32], 8, "count"); hp[32] = hn[32];
+                        rnPublish(this, "hqd-scan", hp, h, 33);
+                    }
                     watchBoA = a; watchBoB = b; watchIbDwords = nib;
                 }
                 const char *bn[8] = {"bo_a", "bo_b", "submit_rc", "result", "fence", "a_va_lo", "b_va_lo", "ok"};
