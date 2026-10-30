@@ -46,3 +46,24 @@ achieved and is not claimed: Stages 5.3–5.7 (PSP/SMU startup, VRAM/GTT,
 command submission, DCN 3.2.1 scanout, IOAccelerator/Metal) are unimplemented,
 no IOAccelerator service exists for this GPU, and `MTLCopyAllDevices()` is
 empty on this host.
+
+## Machine-specific facts (2026-10-31, Tahoe target)
+
+- OpenCore does NOT boot from the internal ESP (`disk0s1` "NO NAME" holds the
+  Windows boot files only). The live OpenCore boots from the FAT32 USB stick
+  mounted at `/Volumes/1401`, OC root `/Volumes/1401/EFI/OC`.
+- That volume is user-writable, so the install step needs NO sudo on this
+  machine — only the reboot does. `stage3_apply.sh` accepts the OC root as an
+  explicit argument (`sudo sh stage3_apply.sh /Volumes/1401/EFI/OC`) but the
+  identical steps were executed directly on 2026-10-31:
+  backups `EFI_BACKUP_CHERRYRED_STAGE3_20261031-005806` (USB) and
+  `stage3/EFI-backup-20261031-005806` (local), kext installed to
+  `Kexts/Navi33Bringup.kext` (ad-hoc signature verified on the copy),
+  boot-args extended to
+  `-v debug=0x100 keepsyms=1 revpatch=sbvmm -radvesa navi33bringup=1`,
+  `Kernel/Add` gained the Navi33Bringup entry (Enabled), `plutil -lint` OK.
+- Recovery property: with the USB stick removed the firmware falls back to
+  the internal Windows boot; re-plugging the stick restores OpenCore.
+- `Misc.Security.SecureBootModel` is Disabled and SIP has kext signing
+  disabled; ad-hoc kext injection matches how Lilu 1.7.3/WhateverGreen 1.7.2
+  already load on this exact setup.

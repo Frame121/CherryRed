@@ -2633,3 +2633,24 @@ Authorization received to hold all 4 commits until M6.
 - Stage 3 BLOCKED on privilege: the ESP (`disk0s1`) cannot be mounted without sudo (`diskutil mount` fails as user, rw and readOnly). Everything prepared for a single-sudo-command execution in `~/Developer/cherryred-macday-20261030/stage3/`: `stage3_apply.sh` (double ESP backup incl. USB, kext install, idempotent config.plist patch adding `Navi33Bringup.kext` + appending `navi33bringup=1`, plist lint, `--rollback` mode), `stage3_verify_after_reboot.sh` (no-sudo post-boot evidence capture + Stage 4 comparison harness), `STAGE3_HANDOFF.md`.
 - Stage 4 pre-comparison (userspace, BEFORE kernel survey) recorded in `stage3/evidence/STAGE4_PRE_COMPARISON_2026-10-31.md`: identity/revision/subsystem/PCIe Gen4 x8/VRAM all agree with Linux evidence; BAR4 (256 B I/O), BAR5 (1 MiB), BAR6 ROM (128 KiB) match Linux byte-for-byte (BAR5+ROM even at identical bases); the two 64-bit prefetchable BARs differ exactly as ReBAR-programmable BARs should (macOS: BAR0 256 MiB, BAR2 2 MiB; Linux: 8 GiB, 256 MiB). The kernel survey will read the ReBAR capability raw values to close this.
 - No kext was installed, activated, or loaded; no EFI/config/NVRAM/SIP/AMFI change; no reboot; no hardware register/MMIO/VRAM access; no git operations on any checkout. RX 7600 hardware acceleration remains NOT achieved and is not claimed: no IOAccelerator service exists, `MTLCopyAllDevices()` is empty, and Stages 5.3–5.7 (PSP/SMU startup, VRAM/GTT, command submission, DCN scanout, IOAccelerator/Metal) are unimplemented.
+
+
+## 2026-10-31 — Stage 3 installation executed (OpenCore on the USB stick)
+
+- Discovery: the live OpenCore boots from the FAT32 USB stick (`/Volumes/1401`,
+  OC root `/Volumes/1401/EFI/OC`), not from the internal ESP; `disk0s1` holds
+  only Windows boot files. The first `stage3_apply.sh` run failed on the ESP
+  because of a mount-point-with-space parse bug and then an `EFI/OC` mismatch;
+  both fixed (explicit OC-root argument, `-f` checks, full-line Mount Point
+  parsing). The failed run left the ESP untouched; the follow-up `shutdown`
+  rebooted the machine into an unchanged configuration.
+- Installation (no sudo required — the USB is user-writable): whole-OC-folder
+  backups to `EFI_BACKUP_CHERRYRED_STAGE3_20261031-005806` (USB) and
+  `stage3/EFI-backup-20261031-005806` (local); `Navi33Bringup.kext` copied to
+  `Kexts/` (ad-hoc signature verified on the copy); boot-args appended with
+  `navi33bringup=1`; `Kernel/Add` appended with the entry (Enabled);
+  `plutil -lint` OK. `SecureBootModel` is Disabled; Lilu/WhateverGreen already
+  inject through the same path.
+- Pending: one reboot (operator), then `stage3_verify_after_reboot.sh` for the
+  kernel-survey evidence. Still no hardware acceleration claim: the scaffold
+  performs PCI config-space reads only.
