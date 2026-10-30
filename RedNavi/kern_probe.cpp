@@ -1706,6 +1706,25 @@ void RedNaviProbe::sdmaTest() {
         for (int i = 0; i < 8; i++) for (int j = 0; j < 3; j++) tv[i * 3 + j] = gr.trace[i][j];
         tv[24] = gr.fault_status; tv[25] = gr.fault_addr_lo; tv[26] = gr.fault_addr_hi;
         rnPublish(this, "gfx-trace", tn, tv, 27);
+
+        // Opt-in (rednavi_compute_test=1, after the gfx test, which sets the MEC entry points): a first command on a compute queue.
+        uint32_t comp = 0;
+        if (PE_parse_boot_argn("rednavi_compute_test", &comp, sizeof(comp)) && comp == 1) {
+            struct rn_compute_result cr;
+            rn_compute_ring_test(&gpu, kRNVramMcBase, 0x0C020000, 4096, &cr);
+            const char *cn[33] = {"step", "ok", "scratch", "active_rd", "pq_control_rd", "mqd_base_rd", "rptr", "wptr", "rptr_shadow", "ring0",
+                                  "fault_status", "fault_addr_lo", "fault_addr_hi",
+                                  "t0_cntl", "t0_active", "t0_rptr", "t1_cntl", "t1_active", "t1_rptr", "t2_cntl", "t2_active", "t2_rptr",
+                                  "t5_cntl", "t5_active", "t5_rptr", "t10_cntl", "t10_active", "t10_rptr", "t20_cntl", "t20_active", "t20_rptr",
+                                  "t50_cntl", "t100_cntl"};
+            uint32_t cv[33] = {cr.step, static_cast<uint32_t>(cr.ok), cr.scratch, cr.active_rd, cr.pq_control_rd, cr.mqd_base_rd, cr.rptr, cr.wptr,
+                               cr.rptr_shadow, cr.ring0, cr.fault_status, cr.fault_addr_lo, cr.fault_addr_hi,
+                               cr.trace[0][0], cr.trace[0][1], cr.trace[0][2], cr.trace[1][0], cr.trace[1][1], cr.trace[1][2],
+                               cr.trace[2][0], cr.trace[2][1], cr.trace[2][2], cr.trace[3][0], cr.trace[3][1], cr.trace[3][2],
+                               cr.trace[4][0], cr.trace[4][1], cr.trace[4][2], cr.trace[5][0], cr.trace[5][1], cr.trace[5][2],
+                               cr.trace[6][0], cr.trace[7][0]};
+            rnPublish(this, "compute-test", cn, cv, 33);
+        }
     }
 #endif
 }

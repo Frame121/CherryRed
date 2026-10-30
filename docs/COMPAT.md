@@ -102,3 +102,11 @@ What it took:
 - Decoding a fault: `CID` indexes the client list in `gfxhub_v3_0_3.c` (6 = CPG), `RW` 0 is a read.
 
 Not done: KIQ/MES, compute rings, doorbells, the GFX clear state and golden registers, interrupts, and doing any of this from system memory (GART). A page-sized zeroed MQD works for one ring; real queue management needs the MQD filled in.
+
+## M4 step 4: the first compute queue command (2026-10-30)
+
+`rednavi_compute_test=1` (after `rednavi_gfx_test=1`, which points the MEC at its firmware) activates the four MEC pipes (`gfx_v11_0_cp_compute_enable`) and programs one hardware queue (MEC 1, pipe 0, queue 2) straight into the `CP_HQD_*` registers with the values `gfx_v11_0_compute_mqd_init` would put in the MQD, the way `gfx_v11_0_kiq_init_register` does for the KIQ. A `SET_UCONFIG_REG SCRATCH_REG0 = 0xDEADBEEF` packet runs from a ring in VRAM. Verified on the RX 7800 XT (`compute-test`): `SCRATCH_REG0` reads `0xDEADBEEF`, the read pointer reaches 8 dwords within a millisecond, no VM fault, the queue stays active.
+
+Notes: no doorbell (`CP_PQ_WPTR_POLL_CNTL.EN` on, the wptr is written into the polled shadow in memory and into `CP_HQD_PQ_WPTR_LO`); EOP buffer of 2 KB (`EOP_SIZE` 8); `CP_MQD_BASE_ADDR` points at a page with only the header (`0xC0310800`) set. Queue 2 of pipe 0 was chosen because MES leaves queues 2 and 3 of each MEC pipe to the driver (`compute_hqd_mask` 0xc in the Linux log); MES itself is not running here.
+
+Not done: a shader dispatch, KIQ/MES, doorbells, interrupts.

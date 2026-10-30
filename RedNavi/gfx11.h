@@ -44,6 +44,14 @@ struct rn_gfx_result {
     int ok;
 };
 
+struct rn_compute_result {
+    u32 step;
+    u32 scratch, active_rd, pq_control_rd, mqd_base_rd, rptr, wptr, rptr_shadow, ring0;
+    u32 trace[8][3];                          // CP_MEC_RS64_CNTL, CP_HQD_ACTIVE, CP_HQD_PQ_RPTR at 0, 1, 2, 5, 10, 20, 50, 100 ms after the wptr write
+    u32 fault_status, fault_addr_lo, fault_addr_hi;
+    int ok;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -61,6 +69,11 @@ void rn_sdma0_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u3
 // SCRATCH_REG0 with SET_UCONFIG_REG. Needs rn_gfxhub_enable and the RLC booted. Written from the Linux sources, NOT yet run on hardware.
 void rn_gfx_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, const struct rn_cp_start *pc,
                       struct rn_gfx_result *res);
+
+// First command on a compute queue: the MEC pipes are activated and one hardware queue (MEC 1, pipe 0, queue 2) is programmed straight
+// into the CP_HQD_* registers the way gfx_v11_0_kiq_init_register does for the KIQ, then SET_UCONFIG_REG writes SCRATCH_REG0.
+// Needs rn_gfx_ring_test to have run first (it points the MEC at its firmware). Written from the Linux sources.
+void rn_compute_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, struct rn_compute_result *res);
 
 #ifdef __cplusplus
 }
