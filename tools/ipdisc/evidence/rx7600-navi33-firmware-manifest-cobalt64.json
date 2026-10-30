@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "title": "RX 7600 (Navi 33) macOS bring-up firmware + IP manifest",
+  "date": "2026-10-25",
+  "gpu": {
+    "name": "AMD Radeon RX 7600",
+    "pci_vendor": "0x1002",
+    "pci_device": "0x7480",
+    "subsystem_vendor": "0x148c",
+    "subsystem_device": "0x2421",
+    "gfx_target": "gfx1102"
+  },
+  "provenance": {
+    "evidence_root": "RX7600-Linux-Evidence",
+    "ip_discovery_sha256": "4b809b3279bd9fd164456f5fcdcb9743d2b4289acdd77f9ac2a2cd77b75e6c89",
+    "capture_kernel": "7.2.11-arch1-1",
+    "firmware_package": "linux-firmware-amdgpu 20260916-1",
+    "source_clone_commit": "64a90897d3c539033f24105968e3513957e70819",
+    "source_clone": "RX7600-Linux-Evidence/source-investigation/arch-linux-v7.2.11",
+    "note": "IP versions and firmware names are taken from the project's own captured evidence (boot journal in firmware-dependency-audit.md and firmware-source-correlation.json), not from generic RDNA 3 defaults. This is Linux-side evidence of hardware behavior, not proof the blobs are loadable or legally redistributable on macOS."
+  },
+  "ip_blocks": {
+    "GC": { "hwid": 11, "version": "11.0.2", "note": "gfx1102 graphics core" },
+    "SDMA": { "hwid": [42, 43], "version": "6.0.2", "note": "SDMA0/SDMA1" },
+    "VCN": { "hwid": 12, "version": "4.0.4", "note": "video codec (UVD/VCN alias)" },
+    "DCN": { "version": "3.2.1", "note": "Display Core; dmcub firmware dcn_3_2_1_dmcub.bin" },
+    "PSP": { "version": "13.0.7", "note": "Platform Security Processor" },
+    "SMU": { "version": "13.0.7", "note": "System Management Unit" }
+  },
+  "unresolved_hwids": [
+    {
+      "hwid": 282,
+      "instance": 0,
+      "version": "13.0.2",
+      "label": "UNKNOWN_HWID_282",
+      "status": "semantic name unresolved in checked v7.2.11-arch1 source (soc15_hw_ip.h has no 282; gap between DAZ_HWID 274 and ATU_HWID 294)",
+      "sysfs_corroborated": true
+    },
+    {
+      "hwid": 286,
+      "instance": 0,
+      "version": "4.0.2",
+      "label": "UNKNOWN_HWID_286",
+      "status": "semantic name unresolved in checked v7.2.11-arch1 source (soc15_hw_ip.h has no 286)",
+      "sysfs_corroborated": true
+    }
+  ],
+  "firmware": [
+    { "path": "amdgpu/gc_11_0_2_imu.bin",  "ip": "GC",   "role": "imu",  "required": true,  "source_ref": "amdgpu/imu_v11_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/gc_11_0_2_me.bin",   "ip": "GC",   "role": "me",   "required": true,  "source_ref": "amdgpu/gfx_v11_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/gc_11_0_2_mec.bin",  "ip": "GC",   "role": "mec",  "required": true,  "source_ref": "amdgpu/gfx_v11_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/gc_11_0_2_mes.bin",   "ip": "GC",   "role": "mes",  "required": true,  "source_ref": "amdgpu/mes_v11_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/gc_11_0_2_mes1.bin",  "ip": "GC",   "role": "mes1", "required": true,  "source_ref": "amdgpu/mes_v11_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/gc_11_0_2_mes_2.bin", "ip": "GC",   "role": "mes2", "required": true,  "source_ref": "amdgpu/mes_v11_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/gc_11_0_2_pfp.bin",   "ip": "GC",   "role": "pfp",  "required": true,  "source_ref": "amdgpu/gfx_v11_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/gc_11_0_2_rlc.bin",   "ip": "GC",   "role": "rlc",  "required": true,  "source_ref": "amdgpu/gfx_v11_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/sdma_6_0_2.bin",      "ip": "SDMA", "role": "sdma", "required": true,  "source_ref": "amdgpu/sdma_v6_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/vcn_4_0_4.bin",       "ip": "VCN",  "role": "vcn",  "required": true,  "source_ref": "amdgpu/amdgpu_vcn.c",  "module_firmware": false, "optional": false },
+    { "path": "amdgpu/dcn_3_2_1_dmcub.bin", "ip": "DCN",  "role": "dmub", "required": true,  "source_ref": "display/amdgpu_dm/amdgpu_dm.c", "module_firmware": false, "optional": false },
+    { "path": "amdgpu/psp_13_0_7_sos.bin",  "ip": "PSP",  "role": "sos",  "required": true,  "source_ref": "amdgpu/psp_v13_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/psp_13_0_7_ta.bin",   "ip": "PSP",  "role": "ta",   "required": true,  "source_ref": "amdgpu/psp_v13_0.c",   "module_firmware": true,  "optional": false },
+    { "path": "amdgpu/smu_13_0_7.bin",      "ip": "SMU",  "role": "smu",  "required": true,  "source_ref": "pm/swsmu/smu13/smu_v13_0.c", "module_firmware": true, "optional": false }
+  ],
+  "optional_firmware": [
+    { "path": "amdgpu/rap_*.bin", "note": "RAP TA — reported 'optional rap ta ucode is not available'; not fatal to Linux boot" },
+    { "path": "amdgpu/securedisplay_*.bin", "note": "secure-display TA — reported optional; not fatal to Linux boot" }
+  ],
+  "evidence_limits": [
+    "Static source reference + local file presence only; not proof requested, loaded, macOS-compatible, or legally redistributable.",
+    "Linux firmware presence is not a substitute for a macOS driver interface; do not copy blobs into a kext on filename/version similarity alone.",
+    "No firmware was flashed, replaced, deleted, or modified by this manifest."
+  ]
+}

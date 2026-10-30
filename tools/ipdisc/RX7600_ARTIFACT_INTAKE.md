@@ -192,8 +192,19 @@ or establish that Cobalt64/macOS supports the card. No `BOARD_SPECIFIC`
 status is assigned until board attribution is independently reviewed, and
 no `TARGET_TESTED` status is assigned without an authorized target test.
 
-## Current intake state
+## Current intake state (updated 2026-10-30)
 
-No real board-attributed artifact was supplied or acquired for this phase.
-Existing generated fixtures remain explicitly synthetic. The physical RX
-7600 IP inventory remains **UNRESOLVED**, and the project remains paused.
+A 10,240-byte Linux AMDGPU debugfs capture candidate is now preserved at
+`evidence/rx7600-amdgpu-discovery-2026-10-23.bin`. Its SHA-256 matches the
+accompanying 2026-10-23 evidence manifest, and strict parsing succeeds with
+39 IP records across one die. See
+`evidence/RX7600_IP_DISCOVERY_ANALYSIS_2026-10-30.md` and the adjacent
+hash-bound provenance sidecar.
+
+The source manifest and Linux inventory logs are user-maintained and not
+cryptographically authenticated. The capture remains **UNVERIFIED** for
+independent provenance and board attribution; parser success alone does not
+upgrade it to `BOARD_SPECIFIC`. The physical IP versions are now directly
+observed in this capture, while exact source-to-binary mapping, VBIOS, firmware
+compatibility, and macOS driver support remain unresolved. Existing generated
+fixtures remain explicitly synthetic.

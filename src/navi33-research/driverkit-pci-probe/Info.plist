@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>Navi33PciProbe</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.cherryred.navi33-pci-probe</string>
+    <key>CFBundleName</key>
+    <string>Navi33PciProbe</string>
+    <key>CFBundlePackageType</key>
+    <string>DEXT</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>DriverKit</string>
+    </array>
+    <key>OSBundleUsageDescription</key>
+    <string>Research-only PCI identity attachment probe; does not initialize GPU hardware.</string>
+    <key>IOKitPersonalities</key>
+    <dict>
+        <key>Navi33PciProbe</key>
+        <dict>
+            <key>CFBundleIdentifierKernel</key>
+            <string>com.apple.kpi.iokit</string>
+            <key>IOClass</key>
+            <string>IOUserService</string>
+            <key>IOMatchCategory</key>
+            <string>org.cherryred.navi33-pci-probe</string>
+            <key>IOPCIPrimaryMatch</key>
+            <string>0x74801002</string>
+            <key>IOPCISecondaryMatch</key>
+            <string>0x2421148c</string>
+            <key>IOProviderClass</key>
+            <string>IOPCIDevice</string>
+            <key>IOUserClass</key>
+            <string>Navi33PciProbe</string>
+            <key>IOUserServerName</key>
+            <string>org.cherryred.navi33-pci-probe</string>
+        </dict>
+    </dict>
+</dict>
+</plist>

@@ -1,29 +1,35 @@
-# Navi33Survey
+# navi33-survey
 
-**Status: first macOS-side bring-up component; not a functional graphics driver.** This opt-in, read-only IOKit service targets the evidenced AMD Radeon RX 7600 board (`1002:7480`, subsystem `148c:2421`). It publishes PCI identity and OS-assigned BAR metadata as `Navi33Survey,*` IORegistry properties, and reports PCIe link and Resizable BAR status. It does not map BARs, access GPU registers, load firmware, initialize the GPU, drive display output, or enable acceleration/Metal. The runtime match is narrower than the plist's vendor/device personality: `probe` and `start` also verify the captured subsystem IDs and refuse other RX 7600 board variants.
+Read-only PCI survey kext for the captured AMD Radeon RX 7600 board (Navi 33, RDNA 3, PCI `1002:7480`, subsystem `148c:2421`).
 
-## Build prerequisites
+**Status: build and link validated on the connected x86_64 macOS host; never loaded or tested against hardware.** This remains a read-only PCI survey kext, not a graphics driver.
 
-Build only on a macOS host with Xcode Command Line Tools and a compatible, legally obtained MacKernelSDK containing `Headers/IOKit/IOService.h` and x86_64 `libkmodc++.a`/`libkmod.a`. This repository checkout does not contain that SDK. Linux host builds are not kext builds.
+## What it does
+- Matches only PCI `1002:7480` / subsystem `148c:2421`, and only when the boot-arg `navi33survey=1` is set.
+- Logs (via `IOLog`): PCI ids/revision/subsystem, BAR physical addresses and sizes,
+  PCIe link speed/width, Resizable BAR capability and current size.
+
+## What it does NOT do
+- No register BAR mapping, no MMIO reads or writes, no VRAM access, no firmware, no display.
+- It does not initialise the GPU and gives no acceleration.
+
+## Build check (build only)
+
+The build uses Xcode and the public [MacKernelSDK](https://github.com/acidanthera/MacKernelSDK).
+From the repository root, place that dependency under the ignored `build/deps` directory
+and run:
 
 ```sh
-make -C src/navi33-survey test
-make -C src/navi33-survey all MKSDK=/absolute/path/to/MacKernelSDK
+git clone --depth 1 https://github.com/acidanthera/MacKernelSDK.git build/deps/MacKernelSDK
+make -C src/navi33-survey
 ```
 
-The build target intentionally fails early if the SDK or required libraries are absent. It targets x86_64 / macOS 11 kernel ABI and must be reviewed against the exact target macOS version before use. A successful link alone does not prove that the kernel will load the bundle.
+The ad-hoc signed bundle is written to `build/navi33-survey/Navi33Survey.kext`.
+The Makefile only compiles, links, and validates the bundle. It does not install,
+activate, or load the kext, edit EFI, or change security settings.
 
-## Safety and validation
-
-The service requires the exact boot argument `navi33survey=1` and accepts only `1002:7480`, subsystem `148c:2421`. Run static tests with `make -C src/navi33-survey test`; these tests do not compile or load a kext. Do not install or load an unvalidated bundle on the daily system. Validate first on a disposable macOS VM; note that the current QEMU VM exposes `vmware-svga`, not the physical RX 7600, so it cannot validate RX 7600 hardware behaviour.
-
-On a successful start, IORegistry exposes the PCI identity fields and one address/length/register tuple for each BAR macOS reports, plus PCIe link and Resizable BAR capability data. It marks zero-length or overflowing address ranges invalid and treats an empty BAR inventory as incomplete. These are host-assigned resource facts only. The service does not explicitly open the PCI provider, change PCI command bits, or map the resources.
-
-## Not implemented
-
-- RX 7600 GPU initialization, firmware and memory management
-- Interrupts, command submission, VRAM management
-- Display engine / scanout / HDMI/DisplayPort output
-- Hardware acceleration, OpenGL/Metal integration
-
-These require separate implementation and hardware-specific evidence. This project must not label the survey bundle as a completed RX 7600 driver.
+The service is opt-in with `navi33survey=1`. It reads PCI identity/configuration
+and assigned BAR metadata, then logs PCIe link and ReBAR information. It does not
+map BARs, read/write GPU registers, load firmware, initialize the GPU, create
+Metal/IOAccelerator services, or provide graphics acceleration. A successful
+build is not hardware validation.

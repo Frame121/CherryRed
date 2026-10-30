@@ -176,3 +176,22 @@ branches, PCI database names, synthetic fixtures, or Navi48 implementation.
 Board identity is now verified, but until an IP Discovery artifact or
 equivalent capture is independently reviewed, **all board IP and firmware rows
 remain UNVERIFIED**, and Phase 4 dispatch implementation is not justified.
+
+
+## Capture recovery update — 2026-10-30
+
+The earlier evidence-gap statements above predate recovery of the raw Linux
+AMDGPU debugfs capture. The 10,240-byte binary is now preserved at
+`evidence/rx7600-amdgpu-discovery-2026-10-23.bin`; its SHA-256 matches the
+original package manifest and strict parser validation reports 39 IP records
+across one die. GC is directly reported as 11.0.2, SDMA0 as 6.0.2, MMHUB as
+3.0.2, UMC instances 0-3 as 8.11.0, and other versions are documented in
+`evidence/RX7600_IP_DISCOVERY_ANALYSIS_2026-10-30.md`.
+
+The capture's associated Linux manifest and inventory logs record PCI
+`1002:7480`, subsystem `148c:2421`, BDF `0000:03:00.0`, and AMDGPU binding.
+Because these are user-maintained records rather than authenticated
+attestations, artifact provenance and board attribution remain **UNVERIFIED**.
+This closes the missing-raw-binary gap but not the independent provenance,
+VBIOS, firmware compatibility, macOS initialization, or Metal acceleration
+gaps. Do not promote the artifact to TARGET_TESTED or claim macOS support.

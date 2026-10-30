@@ -1,5 +1,53 @@
 # Recovery Checkpoint
 
+- **LATEST CHECKPOINT: 2026-10-30 — BOARD FIRMWARE MANIFEST + VBIOS IDENTITY
+  INTAKE COMPLETE; SESSION RUNS DIRECTLY ON THE TAHOE TARGET.** This session
+  executes on the target Mac itself (macOS 26.7.1 Tahoe x86_64, RX 7600
+  enumerated), so no Remote Desktop hop was required. Work completed:
+  1. Full baseline re-validated on the target: host C++ suites 35+32+21+16+18+
+     18+10+22 checks, IPD bounds (8 fixtures + 512 malformed), Navi48
+     isolation 4/4, DriverKit probe contract 4/4; Python suites 31+9+8+7;
+     survey kext rebuilt (codesign/plutil OK, NOT installed/loaded);
+     DriverKit probe rebuilt (build-only); Metal probes rebuilt — generic
+     runtime exits 2 (`MTLCreateSystemDefaultDevice()` nil) and the exact
+     RX 7600 probe exits 2 (`MTLCopyAllDevices()` empty). Metal dispatch
+     remains BLOCKED, reported as such.
+  2. Strict re-parse of the captured IP Discovery artifact: hash matches
+     `4b809b32…b75e6c89`; 39 records; GC 11.0.2, MP0/MP1 13.0.7, SDMA0/1
+     6.0.2, UMC 8.11.0, MMHUB 3.0.2, HDP 6.0.1, OSSSYS 6.0.2, DMU 3.2.1,
+     SMUIO 13.0.8; the volume original was re-hashed and is byte-identical.
+  3. The Cobalt64 evidence package on the mounted volume contained
+     board-attributed records not yet in the repo. Imported byte-preserving
+     copies: `evidence/rx7600-navi33-firmware-manifest-cobalt64.json` (14
+     required firmware files, gfx_target gfx1102, linux-firmware 20260916-1,
+     kernel clone `64a90897`) and a derived
+     `evidence/rx7600-vbios-identity-2026-10-23.json` recording ATOM BIOS
+     `113-EXT86626-001`, ver `022.003.001.027.000001`, 2023/04/25 from the
+     board's own Linux boot journal, hash-bound to the journal
+     (`db85fb97…c9818a`), plus runtime corroboration (8176M GDDR6 128-bit,
+     SMU OK, DCN 3.2.384, DMUB 0x07003300, VCN ENC 1.24/DEC 9 rev 34, SE 2 /
+     SH 2 / CU 8 / 32 active CUs). Identity strings only — NOT a VBIOS dump.
+  4. New `verify_board_firmware_manifest.py` + 17 synthetic tests
+     (`test_board_firmware_manifest.py`): cross-checks the manifest's firmware
+     filename prefixes against the parsed artifact versions, requires role
+     coverage, keeps HWIDs 282/286 explicitly unresolved, checks the VBIOS
+     record's exact PCI identity and `authentication: NONE`, and binds the
+     source journal hash. 17/17 pass; real-evidence run PASS with journal
+     binding. Evidence doc:
+     `evidence/RX7600_BOARD_FIRMWARE_EVIDENCE_2026-10-30.md`.
+  - **Effect on the C0 gate:** the "board-attributed IP Discovery + VBIOS
+    record" prerequisite is materially advanced (both artifacts now exist and
+    cross-check). Still open: VBIOS byte payload, independent authentication
+    of user-maintained records, per-blob hash/license review. No firmware blob
+    was copied into the repo. No hardware access, kext load, firmware load,
+    MMIO/VRAM, EFI/SIP/AMFI change, or reboot was performed. RX 7600 hardware
+    acceleration remains NOT achieved and is not claimed.
+- **Next gate:** independently authenticate the board records (e.g. a fresh
+  authorized Linux capture), acquire and hash the actual firmware blobs and
+  the VBIOS image under a reviewed license path, then begin the separately
+  reviewed GFX11 (C1) implementation with a tested recovery path. Do not
+  attempt hardware init, ID spoofing, or kext activation without them.
+
 - **LATEST CHECKPOINT: 2026-10-21 — PHASE 25 BOARD PRESENCE VERIFIED; TWO
   UNCOMMITTED SOURCE FIXES RESTORED AND HEAD REGRESSIONS CLEARED.** `1002:7480`
   moved from `UNVERIFIED (hardware presence unknown)` to **presence and PCI
@@ -1021,3 +1069,39 @@
   changes outside `tools/ipdisc/`; implementation work; dependency install;
   stage, commit, clean, reset, stash, or delete; claims of RX 7600 macOS
   support.
+
+
+## 2026-10-30 update — physical IP Discovery artifact recovered
+
+Current state supersedes older checkpoint statements that no raw IP Discovery
+binary was present. A previous Linux capture was found on the mounted
+`GameAndFile` volume under `Cobalt64/RX7600-Linux-Evidence` and copied
+byte-for-byte into the CherryRed repo:
+
+- `evidence/rx7600-amdgpu-discovery-2026-10-23.bin` (10,240 bytes)
+- SHA-256: `4b809b3279bd9fd164456f5fcdcb9743d2b4289acdd77f9ac2a2cd77b75e6c89`
+- Strict parser: PASS; one die, 39 IP records, 30 unique numeric HWIDs.
+- Parsed JSON and hash-bound provenance sidecar are adjacent to the binary.
+- Detailed report: `evidence/RX7600_IP_DISCOVERY_ANALYSIS_2026-10-30.md`.
+- GC 11.0.2; SDMA0 6.0.2; MMHUB 3.0.2; HDP 6.0.1; UMC 8.11.0 (instances
+  0-3); NBIF 4.3.1; MP0/MP1 13.0.7; OSSSYS 6.0.2; DMU 3.2.1.
+- Associated user-maintained Linux manifest/logs record Archcraft kernel
+  7.2.11-arch1-1, PCI 0000:03:00.0, 1002:7480, subsystem 148c:2421, and
+  amdgpu. Provenance remains UNVERIFIED pending independent authentication.
+
+Metal Toolchain 17F42 is installed. Generic Metal probe builds but runtime
+returns exit 2 because MTLCreateSystemDefaultDevice() is nil. Exact RX7600
+probe builds but runtime returns exit 2 because MTLCopyAllDevices() is empty.
+System Profiler reports RX 7600 PCI presence but No Kext Loaded. Metal hardware
+dispatch remains BLOCKED; no CPU fallback or spoofing is accepted.
+
+Read-only Linux capture helper: `tools/ipdisc/capture_rx7600_ip_discovery.sh`.
+It requires Linux with the exact device bound to amdgpu and debugfs mounted.
+Do not run it on macOS. No VBIOS has been acquired or authenticated.
+
+Validation on 2026-10-30: IP Discovery parser 30/30; firmware manifest tests
+9/9; Linux inventory collector tests 8/8; Navi33 host suite 172 checks passed;
+IPD bounds 8 fixtures + 512 malformed inputs; Navi48 isolation 4/4; PCI probe
+contract 4/4; Metal build contract PASS; git diff --check PASS. No hardware
+initialization, kext load, firmware load, BAR/MMIO, GPU reset, EFI/SIP/AMFI
+change, or reboot was performed.

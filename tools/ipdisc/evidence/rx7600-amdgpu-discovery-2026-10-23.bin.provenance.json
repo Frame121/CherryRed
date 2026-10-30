@@ -1,0 +1,14 @@
+{
+  "evidence_id": "RX7600-IPD-2026-10-23-0000-03-00-0",
+  "claim": "Raw AMD IP Discovery binary captured from the RX 7600 PCI function and preserved with its original evidence package.",
+  "artifact_path": "tools/ipdisc/evidence/rx7600-amdgpu-discovery-2026-10-23.bin",
+  "source_repository": "User-provided local Cobalt64 RX7600-Linux-Evidence package on external volume",
+  "source_revision": "Archcraft Linux kernel 7.2.11-arch1-1; exact source build provenance not independently authenticated",
+  "source_file_or_section": "/sys/kernel/debug/dri/1/amdgpu_discovery (as recorded in MANIFEST.txt); original capture path /home/framelpo/rx7600-evidence/amdgpu_discovery.bin",
+  "checksum": "sha256:4b809b3279bd9fd164456f5fcdcb9743d2b4289acdd77f9ac2a2cd77b75e6c89",
+  "applies_to": "Recorded capture target PCI 0000:03:00.0, vendor/device 1002:7480, subsystem 148c:2421, driver amdgpu",
+  "verification_method": "Byte-for-byte copy from preserved evidence package; SHA-256 matched prior recorded digest; strict offline IP Discovery parser and binary/table checksum review",
+  "verification_status": "UNVERIFIED",
+  "limitations": "Provenance is based on the accompanying user-maintained manifest and Linux inventory logs; metadata is not cryptographically authenticated. Strict parser validates structure/checksums only. Does not establish firmware compatibility, macOS support, or successful GPU initialization.",
+  "artifact_class": "PHYSICAL_CAPTURE"
+}

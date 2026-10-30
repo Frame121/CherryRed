@@ -1,9 +1,10 @@
 # Navi 33 offline research model
 
-This standalone C++17 module models identity and evidence for the RX 7600
-research target. It is not part of `Navi48Bringup.kext`, has no IOKit or
-hardware-access dependencies, and contains no initialization, firmware-loading,
-register, memory, or macOS integration code.
+This standalone C++17 module models identity, evidence, and hardware-independent
+bring-up/integration contracts for the RX 7600 research target. It is not part
+of `Navi48Bringup.kext`, has no IOKit or hardware-access dependencies, and
+contains no hardware initialization, firmware-loading, register access, VRAM/GART
+management, IOAccelerator, Metal, or display integration implementation.
 
 The `1002:7480` identity is accepted only into the `Navi33ResearchOnly` route.
 Navi 48 is modeled as a separate family and is represented by
@@ -172,3 +173,118 @@ g++ -std=c++17 -Wall -Wextra -Werror -pedantic -fno-exceptions -fno-rtti \
   -o /tmp/cobalt64-bringup-plan-test
 /tmp/cobalt64-bringup-plan-test
 ```
+
+## macOS host-side validation
+
+On an x86_64 macOS host with Apple Command Line Tools installed, run:
+
+```sh
+src/navi33-research/tools/run_macos_host_tests.sh
+```
+
+The script compiles the portable Navi 33 research model, lifecycle tests,
+firmware metadata/range/queue host models, and integration contracts with Apple
+Clang. It runs the IP Discovery parser bounds suite and checks that Navi 33
+routing remains isolated from Navi 48 initialization and that the DriverKit probe
+is limited to its documented read-only BAR metadata scope. Build products are
+created in a temporary directory and removed on exit.
+
+**Scope limit:** these are host-side tests only. The added address allocator,
+queue/fence, display-layout, firmware metadata, and readiness logic are models;
+they do not allocate VRAM, configure GART, submit GPU packets, load firmware,
+create IOAccelerator services, register a Metal device, or drive a display. They
+do not build or load a kernel extension, inspect or initialize GPU registers,
+validate a physical card's IP Discovery table, or enable graphics acceleration.
+Navi 33 hardware initialization and macOS integration remain unimplemented.
+
+
+## DriverKit PCI identity probe (build only)
+
+With Xcode and the DriverKit SDK installed on the x86_64 Mac, run:
+
+```sh
+src/navi33-research/driverkit-pci-probe/build_compile_check.sh
+```
+
+This invokes Apple's IIG compiler and Clang for the DriverKit 25.5 target,
+compiles the PCI personality stub for `1002:7480` / subsystem `148c:2421`, links
+an unsigned `.dext` bundle, and validates its property list and DriverKit Mach-O
+target. Build products go under the repository's ignored `build/` directory.
+
+**Scope limit:** this build-only DriverKit prototype has no host app or approved
+entitlements. It is not signed, installed, or activated, and it does not access
+the GPU. If activated in a future, separately reviewed test, it only logs that
+its matching PCI personality started. It does not implement GPU initialization,
+firmware, memory management, queues, IOAccelerator, display, or Metal, so it is
+not RX 7600 acceleration support. Host-side contracts elsewhere in this module
+are planning/test models only and do not extend this probe's hardware behavior.
+
+
+## Read-only macOS graphics lag diagnostic
+
+From the repository root, run:
+
+```sh
+tools/diagnostics/macos_gpu_lag_report.sh
+```
+
+The script writes a short report to the system temporary directory. It records the macOS build, GPU/VRAM and kext status, PCI and subsystem IDs from a filtered IORegistry query, a summary of registered `IOAccelerator` services, public Metal device enumeration, a one-time `WindowServer` CPU sample, current Reduce Motion/Reduce Transparency settings, and recent matching WindowServer log messages. It intentionally avoids full IORegistry dumps and does not change system settings, modify EFI, or load/unload any kext.
+
+A missing `IOAccelerator` service plus a 7 MB reported VRAM value and `Kernel Extension Info: No Kext Loaded` is strong evidence that the RX 7600 does not have a functioning macOS graphics driver in the current boot. This diagnostic is not itself a fix or a GPU driver. The portable Navi 33 tests remain research-only and must not be described as acceleration support.
+
+
+## Metal and display integration roadmap
+
+The build-specific architecture, implementation work packages, dependency gates, reuse boundaries, and hardware acceptance criteria for RX 7600 Metal and display are documented in `NAVI33_METAL_DISPLAY_IMPLEMENTATION_PLAN.md`. This is a plan and evidence boundary, not an IOFramebuffer, IOAccelerator, Metal driver, or display implementation. In particular, `src/dcn41` and `src/navi48-bringup` are Navi 48 references and are not safe Navi 33 backends.
+
+
+## Navi 33 display contracts (host model only)
+
+`Navi33DisplayContracts` adds bounded validation for a 128-byte EDID base block (header and checksum), scanout buffer dimensions/pitch/length and aperture containment, and a monotonic flip timeline that accepts completion only for the matching pending sequence. Generic-upstream evidence is insufficient to authorize a scanout buffer; only board-attributed or hardware-verified evidence passes this model gate. These contracts do not read EDID from a connector, allocate a framebuffer, map a BAR, program DCN/PHY/DMUB, wait for a vblank interrupt, or expose IOFramebuffer/WindowServer. All tests use synthetic fixtures.
+
+
+## Compute-first path
+
+The RX 7600 goal is now prioritised as a headless compute bring-up before full display integration. See `NAVI33_COMPUTE_FIRST_PLAN.md` for the staged GFX11 firmware, memory/GART, queue, minimal compute submission, macOS user-client, RADV/Vulkan and Metal milestones. `Navi33ComputeContracts` is host-only validation scaffolding; it does not submit work to the GPU. Its synthetic alignment/size policy values are test fixtures, not asserted GFX11 hardware constants.
+
+
+## GFX11 backend foundation (2026-10-30)
+
+`Navi33Gfx11Manifest` is the first GFX11-specific foundation module. It is a
+strict, host-only manifest gate for the target PCI/subsystem identity, board
+evidence, VBIOS attribution, IP major-family separation, version-matched
+firmware filename prefixes, SHA-256/commit field syntax, per-file provenance
+and license review flags, and required firmware roles. It deliberately rejects
+GFX12/Navi48 firmware families.
+
+The test manifest is synthetic. It does not describe the physical RX 7600,
+verify any actual firmware hash, or establish license approval. The module does
+not open firmware files, authenticate metadata, access PCI/BAR/MMIO, initialize
+PSP/SMU/GC/SDMA, allocate VRAM/GART, build a hardware queue, submit an IB, or
+expose IOAccelerator/Metal. It is a prerequisite gate only, not GFX11
+initialization or RX 7600 acceleration.
+
+The host test script now builds and runs this GFX11 gate. Passing the tests is
+not evidence of hardware support. The next actual hardware-backend milestone
+still requires a provenance-documented IP Discovery/VBIOS artifact for the
+exact board and a reviewed, testable recovery path.
+
+
+## Four GFX11-to-Metal workstreams
+
+`Navi33Gfx11Bringup` adds host-only models for (1) ordered, evidence-gated
+GFX11 bring-up stages; (2) VRAM/GART/GPUVM region and mapping validation;
+(3) GFX11 pipe/queue, ring cursor, submission sequence and fence timeline
+validation; and (4) the IOService/user-client/IOAccelerator/Metal publication
+evidence sequence.
+
+These are safety and architecture contracts, not device operations. They do
+not load firmware, authenticate PSP, communicate with SMU, access registers,
+allocate/map VRAM, build page tables, create rings, encode PM4/IB commands,
+ring doorbells, receive interrupts, publish IOAccelerator, or create a Metal
+device. The RX 7600 is not accelerated by these changes.
+
+The GFX11 queue topology assumptions are generic upstream architecture notes
+(two GFX pipes and two queues per pipe; MES replaces KIQ on GFX11+), and must
+not be mistaken for measured RX 7600 board topology. All four model suites are
+compiled and tested by `tools/run_macos_host_tests.sh`.

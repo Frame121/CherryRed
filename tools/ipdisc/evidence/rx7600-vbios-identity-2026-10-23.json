@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "artifact_class": "VBIOS_IDENTITY_RECORD",
+  "title": "RX 7600 board VBIOS identity strings from the board's own Linux boot journal",
+  "date": "2026-10-23",
+  "scope": "IDENTITY_STRINGS_ONLY",
+  "gpu": {
+    "pci_vendor": "1002",
+    "pci_device": "7480",
+    "subsystem_vendor": "148c",
+    "subsystem_device": "2421",
+    "revision": "cf",
+    "pci_bdf": "0000:03:00.0"
+  },
+  "vbios_identity": {
+    "atom_bios_name": "113-EXT86626-001",
+    "build_string": "00062039",
+    "version_string": "022.003.001.027.000001",
+    "build_date": "2023/04/25",
+    "source_line": "amdgpu 0000:03:00.0: [drm] ATOM BIOS: 113-EXT86626-001, build: 00062039, ver: 022.003.001.027.000001, 2023/04/25"
+  },
+  "board_runtime_corroboration": {
+    "vram_reported": "8176M GDDR6 128-bit",
+    "smu": "initialized successfully",
+    "display_core": "v3.2.384 on DCN 3.2.1",
+    "dmub_firmware_version": "0x07003300",
+    "vcn_firmware": "ENC 1.24 DEC 9 VEP 0 revision 34",
+    "gpu_topology": "SE 2, SH per SE 2, CU per SH 8, active_cu_number 32"
+  },
+  "provenance": {
+    "source_artifact": "Cobalt64/RX7600-Linux-Evidence/rx7600-initial.txt",
+    "source_artifact_sha256": "db85fb970eb4bf69e31943e910c50b06625f0f087439c7f1c6d7f37228c9818a",
+    "capture_host": "Archcraft (Arch Linux family), kernel 7.2.11-arch1-1",
+    "capture_method": "board boot journal lines quoted verbatim by the user; read-only",
+    "related_ip_discovery_sha256": "4b809b3279bd9fd164456f5fcdcb9743d2b4289acdd77f9ac2a2cd77b75e6c89",
+    "authentication": "NONE"
+  },
+  "evidence_limits": [
+    "This is a VBIOS IDENTITY STRING RECORD (name/version/date quoted by the amdgpu kernel driver), not a VBIOS byte dump. No ROM payload, VFCT, or ATOMBIOS image was captured.",
+    "The identity strings are user-maintained quotes from the board's own Linux boot; they are not cryptographically authenticated and provenance remains UNVERIFIED pending independent review.",
+    "The version string must not be treated as a GC IP revision; GC 11.0.2 comes only from the parsed IP Discovery artifact.",
+    "Do not infer register access, firmware loading rights, or macOS compatibility from this record."
+  ]
+}

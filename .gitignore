@@ -21,6 +21,8 @@ src/navi33-bringup/firmware/
 # our own assembled compute test shaders (from shaders/*.s), tracked so no LLVM is needed
 !src/navi48-bringup/shaders/store_magic.bin
 !src/navi48-bringup/shaders/store_magic_hsa.bin
+# verified RX 7600 hardware evidence (raw capture; do not regenerate)
+!tools/ipdisc/evidence/rx7600-amdgpu-discovery-2026-10-23.bin
 # local run output
 runs/
 *.log

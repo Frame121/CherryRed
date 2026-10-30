@@ -1,0 +1,11 @@
+#include <DriverKit/IOService.iig>
+
+class Navi33PciProbe : public IOService
+{
+public:
+    virtual kern_return_t
+    Start(IOService * provider) override;
+
+    virtual kern_return_t
+    Stop(IOService * provider) override;
+};
