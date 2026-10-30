@@ -4,6 +4,8 @@
 
 #include <linux/delay.h>
 #include "gc_regs.h"
+#include "osssys_regs.h"
+#include "nbio_regs.h"
 
 namespace {
 
@@ -503,7 +505,7 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
 #define RN_COMPUTE_RESOURCE_LIMITS 0x1bb5u
 #define RN_COMPUTE_PGM_RSRC3 0x1bc8u
 
-void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u64 shaderOff, u64 fenceOff, u64 targetOff,
+void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u64 shaderOff, u64 fenceOff, u64 targetOff, u32 intSel,
                               struct rn_dispatch_result *res) {
     memset(res, 0, sizeof(*res));
     const u64 shaderVa = vaBase + shaderOff, fenceVa = vaBase + fenceOff;
@@ -556,7 +558,7 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u
     // RELEASE_MEM as gfx_v11_0_ring_emit_fence: flush, then write a 32-bit value to the fence address
     ring[n++] = RN_PACKET3(RN_PACKET3_RELEASE_MEM, 6);
     ring[n++] = (1u << 22) | (1u << 21) | (1u << 13) | (1u << 12) | (3u << 25) | RN_CACHE_FLUSH_AND_INV_TS_EVENT | (5u << 8);
-    ring[n++] = (1u << 29);                                                  // DATA_SEL 1: 32-bit data, no interrupt
+    ring[n++] = (1u << 29) | (intSel << 24);                                 // DATA_SEL 1: 32-bit data; INT_SEL 2: interrupt once the write is confirmed
     ring[n++] = lower_32_bits(fenceVa); ring[n++] = upper_32_bits(fenceVa);
     ring[n++] = 0xF00DF00Du; ring[n++] = 0; ring[n++] = 0;
     while (((8 + n) & 7) != 0) { ring[n++] = RN_PACKET3(RN_PACKET3_NOP, 0); ring[n++] = 0; }   // the ring already holds 8 dwords
@@ -590,6 +592,78 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u
     res->fault_addr_hi = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
     grbmSelect(adev, 0, 0, 0, 0);
     #undef SHREG
+}
+
+void rn_ih_enable(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, u64 wptrShadowOff) {
+    u32 tmp;
+    for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
+    rn_vram_wr32(adev, wptrShadowOff, 0); rn_vram_wr32(adev, wptrShadowOff + 4, 0);
+
+    // ih_v6_0_toggle_interrupts(false): ring and interrupts off, pointers to 0
+    tmp = RREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, RB_ENABLE, 0);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, ENABLE_INTR, 0);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL, tmp);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_RPTR, 0);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_WPTR, 0);
+
+    // nbio_v4_3_ih_control: no dummy read (there is no MSI and no system dummy page here), and the ring is in VRAM, so non-snooped
+    WREG32_SOC15(RN_NBIO, 0, regBIF_BX0_INTERRUPT_CNTL2, 0);
+    tmp = RREG32_SOC15(RN_NBIO, 0, regBIF_BX0_INTERRUPT_CNTL);
+    tmp = REG_SET_FIELD(tmp, BIF_BX0_INTERRUPT_CNTL, IH_DUMMY_RD_OVERRIDE, 1);
+    tmp = REG_SET_FIELD(tmp, BIF_BX0_INTERRUPT_CNTL, IH_DUMMY_RD_EN, 0);
+    tmp = REG_SET_FIELD(tmp, BIF_BX0_INTERRUPT_CNTL, IH_REQ_NONSNOOP_EN, 1);
+    WREG32_SOC15(RN_NBIO, 0, regBIF_BX0_INTERRUPT_CNTL, tmp);
+
+    // ih_v6_0_enable_ring
+    const u64 ringVa = vaBase + ringOff;
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_BASE, lower_32_bits(ringVa >> 8));
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_BASE_HI, upper_32_bits(ringVa >> 8) & 0xff);
+    u32 order = 0;
+    while ((4u << order) < ringBytes) order++;                               // order_base_2(ring_size / 4)
+    tmp = RREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, MC_SPACE, 4);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, WPTR_OVERFLOW_CLEAR, 1);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, WPTR_OVERFLOW_ENABLE, 1);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, RB_SIZE, order);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, WPTR_WRITEBACK_ENABLE, 1);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, MC_SNOOP, 0);                       // VRAM
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, MC_RO, 0);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, MC_VMID, 0);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, RPTR_REARM, 0);                     // no MSI
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL, tmp);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_WPTR_ADDR_LO, lower_32_bits(vaBase + wptrShadowOff));
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_WPTR_ADDR_HI, upper_32_bits(vaBase + wptrShadowOff) & 0xFFFFu);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_WPTR, 0);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_RPTR, 0);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_DOORBELL_RPTR, 0);                      // no doorbell for the read pointer
+
+    // ih_v6_0_toggle_interrupts(true): clear the overflow bit by pulsing it, then enable the ring and the interrupts
+    tmp = RREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, RB_ENABLE, 1);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, WPTR_OVERFLOW_CLEAR, 0);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL, tmp);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, WPTR_OVERFLOW_CLEAR, 1);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL, tmp);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, WPTR_OVERFLOW_CLEAR, 0);
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, ENABLE_INTR, 1);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL, tmp);
+
+    // gfx_v11_0_set_compute_eop_interrupt_state: the end-of-pipe timestamp interrupt of MEC 1 pipe 0 (the queue under test)
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_ME1_PIPE0_INT_CNTL);
+    tmp = REG_SET_FIELD(tmp, CP_ME1_PIPE0_INT_CNTL, TIME_STAMP_INT_ENABLE, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_ME1_PIPE0_INT_CNTL, tmp);
+}
+
+void rn_ih_read(struct rn_device *adev, u64 ringOff, u64 wptrShadowOff, struct rn_ih_result *res) {
+    memset(res, 0, sizeof(*res));
+    res->rb_cntl_rd = RREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL);
+    res->wptr_reg = RREG32_SOC15(RN_OSSSYS, 0, regIH_RB_WPTR);
+    res->rptr_reg = RREG32_SOC15(RN_OSSSYS, 0, regIH_RB_RPTR);
+    res->base_rd = RREG32_SOC15(RN_OSSSYS, 0, regIH_RB_BASE);
+    res->cp_int_rd = RREG32_SOC15(RN_GC, 0, regCP_ME1_PIPE0_INT_CNTL);
+    res->wptr_shadow = rn_vram_rd32(adev, wptrShadowOff);
+    for (u32 i = 0; i < 16; i++) res->entry[i] = rn_vram_rd32(adev, ringOff + i * 4);
 }
 
 }

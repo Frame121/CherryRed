@@ -173,6 +173,8 @@
 #define kRNDmubRbSize         8192u
 #define kRNDmubTraceEntryOff  16u
 #define kRNHwIdMp0            255
+#define kRNHwIdOsssys         40
+#define kRNHwIdNbif           108
 
 // Mailbox registers: dword offsets from the IP base address, taken from mp_13_0_0_offset.h
 // (PSP, used by psp_v13_0.c) and smu_v13_0.c (SMU message, argument and response).
@@ -1590,6 +1592,8 @@ void RedNaviProbe::sdmaTest() {
     // (They were all 0 until now, so every macro access in this test hit the wrong register.)
     for (uint32_t i = 0; i < 4; i++) ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i);
     ipBase(kRNHwIdMp1, &gpu.reg_offset[RN_MP1_HWIP][0][0]);
+    for (uint32_t i = 0; i < 2; i++) ipBase(kRNHwIdOsssys, &gpu.reg_offset[RN_OSSSYS_HWIP][0][i], i);
+    for (uint32_t i = 0; i < 6; i++) ipBase(kRNHwIdNbif, &gpu.reg_offset[RN_NBIO_HWIP][0][i], i);
     // After the features are enabled the SMU may be busy for a while with C2PMSG_90 at 0: wait for it (up to 10 s) and record how long.
     {
         const char *sn[2] = {"c2pmsg_90", "sdma_version"};
@@ -1730,9 +1734,13 @@ void RedNaviProbe::sdmaTest() {
             uint32_t disp = 0;
             if (cr.ok && PE_parse_boot_argn("rednavi_dispatch_test", &disp, sizeof(disp)) && disp == 1) {
                 struct rn_dispatch_result dr;
+                // Opt-in (rednavi_ih_test=1): an interrupt ring in VRAM, and the fence packet asks the CP for an interrupt.
+                uint32_t ihTest = 0;
+                const bool ih = PE_parse_boot_argn("rednavi_ih_test", &ihTest, sizeof(ihTest)) && ihTest == 1;
+                if (ih) rn_ih_enable(&gpu, kRNVramMcBase, 0x0C040000, 4096, 0x0C041000);
                 uint32_t store = 0;
                 PE_parse_boot_argn("rednavi_dispatch_store", &store, sizeof(store));   // 1: the shader stores a dword, 0: s_endpgm only
-                rn_compute_dispatch_test(&gpu, kRNVramMcBase, 0x0C020000, 0x0C030000, 0x0C031000, store == 1 ? 0x0C032000 : 0, &dr);
+                rn_compute_dispatch_test(&gpu, kRNVramMcBase, 0x0C020000, 0x0C030000, 0x0C031000, store == 1 ? 0x0C032000 : 0, ih ? 2 : 0, &dr);
                 const char *dn[26] = {"step", "ok", "fence", "fence_before", "rptr", "wptr", "active", "scratch", "fault_status", "fault_addr_lo", "fault_addr_hi",
                                       "t0_rptr", "t0_fence", "t1_rptr", "t1_fence", "t5_rptr", "t5_fence", "t20_rptr", "t20_fence",
                                       "t100_rptr", "t100_fence", "t500_rptr", "t500_fence", "target", "target_before"};
@@ -1741,6 +1749,16 @@ void RedNaviProbe::sdmaTest() {
                                    dr.trace[0][0], dr.trace[0][1], dr.trace[1][0], dr.trace[1][1], dr.trace[2][0], dr.trace[2][1],
                                    dr.trace[3][0], dr.trace[3][1], dr.trace[4][0], dr.trace[4][1], dr.trace[5][0], dr.trace[5][1], dr.target, dr.target_before};
                 rnPublish(this, "dispatch-test", dn, dv, 25);
+                if (ih) {
+                    struct rn_ih_result ir;
+                    rn_ih_read(&gpu, 0x0C040000, 0x0C041000, &ir);
+                    const char *in[23] = {"rb_cntl", "wptr_reg", "wptr_shadow", "rptr_reg", "base", "cp_int", "e0", "e1", "e2", "e3", "e4", "e5", "e6", "e7",
+                                          "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "ok"};
+                    uint32_t iv[23] = {ir.rb_cntl_rd, ir.wptr_reg, ir.wptr_shadow, ir.rptr_reg, ir.base_rd, ir.cp_int_rd};
+                    for (int i = 0; i < 16; i++) iv[6 + i] = ir.entry[i];
+                    iv[22] = ir.wptr_reg != 0 || ir.wptr_shadow != 0;
+                    rnPublish(this, "ih-test", in, iv, 23);
+                }
             }
         }
     }

@@ -138,3 +138,21 @@ With `rednavi_dispatch_store=1` the dispatch of step 5 runs a shader that stores
 Verified on the RX 7800 XT: the target dword in VRAM goes from `0xDEAD0000` to `0x600DC0DE`, the `RELEASE_MEM` fence is written, no VM fault. So a real wave runs, executes scalar and vector moves and a global store through the GPU VM (the system aperture on the VRAM range), with `PGM_RSRC1` `0x002C0000` and `PGM_RSRC2` `0x80`, and without any `SH_MEM_*` setup for VMID 0.
 
 `v_mov_b32` encoding: bits 8:0 source (literal 255, inline zero 128), 16:9 opcode (1), 24:17 destination VGPR, 31:25 `0x3F`. `s_mov_b32`: `0xBE80FF00 | ...` with the destination SGPR in bits 22:16 (`0xBE8000FF` is `s0`, `0xBE8100FF` is `s1`).
+
+## M4 step 6: the interrupt handler (2026-10-30)
+
+`rednavi_ih_test=1` (on top of the dispatch test) sets up ring 0 of the interrupt handler (OSSSYS 6.0, `ih_v6_0.c`) in VRAM and makes the fence packet of the dispatch ask for an interrupt. Verified on the RX 7800 XT (`ih-test`): the IH write pointer and its write-back copy in memory both read `0x20`, and the ring holds one vector for the queue under test:
+
+| dword | value | meaning |
+|---|---|---|
+| 0 | `0x0024b514` | client id `0x14` (GRBM_CP), source id `0xb5` = 181 (`CP_EOP_INTERRUPT`), ring id `0x24` = ME 1, pipe 0, queue 2 |
+| 1 | `0xca1b4f94` | timestamp (low) |
+| 2 | `0x80000000` | timestamp (high) 0, timestamp source flag |
+
+The setup follows `ih_v6_0_irq_init`: ring off, `nbio_v4_3_ih_control` (no dummy read since there is no MSI and no system dummy page; `IH_REQ_NONSNOOP_EN` because the ring is in VRAM), ring base and size (`IH_RB_CNTL.RB_SIZE` is `order_base_2(bytes / 4)`), `MC_SPACE` 4, write-pointer write-back address, then the ring and the interrupt enable. The CP side needs `TIME_STAMP_INT_ENABLE` in `CP_ME1_PIPE0_INT_CNTL`, and the `RELEASE_MEM` packet `INT_SEL` field set to 2.
+
+Linux keeps this ring in system memory; here it is in VRAM and the IH wrote to it, so VRAM works for `MC_SPACE` 4 with the system aperture on.
+
+The register headers for OSSSYS and NBIO are generated the same way as the GC one (`tools/osssys_regs_spec.txt`, `tools/nbio_regs_spec.txt`, `RedNavi/osssys_regs.h`, `RedNavi/nbio_regs.h`).
+
+Not done: delivering the interrupt to the CPU. There is no MSI yet, so the CPU still reads the write pointer; nothing wakes a thread. The doorbell for the read pointer is off too.

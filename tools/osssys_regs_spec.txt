@@ -1,0 +1,10 @@
+# Registers (and fields) of OSSSYS 6.0 (the interrupt handler) that RedNavi/gfx11.cpp programs, NAME[:FIELD,FIELD...]
+# tools/gen_gc_regs.py turns this and the AMD osssys_6_0_0 headers into RedNavi/osssys_regs.h.
+IH_RB_BASE
+IH_RB_BASE_HI
+IH_RB_CNTL:RB_ENABLE,MC_SPACE,WPTR_OVERFLOW_CLEAR,WPTR_OVERFLOW_ENABLE,RB_SIZE,WPTR_WRITEBACK_ENABLE,MC_SNOOP,MC_RO,MC_VMID,ENABLE_INTR,RPTR_REARM
+IH_RB_WPTR
+IH_RB_RPTR
+IH_RB_WPTR_ADDR_LO
+IH_RB_WPTR_ADDR_HI
+IH_DOORBELL_RPTR:OFFSET,ENABLE

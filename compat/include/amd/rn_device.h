@@ -18,6 +18,7 @@ enum rn_hw_ip {
     RN_NBIO_HWIP,
     RN_MMHUB_HWIP,
     RN_SMUIO_HWIP,
+    RN_OSSSYS_HWIP,
     RN_HWIP_MAX,
 };
 

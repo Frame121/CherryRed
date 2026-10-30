@@ -61,6 +61,12 @@ struct rn_dispatch_result {
     int ok;
 };
 
+struct rn_ih_result {
+    u32 step;
+    u32 rb_cntl_rd, wptr_reg, wptr_shadow, rptr_reg, base_rd, cp_int_rd;
+    u32 entry[16];                            // the first two interrupt vectors of the ring (8 dwords each)
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -91,7 +97,13 @@ void rn_compute_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_off
 // With target_vram_offset nonzero the shader is not just s_endpgm: it stores 0x600DC0DE to that VRAM dword (global_store_b32, the
 // instruction words hand-assembled from the encodings in LLVM's MC tests, llvm/test/MC/AMDGPU/gfx11_asm_*.s).
 void rn_compute_dispatch_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u64 shader_vram_offset, u64 fence_vram_offset,
-                              u64 target_vram_offset, struct rn_dispatch_result *res);
+                              u64 target_vram_offset, u32 int_sel, struct rn_dispatch_result *res);
+
+// Interrupt handler (ih_v6_0_irq_init, simplified): ring 0 of OSSSYS in VRAM, its write pointer written back to memory, no MSI and no
+// doorbell; the CP's end-of-pipe timestamp interrupt for MEC pipe 0 is enabled. A RELEASE_MEM with int_sel 2 then makes the CP
+// push an interrupt vector into the ring, which rn_ih_read shows. Written from the Linux sources; NOT yet run on hardware.
+void rn_ih_enable(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 wptr_shadow_vram_offset);
+void rn_ih_read(struct rn_device *adev, u64 ring_vram_offset, u64 wptr_shadow_vram_offset, struct rn_ih_result *res);
 
 #ifdef __cplusplus
 }
