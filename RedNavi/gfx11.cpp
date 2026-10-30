@@ -383,6 +383,40 @@ void rn_gfx_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringB
     res->ring0 = rn_vram_rd32(adev, ringOff);
 }
 
+static volatile u8 *gDoorbellBase;      // mapped doorbell BAR, or null for plain register submission
+static u32 gDoorbellDword;              // the compute queue's doorbell, in dwords
+
+void rn_set_doorbell(volatile void *base, u32 dwordIndex) {
+    gDoorbellBase = static_cast<volatile u8 *>(base);
+    gDoorbellDword = dwordIndex;
+}
+
+void rn_doorbell_aperture_enable(struct rn_device *adev, int writeS2a, u32 before[3]) {
+    u32 tmp = RREG32_SOC15(RN_NBIO, 0, regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN);   // nbio_v4_3_enable_doorbell_aperture
+    before[0] = tmp;
+    before[1] = RREG32_SOC15(RN_NBIO, 0, regS2A_DOORBELL_ENTRY_0_CTRL);
+    before[2] = RREG32_SOC15(RN_NBIO, 0, regS2A_DOORBELL_ENTRY_3_CTRL);
+    if (!(tmp & RCC_DEV0_EPF0_RCC_DOORBELL_APER_EN__BIF_DOORBELL_APER_EN_MASK)) {
+        tmp = REG_SET_FIELD(tmp, RCC_DEV0_EPF0_RCC_DOORBELL_APER_EN, BIF_DOORBELL_APER_EN, 1);
+        WREG32_SOC15(RN_NBIO, 0, regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN, tmp);
+    }
+    if (writeS2a) {
+        WREG32_SOC15(RN_NBIO, 0, regS2A_DOORBELL_ENTRY_0_CTRL, 0x30000007);      // nbio_v4_3_gc_doorbell_init
+        WREG32_SOC15(RN_NBIO, 0, regS2A_DOORBELL_ENTRY_3_CTRL, 0x3000000d);
+    }
+}
+
+// Tells the compute queue (selected by grbmSelect) that the ring now ends at wptr dwords.
+static void computeSubmit(struct rn_device *adev, u64 wptrShadowOff, u32 wptr) {
+    if (gDoorbellBase) {
+        *reinterpret_cast<volatile u64 *>(gDoorbellBase + gDoorbellDword * 4) = wptr;     // the doorbell carries the wptr
+        return;
+    }
+    rn_vram_wr32(adev, wptrShadowOff, wptr);                                 // the polled shadow as well as the register
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO, wptr);
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_HI, 0);
+}
+
 void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, struct rn_compute_result *res) {
     memset(res, 0, sizeof(*res));
     const u64 ringVa = vaBase + ringOff;
@@ -420,8 +454,8 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
 
     // gfx_v11_0_compute_mqd_init values, written like gfx_v11_0_kiq_init_register
     grbmSelect(adev, 1, 0, 0, 2);
-    tmp = RREG32_SOC15(RN_GC, 0, regCP_PQ_WPTR_POLL_CNTL);                    // wptr polling on: no doorbell, the shadow is the doorbell
-    tmp = REG_SET_FIELD(tmp, CP_PQ_WPTR_POLL_CNTL, EN, 1);
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_PQ_WPTR_POLL_CNTL);                    // wptr polling on unless there is a doorbell
+    tmp = REG_SET_FIELD(tmp, CP_PQ_WPTR_POLL_CNTL, EN, gDoorbellBase ? 0 : 1);
     WREG32_SOC15(RN_GC, 0, regCP_PQ_WPTR_POLL_CNTL, tmp);
     WREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE, 0);
     const u64 eopBase = (vaBase + eopOff) >> 8;
@@ -430,7 +464,16 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
     tmp = regCP_HQD_EOP_CONTROL_DEFAULT;
     tmp = REG_SET_FIELD(tmp, CP_HQD_EOP_CONTROL, EOP_SIZE, 8);               // order_base_2(GFX11_MEC_HPD_SIZE 2048 / 4) - 1
     WREG32_SOC15(RN_GC, 0, regCP_HQD_EOP_CONTROL, tmp);
-    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL, regCP_HQD_PQ_DOORBELL_CONTROL_DEFAULT);   // doorbell disabled
+    tmp = regCP_HQD_PQ_DOORBELL_CONTROL_DEFAULT;                             // gfx_v11_0_compute_mqd_init
+    if (gDoorbellBase) {
+        tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_OFFSET, gDoorbellDword);
+        tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_EN, 1);
+        tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_SOURCE, 0);
+        tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_DOORBELL_CONTROL, DOORBELL_HIT, 0);
+        WREG32_SOC15(RN_GC, 0, regCP_MEC_DOORBELL_RANGE_LOWER, 0);          // kiq << 2 * 2 bytes = 0
+        WREG32_SOC15(RN_GC, 0, regCP_MEC_DOORBELL_RANGE_UPPER, 0x8A * 2 * 4); // userqueue_end * 2 << 2
+    }
+    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL, tmp);
     WREG32_SOC15(RN_GC, 0, regCP_MQD_BASE_ADDR, lower_32_bits(vaBase + mqdOff) & 0xfffffffcu);
     WREG32_SOC15(RN_GC, 0, regCP_MQD_BASE_ADDR_HI, upper_32_bits(vaBase + mqdOff));
     tmp = regCP_MQD_CONTROL_DEFAULT;
@@ -460,14 +503,17 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
     tmp = REG_SET_FIELD(tmp, CP_HQD_PERSISTENT_STATE, PRELOAD_SIZE, 0x55);
     WREG32_SOC15(RN_GC, 0, regCP_HQD_PERSISTENT_STATE, tmp);
     WREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE, 1);
+    if (gDoorbellBase) {                                                     // CP_PQ_STATUS.DOORBELL_ENABLE after the queue is active
+        tmp = RREG32_SOC15(RN_GC, 0, regCP_PQ_STATUS);
+        tmp = REG_SET_FIELD(tmp, CP_PQ_STATUS, DOORBELL_ENABLE, 1);
+        WREG32_SOC15(RN_GC, 0, regCP_PQ_STATUS, tmp);
+    }
     res->active_rd = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
     res->pq_control_rd = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_CONTROL);
     res->mqd_base_rd = RREG32_SOC15(RN_GC, 0, regCP_MQD_BASE_ADDR);
     res->step = 2;
 
-    rn_vram_wr32(adev, wptrOff, 8);                                          // 8 dwords, in the polled shadow and in the register
-    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO, 8);
-    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_HI, 0);
+    computeSubmit(adev, wptrOff, 8);                                         // 8 dwords
     res->step = 3;
     static const u32 sampleDelayMs[8] = {0, 1, 1, 3, 5, 10, 30, 50};        // cumulative: 0, 1, 2, 5, 10, 20, 50, 100 ms
     for (u32 i = 0; i < 8; i++) {
@@ -567,9 +613,7 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u
     const u32 start = 8;                                                     // after the SCRATCH_REG0 packet of the first test
     for (u32 i = 0; i < n; i++) rn_vram_wr32(adev, ringOff + (start + i) * 4, ring[i]);
     grbmSelect(adev, 1, 0, 0, 2);
-    rn_vram_wr32(adev, wptrOff, start + n);
-    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO, start + n);
-    WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_HI, 0);
+    computeSubmit(adev, wptrOff, start + n);
     res->step = 2;
     static const u32 sampleDelayMs[6] = {0, 1, 4, 15, 80, 400};              // cumulative: 0, 1, 5, 20, 100, 500 ms
     for (u32 i = 0; i < 6; i++) {

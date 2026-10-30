@@ -30,6 +30,12 @@ enum rn_hw_ip {
 #define RN_MM_DATA 0x04
 #define RN_MM_INDEX_HI 0x18
 
+// Registers past the end of the register BAR (the doorbell routing of the NBIO, for one, is some 20 MB in) are reached through the NBIO's
+// RSMU index/data pair, which is what amdgpu uses on these ASICs (nbio_v4_3_get_pcie_index_offset). Byte offsets in the BAR: NBIF segment 1
+// base 0x14 dwords for the index and the next dword for the data. MM_INDEX does not reach those registers.
+#define RN_RSMU_INDEX 0x50
+#define RN_RSMU_DATA 0x54
+
 struct rn_device {
     struct device dev;
     volatile u8 *rmmio;             // mapped register BAR

@@ -102,6 +102,14 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 va_base, u64 ring_vram
 // Interrupt handler (ih_v6_0_irq_init, simplified): ring 0 of OSSSYS in VRAM, its write pointer written back to memory, no MSI and no
 // doorbell; the CP's end-of-pipe timestamp interrupt for MEC pipe 0 is enabled. A RELEASE_MEM with int_sel 2 then makes the CP
 // push an interrupt vector into the ring, which rn_ih_read shows. Written from the Linux sources; NOT yet run on hardware.
+// Doorbells: the NBIO doorbell aperture is switched on, and while rn_set_doorbell has a base, the compute queue is programmed with a
+// doorbell (CP_HQD_PQ_DOORBELL_CONTROL, wptr polling off) and every submission is a 64-bit write of the wptr to that doorbell instead of a
+// register write. base is the mapped doorbell BAR (BAR2), dword_index the queue's doorbell in dwords (mec_ring0 << 1 = 6 here).
+// before[0..2] receive DOORBELL_APER_EN, S2A_DOORBELL_ENTRY_0_CTRL and _3_CTRL as they were; APER_EN is only written if it was 0, and the
+// two S2A entries (nbio_v4_3_gc_doorbell_init) only if write_s2a is set.
+void rn_doorbell_aperture_enable(struct rn_device *adev, int write_s2a, u32 before[3]);
+void rn_set_doorbell(volatile void *base, u32 dword_index);
+
 void rn_ih_enable(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 wptr_shadow_vram_offset);
 void rn_ih_read(struct rn_device *adev, u64 ring_vram_offset, u64 wptr_shadow_vram_offset, struct rn_ih_result *res);
 

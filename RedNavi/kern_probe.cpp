@@ -1714,6 +1714,23 @@ void RedNaviProbe::sdmaTest() {
         // Opt-in (rednavi_compute_test=1, after the gfx test, which sets the MEC entry points): a first command on a compute queue.
         uint32_t comp = 0;
         if (PE_parse_boot_argn("rednavi_compute_test", &comp, sizeof(comp)) && comp == 1) {
+            // Opt-in (rednavi_doorbell_test=1): the queue is woken by a doorbell write to BAR2 instead of by registers.
+            uint32_t dbArg = 0;
+            IOMemoryMap *doorbellMap = nullptr;
+            if (PE_parse_boot_argn("rednavi_doorbell_test", &dbArg, sizeof(dbArg)) && dbArg == 1) {
+                doorbellMap = pci->mapDeviceMemoryWithRegister(kIOPCIConfigBaseAddress0 + 2 * 4);
+                if (doorbellMap) {
+                    uint32_t s2a = 0, before[3] = {};
+                    PE_parse_boot_argn("rednavi_doorbell_s2a", &s2a, sizeof(s2a));   // 1: also write the two S2A doorbell entries
+                    rn_doorbell_aperture_enable(&gpu, s2a == 1, before);
+                    rn_set_doorbell(reinterpret_cast<volatile void *>(doorbellMap->getVirtualAddress()), 6);   // mec_ring0 (3) << 1
+                    const char *bn[5] = {"length_kb", "doorbell_dword", "aper_en_before", "s2a0_before", "s2a3_before"};
+                    uint32_t bv[5] = {static_cast<uint32_t>(doorbellMap->getLength() >> 10), 6, before[0], before[1], before[2]};
+                    rnPublish(this, "doorbell-info", bn, bv, 5);
+                } else {
+                    IOLog("RedNavi: doorbell test: could not map BAR2\n");
+                }
+            }
             struct rn_compute_result cr;
             rn_compute_ring_test(&gpu, kRNVramMcBase, 0x0C020000, 4096, &cr);
             const char *cn[33] = {"step", "ok", "scratch", "active_rd", "pq_control_rd", "mqd_base_rd", "rptr", "wptr", "rptr_shadow", "ring0",
@@ -1760,6 +1777,7 @@ void RedNaviProbe::sdmaTest() {
                     rnPublish(this, "ih-test", in, iv, 23);
                 }
             }
+            if (doorbellMap) { rn_set_doorbell(nullptr, 0); doorbellMap->release(); }
         }
     }
 #endif

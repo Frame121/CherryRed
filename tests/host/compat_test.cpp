@@ -137,9 +137,9 @@ static void testRegisters() {
     CHECK(bar[0x23] == 7);                     // segment base 0x20 + register 3
     CHECK(RREG32_SOC15(MP1, 0, mmFAKE) == 7);
     CHECK(SOC15_REG_OFFSET(MP1, 0, mmFAKE) == 0x23);
-    // Past the BAR the accesses go through MM_INDEX / MM_DATA at byte 0 and 4.
+    // Past the BAR the accesses go through the RSMU index / data pair at byte 0x50 and 0x54.
     WREG32(0x400, 0x1234);
-    CHECK(bar[0] == 0x1000 && bar[1] == 0x1234);      // index = 0x400 * 4, data written
+    CHECK(bar[0x14] == 0x1000 && bar[0x15] == 0x1234);      // index = 0x400 * 4, data written
 }
 
 int main() {

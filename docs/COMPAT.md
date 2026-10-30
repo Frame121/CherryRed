@@ -156,3 +156,11 @@ Linux keeps this ring in system memory; here it is in VRAM and the IH wrote to i
 The register headers for OSSSYS and NBIO are generated the same way as the GC one (`tools/osssys_regs_spec.txt`, `tools/nbio_regs_spec.txt`, `RedNavi/osssys_regs.h`, `RedNavi/nbio_regs.h`).
 
 Not done: delivering the interrupt to the CPU. There is no MSI yet, so the CPU still reads the write pointer; nothing wakes a thread. The doorbell for the read pointer is off too.
+
+## M4 step 7: doorbells (2026-10-30)
+
+`rednavi_doorbell_test=1 rednavi_doorbell_s2a=1` makes the compute queue of the earlier steps work from a doorbell: BAR2 (the doorbell BAR, 2 MB here) is mapped, the NBIO doorbell aperture is switched on (`RCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.BIF_DOORBELL_APER_EN`), the two doorbell steering entries are written (`S2A_DOORBELL_ENTRY_0_CTRL` 0x30000007 and `_3_CTRL` 0x3000000d, `nbio_v4_3_gc_doorbell_init`), and the queue is programmed with `CP_HQD_PQ_DOORBELL_CONTROL` (`DOORBELL_OFFSET` 6 dwords = slot `mec_ring0` 3, `DOORBELL_EN`), the MEC doorbell range (0 to `userqueue_end` 0x8A, in bytes `*2*4`), `CP_PQ_STATUS.DOORBELL_ENABLE` and wptr polling off. A submission is then a 64-bit write of the wptr to BAR2 + 0x18. Verified on the RX 7800 XT: the scratch register packet, the shader dispatch with its store and fence, and the IH vector all work with no register or shadow write telling the CP about the new wptr.
+
+What cost the time: the S2A registers are about 20 MB into the register space, past the 512 KB BAR. The compat layer reached such registers through `MM_INDEX`/`MM_DATA`, which does not reach them (they read `0xffffffff`), and writing through it blanked the display, so the first attempt looked like "the doorbell breaks the screen". Registers past the BAR are reached through the NBIO's RSMU index/data pair (BAR bytes 0x50 and 0x54, what amdgpu uses on these ASICs); with that, the S2A entries read `0x0` before the write (not configured by the VBIOS) and the write is harmless. `rn_rreg32`/`rn_wreg32` now use it.
+
+Not done: doorbells for the gfx queue, SDMA and the IH read pointer; delivering interrupts to the CPU (MSI); the doorbell index assignment for more than one queue.
