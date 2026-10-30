@@ -26,9 +26,15 @@ BOOTARG="navi33bringup=1"
 [ -d "$KEXT_SRC" ] || { echo "ERROR: $KEXT_SRC missing"; exit 1; }
 
 echo "== Mounting ESP (disk0s1) =="
-diskutil mount disk0s1 || { echo "ESP mount failed"; exit 1; }
-ESP="$(diskutil info disk0s1 | awk '/Mount Point/{print $3}')"
-[ -n "$ESP" ] && [ -d "$ESP/$PLIST" ] || { echo "ERROR: $ESP/$PLIST not found"; diskutil unmount disk0s1; exit 1; }
+diskutil mount disk0s1 2>/dev/null || echo "  (mount reported an error — likely already mounted, continuing)"
+# The ESP label is "NO NAME"; the mount point contains a space, so take the
+# whole remainder of the Mount Point line, not just one field.
+ESP="$(diskutil info disk0s1 | sed -n 's/^[[:space:]]*Mount Point:[[:space:]]*//p' | head -1)"
+if [ -z "$ESP" ] || [ ! -d "$ESP/$PLIST" ]; then
+  echo "ERROR: $PLIST not found under ESP mount point '${ESP:-<none>}'"
+  diskutil unmount disk0s1 2>/dev/null || true
+  exit 1
+fi
 echo "ESP: $ESP"
 
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -50,7 +56,7 @@ with open(p,'wb') as f: plistlib.dump(cfg, f, sort_keys=True)
 print('boot-args now:', nv['boot-args'])
 PYEOF
   plutil -lint "$ESP/$PLIST"
-  diskutil unmount disk0s1
+  diskutil unmount disk0s1 || true
   echo "Rollback done. Reboot to return to the pre-Stage-3 state."
   exit 0
 fi
@@ -115,9 +121,10 @@ plutil -lint "$ESP/$PLIST"
 
 echo "== Sanity: kext bundle on ESP =="
 ls "$ESP/$OC_KEXTS/Navi33Bringup.kext/Contents/MacOS/"
-diskutil unmount disk0s1
+diskutil unmount disk0s1 || true
 
 echo
-echo "DONE. Next step: reboot (sudo shutdown -r now, or stage3_reboot.sh)."
-echo "After reboot, run (no sudo): sh stage3_verify_after_reboot.sh"
-echo "Rollback at any time: sudo sh stage3_apply.sh --rollback"
+echo "DONE. Next step: reboot (sudo shutdown -r now)."
+echo "After reboot, run (no sudo, from this same directory):"
+echo "  sh $BACKUP_LOCAL/stage3_verify_after_reboot.sh"
+echo "Rollback at any time: sudo sh $BACKUP_LOCAL/stage3_apply.sh --rollback"
