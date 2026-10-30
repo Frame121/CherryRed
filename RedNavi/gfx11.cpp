@@ -1311,6 +1311,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const u32 start[
         p1.header.type = MES_API_TYPE_SCHEDULER;
         p1.header.opcode = MES_SCH_API_SET_HW_RSRC_1;
         p1.header.dwsize = API_FRAME_SIZE_IN_DWORDS;
+        for (u32 o = 0; o < 0x1000; o += 4) rn_vram_wr32(adev, sharedOff + 0x200 + o, 0);   // the fence area must start at zero (it read 0xffffffff in VRAM and the scheduler then spun in ADD_QUEUE)
         p1.enable_mes_info_ctx = 1;
         p1.cleaner_shader_fence_mc_addr = vaBase + sharedOff + 0x200;
         res->hw_res_ok = sendFrame(&p1, offsetof(union MESAPI_SET_HW_RESOURCES_1, api_status) / 4);
@@ -1369,6 +1370,18 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const u32 start[
     res->kiq_version = RREG32_SOC15(RN_GC, 0, regCP_MES_GP3_LO);
     grbmSelect(adev, 0, 0, 0, 0);
     for (u32 i = 0; i < 16; i++) { res->log_hist[i] = rn_vram_rd32(adev, logOff + i * 4); res->log_scratch[i] = rn_vram_rd32(adev, logOff + 0x4000 + i * 4); }
+    // what the hung scheduler leaves behind: a series of instruction pointers, the queue's MQD and write-back words, the cleaner shader fence
+    grbmSelect(adev, 3, 0, 0, 0);
+    for (u32 i = 0; i < 8; i++) { res->log_hist[i] = RREG32_SOC15(RN_GC, 0, regCP_MES_INSTR_PNTR); udelay(37 * (i + 1)); }
+    grbmSelect(adev, 0, 0, 0, 0);
+    res->log_hist[8] = rn_vram_rd32(adev, qOff + 0x2000);
+    res->log_hist[9] = rn_vram_rd32(adev, qOff + 0x2000 + 130 * 4);
+    res->log_hist[10] = rn_vram_rd32(adev, qOff + 0x2000 + 143 * 4);
+    res->log_hist[11] = rn_vram_rd32(adev, sharedOff + 0x200);
+    res->log_hist[12] = rn_vram_rd32(adev, qOff + 0x1008);
+    res->log_hist[13] = rn_vram_rd32(adev, qOff + 0x1000);
+    res->log_hist[14] = rn_vram_rd32(adev, apiStatusOff);
+    res->log_hist[15] = rn_rreg32(adev, adev->reg_offset[RN_GC_HWIP][0][0] + 0xda4);   // GRBM_STATUS
     res->step = 5;
     if (res->q_active & 1u) { gMapped = true; gMappedWptr = 0; gMappedQueue = qQueue; }   // later rn_compute_submit_ib calls use this queue
 }
