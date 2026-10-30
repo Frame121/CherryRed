@@ -26,7 +26,7 @@ GROUPS = [
     # The HDMI path of a board whose monitor is on DIG1 (an RX 7600 on HDMI-A-2 has SYMCLKB enabled): safest first, like the others.
     ("hpd_aux1", r"HPD1_|DP_AUX1_"),
     ("dig1_hdmi", r"DIG1_|DP1_|AFMT1_|HDMI_|HDMICHARCLK|HDMISTREAMCLK"),
-]
+] + [(f"hpd_aux{n}", rf"HPD{n}_|DP_AUX{n}_") for n in (0, 2, 3, 5)] + [(f"dig{n}_dp{n}", rf"DIG{n}_|DP{n}_|AFMT{n}_") for n in (0, 2, 3, 5)]
 PLANE_GROUPS = ("hubp0", "dpp0")
 
 

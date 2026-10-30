@@ -64,6 +64,8 @@ The stages that **write to the GPU** (PSP load, ring, TMR, DMCUB load, DisplayPo
 
 With `rednavi_fb=1` (and `rednavi_dcn_replay=14`) the probe publishes where the scanout surface is, and a second kext, `RedNaviFB.kext`, hands it to WindowServer. It is a separate kext because it links against IOGraphicsFamily, which lives in the system kernel collection, so OpenCore cannot inject it. Install it through the auxiliary kernel collection (SIP off, `codesign -f -s -`, `kmutil load -p`), as described in [docs/DP_BRINGUP.md](docs/DP_BRINGUP.md). If macOS also shows a second, nameless display, that is the stock firmware boot framebuffer, not a second output. Boot-arg `-wegnoigpu` (WhateverGreen) switches the Intel iGPU off so the card is the only display.
 
+**Linux owners (no macOS needed):** `sudo python3 tools/linux_collect.py` from a text console with the monitor lit writes one `rednavi_report_*.tar.gz` (IP blocks, connectors, amdgpu log lines, the display registers of the connector that is lit; no EDID, no serial numbers) to attach to an issue.
+
 Please post decoded output in an issue, together with your board and BIOS settings (Above 4G Decoding, Resizable BAR).
 
 ## Contributing

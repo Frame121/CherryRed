@@ -9,7 +9,7 @@ Every line is written to the output file and fsynced before the next register is
 fsynced) before the first register of each group, so if a read ever locks the machine the file shows the group and the last
 register reached.
 
-Groups, safest first: hpd_aux4 dig4_dp4 clocks otg0 opp0 mpc hubbub hubp0 dpp0 dcnvm dcio; for a monitor on DIG1 (e.g. HDMI on a Navi 33): hpd_aux1 dig1_hdmi. With no group names it reads the first six.
+Groups, safest first: hpd_aux4 dig4_dp4 clocks otg0 opp0 mpc hubbub hubp0 dpp0 dcnvm dcio; for a monitor on another DIG: hpd_aux<N> and dig<N>_dp<N> (hpd_aux1 dig1_hdmi for DIG1); tools/linux_collect.py picks them. With no group names it reads the first six.
 The list is for the DisplayPort path of the Navi 32 development board (HPD4/AUX4/DIG4): if your monitor is on another connector
 the DIG4/HPD4 registers read as idle (DIG4_DIG_FE_CNTL 0). The DMU register bases are read from the kernel's IP discovery in sysfs
 (hw_id 271) and fall back to Navi 32's.
@@ -49,6 +49,34 @@ def dmu_bases(dev):
     return None
 
 
+def dump(card, dev, reglist, out_path, groups, bases):
+    """Reads the registers of the given groups into out_path (appending), fsyncing every line."""
+    regs = [l.split() for l in open(reglist) if l.strip()]
+    fd = os.open(card + "/amdgpu_regs", os.O_RDONLY)
+    out = open(out_path, "a")
+    values = {}
+
+    def emit(text):
+        out.write(text + "\n")
+        out.flush()
+        os.fsync(out.fileno())
+
+    emit("# device %s, DMU bases %s" % (dev, " ".join(hex(bases[i]) for i in sorted(bases))))
+    for g in groups:
+        emit(f"# group {g}")
+        for grp, name, idx, off in regs:
+            if grp != g:
+                continue
+            addr = (bases[int(idx)] + int(off, 16)) * 4
+            v, = struct.unpack("<I", os.pread(fd, 4, addr))
+            values[name] = v
+            emit(f"{name} {idx} {off} 0x{v:08x}")
+        emit(f"# done {g}")
+    out.close()
+    os.close(fd)
+    return values
+
+
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     args = sys.argv[1:]
@@ -70,32 +98,13 @@ def main():
         reglist, out_path, groups = groups[0], groups[1], groups[2:]
     card, dev = find_card()
     out_path = out_path or "dcn_pipe_%s.txt" % (dev or "unknown")
-    regs = [l.split() for l in open(reglist or os.path.join(here, "dcn32_pipe_reglist.txt")) if l.strip()]
-    groups = groups or DEFAULT
     bases = dmu_bases(dev)
     if bases is None:
         bases = NAVI32_BASES
         print("warning: no ip_discovery in sysfs, using Navi 32's DMU bases %s" % {i: hex(b) for i, b in bases.items()}, file=sys.stderr)
     elif bases != NAVI32_BASES:
         print("note: this card's DMU bases differ from Navi 32's: %s" % {i: hex(b) for i, b in bases.items()}, file=sys.stderr)
-    fd = os.open(card + "/amdgpu_regs", os.O_RDONLY)
-    out = open(out_path, "a")
-
-    def emit(text):
-        out.write(text + "\n")
-        out.flush()
-        os.fsync(out.fileno())
-
-    emit("# device %s, DMU bases %s" % (dev, " ".join(hex(bases[i]) for i in sorted(bases))))
-    for g in groups:
-        emit(f"# group {g}")
-        for grp, name, idx, off in regs:
-            if grp != g:
-                continue
-            addr = (bases[int(idx)] + int(off, 16)) * 4
-            v, = struct.unpack("<I", os.pread(fd, 4, addr))
-            emit(f"{name} {idx} {off} 0x{v:08x}")
-        emit(f"# done {g}")
+    dump(card, dev, reglist or os.path.join(here, "dcn32_pipe_reglist.txt"), out_path, groups or DEFAULT, bases)
     print("wrote %s" % out_path, file=sys.stderr)
 
 
