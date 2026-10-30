@@ -24,9 +24,11 @@ GROUPS = [
     ("dpp0", r"CNVC_CFG0_|CNVC_CUR0_|DSCL0_|CM0_|DPP_TOP0_|CURSOR0_|DPP0_"),
     ("dcnvm", r"DCN_VM_|DCN_"),
     # A monitor on another DIG (an RX 7600 on HDMI-A-2 has SYMCLKB enabled, front end 1): the same two groups as for DIG4.
-    ("hpd_aux1", r"HPD1_|DP_AUX1_"),
+    # The AUX data FIFO registers (AUX_SW_DATA, AUX_LS_DATA) are left out: on an HDMI connector the AUX channel is unused and reading
+    # DP_AUX1_AUX_SW_DATA made an RX 7600 stop answering on the bus (every later read was 0xffffffff, then it froze; issue #6).
+    ("hpd_aux1", r"HPD1_|DP_AUX1_AUX_(?!SW_DATA|LS_DATA)"),
     ("dig1_hdmi", r"DIG1_|DP1_"),
-] + [(f"hpd_aux{n}", rf"HPD{n}_|DP_AUX{n}_") for n in (0, 2, 3, 5)] + [(f"dig{n}_dp{n}", rf"DIG{n}_|DP{n}_") for n in (0, 2, 3, 5)] + [
+] + [(f"hpd_aux{n}", rf"HPD{n}_|DP_AUX{n}_AUX_(?!SW_DATA|LS_DATA)") for n in (0, 2, 3, 5)] + [(f"dig{n}_dp{n}", rf"DIG{n}_|DP{n}_") for n in (0, 2, 3, 5)] + [
     # NOT safe: the HDMI encoder and the audio format blocks are gated when unused, and reading them froze an RX 7600 (issue #6).
     # Not part of any default, and tools/linux_collect.py never reads them.
     ("unsafe_hdmi_afmt", r"AFMT\d_|HDMI_|HDMICHARCLK|HDMISTREAMCLK"),

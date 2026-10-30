@@ -66,6 +66,7 @@ def dump(card, dev, reglist, out_path, groups, bases):
         os.fsync(out.fileno())
 
     emit("# device %s, DMU bases %s" % (dev, " ".join(hex(bases[i]) for i in sorted(bases))))
+    ones = 0                                         # consecutive reads of 0xffffffff: the card has stopped answering on the bus
     for g in groups:
         emit(f"# group {g}")
         for grp, name, idx, off in regs:
@@ -75,6 +76,11 @@ def dump(card, dev, reglist, out_path, groups, bases):
             v, = struct.unpack("<I", os.pread(fd, 4, addr))
             values[name] = v
             emit(f"{name} {idx} {off} 0x{v:08x}")
+            ones = ones + 1 if v == 0xFFFFFFFF else 0
+            if ones >= 4:
+                emit(f"# ABORT: the GPU stopped answering (4 reads of 0xffffffff in a row) after {name}")
+                out.close()
+                raise SystemExit("the GPU stopped answering after %s (see %s); stopped reading" % (name, out_path))
         emit(f"# done {g}")
     out.close()
     os.close(fd)
