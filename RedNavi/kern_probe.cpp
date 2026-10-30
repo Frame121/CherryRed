@@ -1759,6 +1759,50 @@ void RedNaviProbe::sdmaTest() {
         uint32_t gv2[12] = {static_cast<uint32_t>(sr.ok), sr.rptr, sr.wptr, host[0], host[1], rn_vram_rd32(&gpu, vramDst), sr.fault_status, sr.fault_addr_lo,
                             sr.fault_addr_hi, host[0] == 0x11223344u, rn_vram_rd32(&gpu, vramDst) == 0x55667788u, sr.rptr_shadow};
         rnPublish(this, "gart-test", gn2, gv2, 12);
+
+        // The hub is on: a page is mapped at run time, used, then pointed at another host page and flushed. The second write must land
+        // in the new page; a stale translation would put it in the old one. Finally the PTE is removed again.
+        {
+            volatile uint32_t *h = static_cast<volatile uint32_t *>(hostBuf->getBytesNoCopy());   // 1024 dwords per page
+            h[3 * 1024] = 0x0; h[2 * 1024 + 1] = 0x0;
+            const uint64_t va = kGartVa + 8 * 4096;
+            int f1 = rn_gart_update_page(&gpu, &gmc, 8, hostBus + 3 * 4096ull);                    // page 8 -> host page 3
+            const uint32_t pk1[5] = {2u, lower_32_bits(va), upper_32_bits(va), 0u, 0x99887766u};
+            struct rn_sdma_run_result r1, r2;
+            rn_sdma0_run(&gpu, kRNVramMcBase, 0x0C0B0000, 4096, pk1, 5, &r1);
+            const uint32_t w1 = h[3 * 1024];
+            int f2 = rn_gart_update_page(&gpu, &gmc, 8, hostBus + 2 * 4096ull);                    // page 8 -> host page 2
+            const uint32_t pk2[5] = {2u, lower_32_bits(va + 4), upper_32_bits(va + 4), 0u, 0xAABBCCDDu};
+            rn_sdma0_run(&gpu, kRNVramMcBase, 0x0C0B0000, 4096, pk2, 5, &r2);
+            const uint32_t w2 = h[2 * 1024 + 1], stale = h[3 * 1024 + 1];
+            int f3 = rn_gart_update_page(&gpu, &gmc, 8, 0);                                        // unmapped again
+            const char *dn2[10] = {"flush1", "flush2", "flush3", "first_in_page3", "second_in_page2", "second_in_old_page", "run1_ok", "run2_ok", "fault_status", "fault_addr_lo"};
+            uint32_t dv2[10] = {static_cast<uint32_t>(f1), static_cast<uint32_t>(f2), static_cast<uint32_t>(f3), w1, w2, stale,
+                                static_cast<uint32_t>(r1.ok), static_cast<uint32_t>(r2.ok), r2.fault_status, r2.fault_addr_lo};
+            rnPublish(this, "gart-dynamic", dn2, dv2, 10);
+
+            // More data on why the remapped page kept its old translation: what the page table holds after an update, whether a page that
+            // was never used before is mapped correctly after the hub is on, and a remap with a long pause before the flush.
+            const uint64_t pteBase = gmc.pt_vram_offset;
+            h[1024 + 2] = 0; h[5] = 0; h[1024 + 5] = 0;
+            rn_gart_update_page(&gpu, &gmc, 9, hostBus + 1 * 4096ull);                               // fresh page 9 -> host page 1
+            const uint32_t pteLo9 = rn_vram_rd32(&gpu, pteBase + 9 * 8), pteHi9 = rn_vram_rd32(&gpu, pteBase + 9 * 8 + 4);
+            const uint64_t va9 = kGartVa + 9 * 4096;
+            const uint32_t pk3[5] = {2u, lower_32_bits(va9 + 8), upper_32_bits(va9 + 8), 0u, 0xC0FFEE00u};
+            struct rn_sdma_run_result r3, r4;
+            rn_sdma0_run(&gpu, kRNVramMcBase, 0x0C0B0000, 4096, pk3, 5, &r3);
+            const uint32_t fresh = h[1024 + 2];                                                      // lands in host page 1 if the new mapping works
+            rn_gart_map_page(&gpu, &gmc, 9, hostBus + 0 * 4096ull);                                 // remap 9 -> host page 0, only the PTE
+            const uint32_t pteLo9b = rn_vram_rd32(&gpu, pteBase + 9 * 8);
+            IOSleep(50);
+            rn_gart_flush(&gpu);
+            IOSleep(50);
+            const uint32_t pk4[5] = {2u, lower_32_bits(va9 + 20), upper_32_bits(va9 + 20), 0u, 0xC0FFEE11u};
+            rn_sdma0_run(&gpu, kRNVramMcBase, 0x0C0B0000, 4096, pk4, 5, &r4);
+            const char *d3n[10] = {"pte9_lo", "pte9_hi", "pte9_lo_after_remap", "fresh_in_page1", "remap_in_page0", "remap_in_old_page1", "run3_ok", "run4_ok", "fault_status", "fault_addr_lo"};
+            uint32_t d3v[10] = {pteLo9, pteHi9, pteLo9b, fresh, h[5], h[1024 + 5], static_cast<uint32_t>(r3.ok), static_cast<uint32_t>(r4.ok), r4.fault_status, r4.fault_addr_lo};
+            rnPublish(this, "gart-dynamic2", d3n, d3v, 10);
+        }
     }
 
 #ifdef RN_HAVE_GC_FW

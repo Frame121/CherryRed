@@ -182,3 +182,11 @@ Not done: mapping and unmapping at runtime (a TLB invalidation through `GCVM_INV
 The handler is an `IOInterruptEventSource` on the MSI index, run on the PCI work loop. It acknowledges the IH ring by writing the read pointer from the write pointer (`rn_ih_ack`), which re-arms the next message (`IH_RB_CNTL.RPTR_REARM` is set when MSI is on), and counts. Verified on the RX 7800 XT (`msi-test`): `msi_count` 1 and `msi_last_wptr` 0x20 after the fence interrupt of the dispatch, the fence read once afterwards is there, no panic. The fence is not polled: `rn_compute_dispatch_test` takes a wait callback for that.
 
 Not done: more than one interrupt in a row (only one is tested), the other interrupt sources of the IH (page faults, SDMA), an interrupt-driven wait on a thread instead of a sleep loop, and the IH ring in system memory.
+
+### GART mappings at run time (2026-10-30)
+
+With the hub already on (`gart-dynamic`, `gart-dynamic2`, verified on the RX 7800 XT):
+
+- A **new** GART page mapped after `rn_gfxhub_enable` is used correctly by the very next access: SDMA wrote `0xC0FFEE00` through a page that had never been mapped before, and it landed in the host page the PTE names. The PTE written through `MM_INDEX` reads back correct (`0x22188067`: valid, system, snooped, readable, writeable, address bits 47:12).
+- **Reusing an address** does not work yet. After pointing an already used GART page at another host page, the next access still goes to the old one, whatever the flush: invalidation engine 17 with the request layout of `gfxhub_v3_0_3_get_invalidate_req` (it acknowledges at once), then also the `GCVM_L2_CNTL2` L1 TLB and L2 cache invalidation that `rn_gfxhub_enable` uses, with 50 ms pauses either side. Not understood. Untested ideas: invalidating from the SDMA ring the way `sdma_v6_0_ring_emit_vm_flush` does, the HDP flush Linux does first, an MMHUB invalidation too, stopping the queue first.
+- So the buffer code must hand out GART addresses that are never reused, and an unmap is only safe for an address that will not be mapped again. A 1 TB GART window of 4 KB pages is plenty for a session.

@@ -29,6 +29,42 @@ void rn_gart_clear(struct rn_device *adev, const struct rn_gmc *gmc) {
     for (u64 o = 0; o < pages * 8; o += 4) rn_vram_wr32(adev, gmc->pt_vram_offset + o, 0);   // every PTE invalid
 }
 
+int rn_gart_flush(struct rn_device *adev) {
+    u32 req = 0;                                                             // gfxhub_v3_0_3_get_invalidate_req(vmid 0, flush type 0)
+    req = REG_SET_FIELD(req, GCVM_INVALIDATE_ENG17_REQ, PER_VMID_INVALIDATE_REQ, 1);
+    req = REG_SET_FIELD(req, GCVM_INVALIDATE_ENG17_REQ, FLUSH_TYPE, 0);
+    req = REG_SET_FIELD(req, GCVM_INVALIDATE_ENG17_REQ, INVALIDATE_L2_PTES, 1);
+    req = REG_SET_FIELD(req, GCVM_INVALIDATE_ENG17_REQ, INVALIDATE_L2_PDE0, 1);
+    req = REG_SET_FIELD(req, GCVM_INVALIDATE_ENG17_REQ, INVALIDATE_L2_PDE1, 1);
+    req = REG_SET_FIELD(req, GCVM_INVALIDATE_ENG17_REQ, INVALIDATE_L2_PDE2, 1);
+    req = REG_SET_FIELD(req, GCVM_INVALIDATE_ENG17_REQ, INVALIDATE_L1_PTES, 1);
+    req = REG_SET_FIELD(req, GCVM_INVALIDATE_ENG17_REQ, CLEAR_PROTECTION_FAULT_STATUS_ADDR, 0);
+    WREG32_SOC15(RN_GC, 0, regGCVM_INVALIDATE_ENG17_REQ, req);
+    int rc = -1;
+    for (int i = 0; i < 100000; i++) {                                       // up to ~100 ms
+        if (RREG32_SOC15(RN_GC, 0, regGCVM_INVALIDATE_ENG17_ACK) & 1u) { rc = 0; break; }
+        udelay(1);
+    }
+    // The engine acknowledged but a changed PTE was still used on hardware (gart-dynamic test): also do what rn_gfxhub_enable does to
+    // start from empty caches, pulse the L1 TLB and L2 cache invalidation in GCVM_L2_CNTL2.
+    u32 tmp = RREG32_SOC15(RN_GC, 0, regGCVM_L2_CNTL2);
+    tmp = REG_SET_FIELD(tmp, GCVM_L2_CNTL2, INVALIDATE_ALL_L1_TLBS, 1);
+    tmp = REG_SET_FIELD(tmp, GCVM_L2_CNTL2, INVALIDATE_L2_CACHE, 1);
+    WREG32_SOC15(RN_GC, 0, regGCVM_L2_CNTL2, tmp);
+    udelay(100);
+    return rc;
+}
+
+int rn_gart_update_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 bus) {
+    if (bus) {
+        rn_gart_map_page(adev, gmc, page, bus);
+    } else {
+        const u64 slot = gmc->pt_vram_offset + (u64)page * 8;
+        rn_vram_wr32(adev, slot, 0); rn_vram_wr32(adev, slot + 4, 0);
+    }
+    return rn_gart_flush(adev);
+}
+
 void rn_gart_map_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 bus) {
     // AMDGPU_PTE_VALID | SYSTEM | SNOOPED | READABLE | WRITEABLE, address in bits 47:12
     const u64 pte = (bus & 0x0000FFFFFFFFF000ull) | 0x1ull | 0x2ull | 0x4ull | 0x20ull | 0x40ull;

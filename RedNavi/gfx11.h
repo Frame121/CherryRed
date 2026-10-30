@@ -85,6 +85,10 @@ void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc);
 // physical address gives it: valid, system, snooped, readable, writeable). Do this before rn_gfxhub_enable, which also flushes the TLBs.
 void rn_gart_map_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 bus_addr);
 void rn_gart_clear(struct rn_device *adev, const struct rn_gmc *gmc);
+// With the hub already on: change or remove a PTE (bus 0 = unmap), then flush VMID 0's TLBs through invalidation engine 17, the one
+// Linux reserves for the GART (gmc_v11_0_flush_vm_hub). Returns 0 once the engine acknowledges, -1 on timeout.
+int rn_gart_update_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 bus_addr);
+int rn_gart_flush(struct rn_device *adev);
 
 // Runs a packet list on SDMA0's gfx ring (the setup of rn_sdma0_test, reprogrammed) and waits for the read pointer to reach its end.
 // Addresses inside the packets are whatever the SDMA can translate: MC addresses in the VRAM aperture, or GART addresses.
