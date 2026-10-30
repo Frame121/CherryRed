@@ -120,3 +120,21 @@ The SET_SH_REG offset of a compute register is its absolute dword (GC segment 0 
 The `PGM_RSRC1/2` values (`0x002C0000`, `0x80`) are plausible defaults, not checked against compiler output; this shader touches no memory and no registers, so the first shader that does will test them.
 
 Not done: a shader that writes memory (needs GFX11 machine code for a global store and a VGPR address), shader memory configuration (`SH_MEM_*`), queue management through MES, GART, interrupts.
+
+### A shader that writes memory (2026-10-30)
+
+With `rednavi_dispatch_store=1` the dispatch of step 5 runs a shader that stores a dword instead of just ending. The machine code is written by hand, one 32-bit word at a time, from the encodings in LLVM's assembler tests (`llvm/test/MC/AMDGPU/gfx11_asm_*.s`, which print each instruction next to its bytes):
+
+| Instruction | Words |
+|---|---|
+| `s_mov_b32 s0, <address low>` | `0xBE8000FF`, literal |
+| `s_mov_b32 s1, <address high>` | `0xBE8100FF`, literal |
+| `v_mov_b32 v1, 0` | `0x7E020280` |
+| `v_mov_b32 v2, 0x600DC0DE` | `0x7E0402FF`, literal |
+| `global_store_b32 v1, v2, s[0:1]` | `0xDC6A0000`, `0x00000201` |
+| `s_waitcnt_vscnt null, 0x0` | `0xBC7C0000` |
+| `s_endpgm` | `0xBFB00000` |
+
+Verified on the RX 7800 XT: the target dword in VRAM goes from `0xDEAD0000` to `0x600DC0DE`, the `RELEASE_MEM` fence is written, no VM fault. So a real wave runs, executes scalar and vector moves and a global store through the GPU VM (the system aperture on the VRAM range), with `PGM_RSRC1` `0x002C0000` and `PGM_RSRC2` `0x80`, and without any `SH_MEM_*` setup for VMID 0.
+
+`v_mov_b32` encoding: bits 8:0 source (literal 255, inline zero 128), 16:9 opcode (1), 24:17 destination VGPR, 31:25 `0x3F`. `s_mov_b32`: `0xBE80FF00 | ...` with the destination SGPR in bits 22:16 (`0xBE8000FF` is `s0`, `0xBE8100FF` is `s1`).

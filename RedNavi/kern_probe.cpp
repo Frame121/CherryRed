@@ -1730,15 +1730,17 @@ void RedNaviProbe::sdmaTest() {
             uint32_t disp = 0;
             if (cr.ok && PE_parse_boot_argn("rednavi_dispatch_test", &disp, sizeof(disp)) && disp == 1) {
                 struct rn_dispatch_result dr;
-                rn_compute_dispatch_test(&gpu, kRNVramMcBase, 0x0C020000, 0x0C030000, 0x0C031000, &dr);
-                const char *dn[24] = {"step", "ok", "fence", "fence_before", "rptr", "wptr", "active", "scratch", "fault_status", "fault_addr_lo", "fault_addr_hi",
+                uint32_t store = 0;
+                PE_parse_boot_argn("rednavi_dispatch_store", &store, sizeof(store));   // 1: the shader stores a dword, 0: s_endpgm only
+                rn_compute_dispatch_test(&gpu, kRNVramMcBase, 0x0C020000, 0x0C030000, 0x0C031000, store == 1 ? 0x0C032000 : 0, &dr);
+                const char *dn[26] = {"step", "ok", "fence", "fence_before", "rptr", "wptr", "active", "scratch", "fault_status", "fault_addr_lo", "fault_addr_hi",
                                       "t0_rptr", "t0_fence", "t1_rptr", "t1_fence", "t5_rptr", "t5_fence", "t20_rptr", "t20_fence",
-                                      "t100_rptr", "t100_fence", "t500_rptr", "t500_fence"};
-                uint32_t dv[24] = {dr.step, static_cast<uint32_t>(dr.ok), dr.fence, dr.fence_before, dr.rptr, dr.wptr, dr.active, dr.scratch,
+                                      "t100_rptr", "t100_fence", "t500_rptr", "t500_fence", "target", "target_before"};
+                uint32_t dv[26] = {dr.step, static_cast<uint32_t>(dr.ok), dr.fence, dr.fence_before, dr.rptr, dr.wptr, dr.active, dr.scratch,
                                    dr.fault_status, dr.fault_addr_lo, dr.fault_addr_hi,
                                    dr.trace[0][0], dr.trace[0][1], dr.trace[1][0], dr.trace[1][1], dr.trace[2][0], dr.trace[2][1],
-                                   dr.trace[3][0], dr.trace[3][1], dr.trace[4][0], dr.trace[4][1], dr.trace[5][0], dr.trace[5][1]};
-                rnPublish(this, "dispatch-test", dn, dv, 23);
+                                   dr.trace[3][0], dr.trace[3][1], dr.trace[4][0], dr.trace[4][1], dr.trace[5][0], dr.trace[5][1], dr.target, dr.target_before};
+                rnPublish(this, "dispatch-test", dn, dv, 25);
             }
         }
     }

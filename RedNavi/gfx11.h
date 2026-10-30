@@ -55,6 +55,7 @@ struct rn_compute_result {
 struct rn_dispatch_result {
     u32 step;
     u32 fence, fence_before, rptr, wptr, active, scratch;
+    u32 target, target_before;                // the dword the shader stores to (0 if no store was asked for)
     u32 trace[6][2];                          // CP_HQD_PQ_RPTR and the fence at 0, 1, 5, 20, 100, 500 ms after the wptr write
     u32 fault_status, fault_addr_lo, fault_addr_hi;
     int ok;
@@ -87,8 +88,10 @@ void rn_compute_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_off
 // (SET_SH_REG: program address, resources, thread counts) and run as one workgroup of one thread (DISPATCH_DIRECT), followed by a
 // RELEASE_MEM that writes 0xF00DF00D to a fence in VRAM when the dispatch is done. Written from nvd.h and the register headers, and
 // from the packet layout of gfx_v11_0_ring_emit_fence; NOT yet run on hardware.
+// With target_vram_offset nonzero the shader is not just s_endpgm: it stores 0x600DC0DE to that VRAM dword (global_store_b32, the
+// instruction words hand-assembled from the encodings in LLVM's MC tests, llvm/test/MC/AMDGPU/gfx11_asm_*.s).
 void rn_compute_dispatch_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u64 shader_vram_offset, u64 fence_vram_offset,
-                              struct rn_dispatch_result *res);
+                              u64 target_vram_offset, struct rn_dispatch_result *res);
 
 #ifdef __cplusplus
 }

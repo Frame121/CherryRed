@@ -503,16 +503,31 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
 #define RN_COMPUTE_RESOURCE_LIMITS 0x1bb5u
 #define RN_COMPUTE_PGM_RSRC3 0x1bc8u
 
-void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u64 shaderOff, u64 fenceOff, struct rn_dispatch_result *res) {
+void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u64 shaderOff, u64 fenceOff, u64 targetOff,
+                              struct rn_dispatch_result *res) {
     memset(res, 0, sizeof(*res));
     const u64 shaderVa = vaBase + shaderOff, fenceVa = vaBase + fenceOff;
     const u64 wptrOff = ringOff + 0x1008;
     const u32 gcBase = adev->reg_offset[RN_GC_HWIP][0][0];
     #define SHREG(reg) (gcBase + (reg) - RN_PACKET3_SET_SH_REG_START)
 
-    // the shader: s_endpgm (GFX11 SOPP opcode 48), then s_code_end padding up to 256 bytes
-    rn_vram_wr32(adev, shaderOff, 0xBFB00000u);
-    for (u32 o = 4; o < 256; o += 4) rn_vram_wr32(adev, shaderOff + o, 0xBF9F0000u);
+    // the shader: s_endpgm (GFX11 SOPP opcode 48) alone, or a store of one dword followed by s_endpgm; s_code_end padding up to 256 bytes
+    u32 code[16];
+    u32 nc = 0;
+    if (targetOff) {
+        const u64 targetVa = vaBase + targetOff;
+        code[nc++] = 0xBE8000FFu; code[nc++] = lower_32_bits(targetVa);     // s_mov_b32 s0, <address low>
+        code[nc++] = 0xBE8100FFu; code[nc++] = upper_32_bits(targetVa);     // s_mov_b32 s1, <address high>
+        code[nc++] = 0x7E020280u;                                           // v_mov_b32 v1, 0           (offset)
+        code[nc++] = 0x7E0402FFu; code[nc++] = 0x600DC0DEu;                 // v_mov_b32 v2, 0x600DC0DE  (data)
+        code[nc++] = 0xDC6A0000u; code[nc++] = 0x00000201u;                 // global_store_b32 v1, v2, s[0:1]
+        code[nc++] = 0xBC7C0000u;                                           // s_waitcnt_vscnt null, 0x0
+        rn_vram_wr32(adev, targetOff, 0xDEAD0000u);
+        res->target_before = rn_vram_rd32(adev, targetOff);
+    }
+    code[nc++] = 0xBFB00000u;                                               // s_endpgm
+    for (u32 i = 0; i < nc; i++) rn_vram_wr32(adev, shaderOff + i * 4, code[i]);
+    for (u32 o = nc * 4; o < 256; o += 4) rn_vram_wr32(adev, shaderOff + o, 0xBF9F0000u);
     rn_vram_wr32(adev, fenceOff, 0x0BADF00Du);
     res->fence_before = rn_vram_rd32(adev, fenceOff);
 
@@ -569,6 +584,7 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u
     res->wptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
     res->active = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
     res->scratch = RREG32_SOC15(RN_GC, 0, regSCRATCH_REG0);
+    if (targetOff) res->target = rn_vram_rd32(adev, targetOff);
     res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
     res->fault_addr_lo = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
     res->fault_addr_hi = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_HI32);
