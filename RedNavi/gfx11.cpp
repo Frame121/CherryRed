@@ -476,13 +476,9 @@ static void computeSubmit(struct rn_device *adev, u64 wptrShadowOff, u32 wptr) {
     WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_HI, 0);
 }
 
-void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, struct rn_compute_result *res) {
-    memset(res, 0, sizeof(*res));
-    const u64 ringVa = vaBase + ringOff;
-    const u64 rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008, mqdOff = ringOff + 0x2000, eopOff = ringOff + 0x4000;
+// gfx_v11_0_cp_compute_enable(true): the four MEC pipes out of reset and active, ucode cache valid, MEC running.
+void rn_mec_enable(struct rn_device *adev) {
     u32 tmp;
-
-    // gfx_v11_0_cp_compute_enable(true): the four MEC pipes out of reset and active, ucode cache valid, MEC running
     tmp = RREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_CNTL);
     tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_INVALIDATE_ICACHE, 0);
     tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_PIPE0_RESET, 0);
@@ -496,6 +492,15 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
     tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_HALT, 0);
     WREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_CNTL, tmp);
     udelay(50);
+}
+
+void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, struct rn_compute_result *res) {
+    memset(res, 0, sizeof(*res));
+    const u64 ringVa = vaBase + ringOff;
+    const u64 rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008, mqdOff = ringOff + 0x2000, eopOff = ringOff + 0x4000;
+    u32 tmp;
+
+    rn_mec_enable(adev);
     res->step = 1;
 
     // the packet: SET_UCONFIG_REG SCRATCH_REG0 = 0xDEADBEEF (a compute ring is tested with it too), padded to 8 dwords
@@ -1207,11 +1212,13 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     static_assert(sizeof(union MESAPI_SET_HW_RESOURCES) == 256 && sizeof(union MESAPI__ADD_QUEUE) == 256 &&
                   sizeof(union MESAPI__QUERY_MES_STATUS) == 256, "MES API frames are 64 dwords");
     memset(res, 0, sizeof(*res));
+    if (!gDoorbellBase) return;                                // the rings are driven by doorbell writes
     // VRAM map (all below the GART page table at 0x0C100000): MES KIQ ring at base, MES scheduler ring at base + 0x10000, shared words at +0x20000,
     // the legacy compute queue at +0x30000. In each: ring, rptr at +0x1000, wptr at +0x1008, MQD at +0x2000, EOP at +0x4000.
     const u64 kiqOff = base, schedOff = base + 0x10000, sharedOff = base + 0x20000, qOff = base + 0x30000;
     const u64 schCtxOff = sharedOff, queryFenceOff = sharedOff + 0x10, ringFenceOff = sharedOff + 0x20, apiStatusOff = sharedOff + 0x100;
-    const u32 qPipe = 0, qQueue = 1;   // a kernel-owned queue: outside the MES hqd mask (0xf0), as Linux maps its legacy queues
+    const u32 qPipe = 0, qQueue = 0;   // a kernel-owned queue (outside the MES hqd mask 0xc), as Linux maps its first compute ring
+    const u32 legDb = 6;               // mec_ring0 << 1
 
     // step 1: enable (mes_v11_0_enable): reset both pipes, give each its program counter, then un-halt and activate both
     if (progress) progress(ctx, 1);
@@ -1335,7 +1342,9 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         p.query_status_fence_gpu_mc_ptr = vaBase + queryFenceOff;
         // Linux (6.x, same card, docs/logs/linux-reference/mes_dmesg_linux.txt) reports compute_hqd_mask 0x0000000c: the MES schedules only queues 2 and 3 of a
         // pipe. 0xf0 named queues the scheduler never uses, so it found no hardware queue to load a process queue into. Pipe 0 is left to the hand-programmed queues.
-        p.compute_hqd_mask[0] = 0;
+        // The legacy path is the real one (no hand-made queue is expected in the way): all four pipes, queues 2 and 3, as Linux. The process path (step 7 and up)
+        // keeps pipe 0 for the hand-programmed queues.
+        p.compute_hqd_mask[0] = maxStep >= 7 ? 0 : 0xc;
         for (int i = 1; i < 4; i++) p.compute_hqd_mask[i] = 0xc;
         p.gfx_hqd_mask[0] = 0x2; p.sdma_hqd_mask[0] = 0xfc; p.sdma_hqd_mask[1] = 0xfc;
         for (int i = 0; i < AMD_PRIORITY_NUM_LEVELS; i++) p.aggregated_doorbells[i] = kMesDbStart + i * 2;   // one doorbell per priority level, in the page after the kernel doorbells (amdgpu_mes_doorbell_init)
@@ -1371,7 +1380,8 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
 
     // step 5: map a legacy kernel compute queue (ME 1) through the scheduler (mes_v11_0_map_legacy_queue)
     if (progress) progress(ctx, 5);
-    writeComputeMqd(adev, vaBase, qOff, 4096, qOff + 0x2000, qOff + 0x4000, kMappedDoorbellDword);
+    gMappedDoorbell = legDb;
+    writeComputeMqd(adev, vaBase, qOff, 4096, qOff + 0x2000, qOff + 0x4000, legDb);
     {
         // amdgpu_gfx_mes_enable_kcq: SET_RESOURCES on the KIQ ring with every queue in the mask comes before the legacy queue is mapped
         u32 pk[8];
@@ -1444,7 +1454,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         p.header.dwsize = API_FRAME_SIZE_IN_DWORDS;
         p.pipe_id = qPipe;
         p.queue_id = qQueue;
-        p.doorbell_offset = kMappedDoorbellDword;
+        p.doorbell_offset = legDb;
         p.mqd_addr = vaBase + qOff + 0x2000;
         p.wptr_addr = vaBase + qOff + 0x1008;
         p.queue_type = MES_QUEUE_TYPE_COMPUTE;
@@ -1459,7 +1469,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         for (u32 q = 0; q < 8; q++) {
             grbmSelect(adev, 1, pipe, 0, q);
             const u32 act = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE), db = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL);
-            if ((act & 1u) && ((db >> 2) & 0x3ffffffu) == kMappedDoorbellDword) {
+            if ((act & 1u) && ((db >> 2) & 0x3ffffffu) == gMappedDoorbell) {
                 res->q_active = act; res->q_doorbell_ctl = db; foundPipe = pipe; foundQueue = q;
                 break;
             }

@@ -2150,7 +2150,17 @@ void RedNaviProbe::sdmaTest() {
                 }
             }
             struct rn_compute_result cr;
-            rn_compute_ring_test(&gpu, kRNVramMcBase, 0x0C020000, 4096, &cr);
+            uint32_t gcAwake = 0;     // rednavi_gc_awake=1: hold the RLC safe mode (the GC cannot enter GFXOFF) for the rest of the session; queues set up by hand
+            PE_parse_boot_argn("rednavi_gc_awake", &gcAwake, sizeof(gcAwake));      // are lost when the GC powers down
+            if (gcAwake == 1) rn_gc_safe_mode(&gpu, 1);
+            uint32_t mesClean = 0;    // rednavi_mes_clean=1: no hand-programmed queue at all, only the MEC running and the doorbells mapped; the MES maps the queue
+            PE_parse_boot_argn("rednavi_mes_clean", &mesClean, sizeof(mesClean));
+            if (mesClean == 1 || mesClean == 2) {
+                memset(&cr, 0, sizeof(cr));
+                rn_mec_enable(&gpu);
+            } else {
+                rn_compute_ring_test(&gpu, kRNVramMcBase, 0x0C020000, 4096, &cr);
+            }
             const char *cn[33] = {"step", "ok", "scratch", "active_rd", "pq_control_rd", "mqd_base_rd", "rptr", "wptr", "rptr_shadow", "ring0",
                                   "fault_status", "fault_addr_lo", "fault_addr_hi",
                                   "t0_cntl", "t0_active", "t0_rptr", "t1_cntl", "t1_active", "t1_rptr", "t2_cntl", "t2_active", "t2_rptr",
@@ -2271,6 +2281,10 @@ void RedNaviProbe::sdmaTest() {
                     }
                 }
                 if ((mr.q_active & 1u) || mr.add_ok) computeRingOff = 0x0C0A0000 + 0x30000;   // the queue the MES mapped
+                if (mesClean == 1 && ((mr.q_active & 1u) || mr.add_ok)) cr.ok = 1;
+                if (mesClean == 2) {      // the MES is up (step 4): now a hand-programmed queue, to see whether it survives with the MES running
+                    rn_compute_ring_test(&gpu, kRNVramMcBase, 0x0C020000, 4096, &cr);
+                }   // lets the tests that use the queue run on the MES-mapped one
             }
             // Opt-in (rednavi_kiq_test=1): the way Linux runs compute queues. The queue programmed by hand above is reset by the
             // firmware on the next doorbell after the boot-time tests; a queue mapped through the KIQ is the firmware's own.

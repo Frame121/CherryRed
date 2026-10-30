@@ -161,6 +161,7 @@ void rn_compute_diag(struct rn_device *adev, u32 out[11]);   // out[8..10]: SDMA
 // MEC doorbell range (lower, upper), NBIO DOORBELL_APER_EN, HQD PQ base, PQ control, MQD base.
 void rn_compute_diag2(struct rn_device *adev, u32 out[8]);
 void rn_mes_state(struct rn_device *adev, u32 out[15]);
+void rn_mec_enable(struct rn_device *adev);   // MEC pipes out of reset and running, no queue
 void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]);   // CP_MES_DOORBELL_CONTROL1..6 per MES pipe
 void rn_scan_hqds(struct rn_device *adev, u32 out[33]);   // the active ME 1 queues: 8 x {pipe*8+queue, doorbell control, rptr, wptr}, count
 
