@@ -1,6 +1,27 @@
 # Recovery Checkpoint
 
-- **LATEST CHECKPOINT: 2026-10-30 — BOARD FIRMWARE MANIFEST + VBIOS IDENTITY
+- **LATEST CHECKPOINT: 2026-10-31 — MAC-DAY STAGES 0–2 COMPLETE ON TARGET;
+  Navi33Bringup.kext BUILT+SIGNED; STAGE 3 PACKED AND WAITING FOR ONE SUDO
+  COMMAND.** The bring-up scaffold was compiled for the first time on the
+  Tahoe target (`~/Developer/cherryred-macday-20261030/`; two required source
+  fixes recorded as patches there: `<stdint.h>`/`uint16_t` in
+  `Navi33PciMatch.hpp`, `UInt8` offset in `surveyPcieLink`). OSBundleLibraries
+  validated against the live BKC (pexpert no longer exists on Tahoe; declared
+  set matches loaded Lilu/WEG practice). Firmware 14/14 hash pins re-verified.
+  Full host suites all pass. Stage 3 (OpenCore injection + `navi33bringup=1`)
+  is fully prepared in `stage3/` (`stage3_apply.sh` with double ESP backup and
+  `--rollback`; `stage3_verify_after_reboot.sh` runs the Stage 4 comparison
+  without sudo) and is BLOCKED only on the user's sudo password — the ESP
+  cannot be mounted as user. Stage 4 pre-comparison (userspace ioreg vs Linux
+  evidence) is recorded: identity/link/VRAM and the three non-ReBAR BARs match
+  byte-for-byte; the two 64-bit prefetchable BARs differ exactly as
+  ReBAR-programmable BARs are expected to. NEXT ACTION after reboot:
+  `sh ~/Developer/cherryred-macday-20261030/stage3/stage3_verify_after_reboot.sh`
+  then record the kernel-survey evidence in the repo. Do not claim Metal or
+  acceleration: Stages 5.3–5.7 remain unimplemented and no IOAccelerator
+  exists. Previous checkpoint (2026-10-30) below.
+
+- **CHECKPOINT: 2026-10-30 — BOARD FIRMWARE MANIFEST + VBIOS IDENTITY
   INTAKE COMPLETE; SESSION RUNS DIRECTLY ON THE TAHOE TARGET.** This session
   executes on the target Mac itself (macOS 26.7.1 Tahoe x86_64, RX 7600
   enumerated), so no Remote Desktop hop was required. Work completed:

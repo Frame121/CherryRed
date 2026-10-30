@@ -1,0 +1,48 @@
+            | |   "VRAM,totalMB" = <00200000>
+            | |   "IOPMIsPowerManaged" = Yes
+            | |   "compatible" = <"pci148c,2421","pci1002,7480","pciclass,030000","VGA","GFX0">
+            | |   "IOPCIExpressDeviceCapabilities2" = 41093535
+            | |   "IOHibernateState" = <00000000>
+            | |   "IOPCIExpressDeviceCapabilities" = 36769
+            | |   "attached-gpu-control-path" = "IOService:/AppleACPIPlatformExpert/PCI0@0/AppleACPIPCI/GPP0@1,1/IOPP/SWUS@0/IOPP/SWDS@0/IOPP/GFX0@0/IONDRVFramebuffer/AGPM"
+            | |   "reg" = <000003000000000000000000000000000000000010000342000000000000000000000000000000101800034200000000000000000000000000002000200003010000000000000000000000000001000024000302000000000000000000000000000010003000030200000000000000000000000000000200>
+            | |   "IOPCIPowerManagementCapabilities" = 18446744073441338369
+            | |   "device-id" = <80740000>
+            | |   "revision-id" = <cf000000>
+            | |   "IOPCIAERCapabilities" = 160
+            | |   "IOPCIExpressLinkCapabilities2" = 25165854
+            | |   "acpi-path" = "IOACPIPlane:/_SB/PCI0@0/GPP0@10001/SWUS@0/SWDS@0/VGA@0"
+            | | }
+            | | 
+            | +-o AMDSupport  <class AMDSupport, id 0x1000004dd, registered, matched, active, busy 0 (47 ms), retain 5>
+            | +-o .Display_boot  <class IONDRVFramebuffer, id 0x1000004de, registered, matched, active, busy 0 (65 ms), retain 22>
+            |   +-o AppleMCCSControlModule  <class AppleMCCSControlModule, id 0x1000004f8, registered, matched, active, busy 0 (0 ms), retain 7>
+            |   | +-o AppleMCCSParameterHandler  <class AppleMCCSParameterHandler, id 0x1000004ff, registered, matched, active, busy 0 (0 ms), retain 5>
+            |   +-o AppleUpstreamUserClientDriver  <class AppleUpstreamUserClientDriver, id 0x1000004f9, registered, matched, active, busy 0 (0 ms), retain 5>
+            |   +-o display0  <class IODisplayConnect, id 0x1000005aa, registered, matched, active, busy 0 (0 ms), retain 6>
+            |   | +-o AppleDisplay  <class AppleDisplay, id 0x1000005ac, registered, matched, active, busy 0 (0 ms), retain 8>
+            |   +-o IOFramebufferSharedUserClient  <class IOFramebufferSharedUserClient, id 0x1000006a2, !registered, !matched, active, busy 0, retain 5>
+            |   +-o IOFramebufferUserClient  <class IOFramebufferUserClient, id 0x100001309, !registered, !matched, active, busy 0, retain 5>
+            +-o HDAU@0,1  <class IOPCIDevice, id 0x100000267, registered, matched, active, busy 0 (1 ms), retain 9>
+                {
+                  "acpi-device" = "IOACPIPlatformDevice is not serializable"
+                  "IOInterruptSpecifiers" = (<0100000007000000>,<0800000000000100>)
+                  "assigned-addresses" = <10010382000000000000c2fc0000000000400000>
+                  "vendor-id" = <02100000>
+                  "class-code" = <00030400>
+                  "subsystem-vendor-id" = <02100000>
+                  "IOPCIExpressLinkCapabilities" = 4487300
+                  "IOName" = "pci1002,ab30"
+                  "pcidebug" = "3:0:1"
+                  "IOChildIndex" = 2
+                  "IOPCIExpressLinkStatus" = 4228
+                  "IOPCIExpressCapabilities" = 18
+                  "Capability Offsets" = {"VendorSpecificCapability"=72,"PowerManagementCapability"=80,"PCIExpressCapability"=100,"ErrorReportingCapability"=336,"AccessControlServicesCapability"=672,"MSICapability"=160,"VSEC"=256}
+                  "IOServiceDEXTEntitlements" = (("com.apple.developer.driverkit.transport.pci"))
+                  "IOInterruptControllers" = ("io-apic-1","IOPCIMessagedInterruptController")
+                  "built-in" = <00>
+                  "IOBusyInterest" = "IOCommand is not serializable"
+                  "IOPowerManagement" = {"CurrentPowerState"=2,"CapabilityFlags"=258,"ChildProxyPowerState"=2,"MaxPowerState"=3}
+                  "IOPCIResourced" = Yes
+                  "IODeviceMemory" = (({"address"=4240572416,"length"=16384}))
+                  "IOPCIMSIMessageControl" = 128
