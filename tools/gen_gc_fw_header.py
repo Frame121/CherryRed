@@ -111,6 +111,10 @@ def main():
         for n in ("pfp", "me", "mec"):
             d = open(f"{sys.argv[1]}/gc_11_0_3_{n}.bin", "rb").read()
             f.write(f"#define kRNGc{n.capitalize()}StartLo 0x{u32(d, 52):x}u\n#define kRNGc{n.capitalize()}StartHi 0x{u32(d, 56):x}u\n")
+        # MES: program counter start of the two pipes (mes_firmware_header_v1_0: mes_uc_start_addr_lo/hi at 56/60), 64-bit, for gfx11.cpp
+        for n, fn in (("0", "mes_2"), ("1", "mes1")):
+            d = open(f"{sys.argv[1]}/gc_11_0_3_{fn}.bin", "rb").read()
+            f.write(f"#define kRNMes{n}StartLo 0x{u32(d, 56):x}u\n#define kRNMes{n}StartHi 0x{u32(d, 60):x}u\n")
         f.write("static const unsigned char kRNGcFwBlob[] = {\n")
         blob = b"".join(d for _, _, d in items)
         for j in range(0, len(blob), 16):

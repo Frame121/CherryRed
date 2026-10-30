@@ -159,6 +159,24 @@ void rn_compute_diag(struct rn_device *adev, u32 out[11]);   // out[8..10]: SDMA
 // The doorbell and queue registers as they are now (compare with the values that were programmed): HQD doorbell control, CP_PQ_STATUS, the
 // MEC doorbell range (lower, upper), NBIO DOORBELL_APER_EN, HQD PQ base, PQ control, MQD base.
 void rn_compute_diag2(struct rn_device *adev, u32 out[8]);
+void rn_mes_state(struct rn_device *adev, u32 out[15]);
+
+struct rn_mes_result {
+    u32 step;
+    u32 cntl, p0_pc, p0_pc10, p1_pc, p1_pc10;     // CP_MES_CNTL and the instruction pointers of both pipes (the second 10 ms after the first)
+    u32 kiq_active, kiq_doorbell_ctl, kiq_rptr;   // the MES KIQ queue (ME 3, pipe 1)
+    u32 sched_active;                              // the scheduler queue (ME 3, pipe 0) loaded through MAP_QUEUES
+    u32 ring_fence, api_status;                    // QUERY_SCHEDULER_STATUS fence and the last frame's completion word
+    int hw_res_ok, add_ok;
+    u32 hw_res1_status;
+    u32 log_hist[16], log_scratch[16];            // first dwords of the two halves of the MES event log
+    u32 q_active, q_doorbell_ctl, fault_status;    // the legacy compute queue mapped by ADD_QUEUE
+    u32 sched_version, kiq_version, sched_rptr, sched_wptr, mepc, mcause, ring_fence_late, p0_pc_end;   // diagnostics after the last stage
+};
+// Bring up the MES in stages (docs/COMPAT.md): start[] = {pipe0 start lo, hi, pipe1 start lo, hi} from the firmware headers. Needs the doorbell
+// aperture mapped (rn_doorbell_aperture_enable and rn_set_doorbell). base is a VRAM offset with 0x40000 bytes free.
+void rn_mes_start(struct rn_device *adev, u64 va_base, u64 base, const u32 start[4], u32 max_step, void (*progress)(void *ctx, u32 step),
+                  void *ctx, struct rn_mes_result *res);   // read-only: MES control and the state of its two pipes
 void rn_gc_safe_mode(struct rn_device *adev, int enter);
 u32 rn_build_dispatch_ib(struct rn_device *adev, u32 *ib, u64 shader_va);
 

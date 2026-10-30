@@ -2226,6 +2226,48 @@ void RedNaviProbe::sdmaTest() {
                     }
                 }
             }
+            // Opt-in (rednavi_mes_probe=1): read-only state of the MES (is it running?). Published as "mes-state".
+            uint32_t mesProbe = 0;
+            if (PE_parse_boot_argn("rednavi_mes_probe", &mesProbe, sizeof(mesProbe)) && mesProbe == 1) {
+                uint32_t m[15];
+                rn_mes_state(&gpu, m);
+                const char *mn[15] = {"cntl", "p0_pc", "p0_pc_10ms", "p0_mepc", "p0_mcause", "p0_mbadaddr", "p0_gp0", "p0_gp3",
+                                      "p1_pc", "p1_pc_10ms", "p1_mepc", "p1_mcause", "p1_mbadaddr", "p1_gp0", "p1_gp3"};
+                rnPublish(this, "mes-state", mn, m, 15);
+            }
+            // Opt-in (rednavi_mes_step=N, 1..5): bring up the MES in stages (docs/COMPAT.md); "mes-progress" names the stage about to run.
+            uint32_t mesStep = 0;
+            if (PE_parse_boot_argn("rednavi_mes_step", &mesStep, sizeof(mesStep)) && mesStep >= 1) {
+                struct rn_mes_result mr;
+                const uint32_t start[4] = {kRNMes0StartLo, kRNMes0StartHi, kRNMes1StartLo, kRNMes1StartHi};
+                rn_mes_start(&gpu, kRNVramMcBase, 0x0C0A0000, start, mesStep,
+                             [](void *ctx, uint32_t step) {
+                                 RedNaviProbe *self = static_cast<RedNaviProbe *>(ctx);
+                                 const char *pn[1] = {"about_to_run"};
+                                 uint32_t pv[1] = {step};
+                                 rnPublish(self, "mes-progress", pn, pv, 1);
+                                 IOLog("RedNavi: MES step %u\n", step);
+                                 IOSleep(100);
+                             }, this, &mr);
+                const char *mn[25] = {"step", "cntl", "p0_pc", "p0_pc10", "p1_pc", "p1_pc10", "kiq_active", "kiq_doorbell_ctl", "kiq_rptr", "sched_active",
+                                      "ring_fence", "api_status", "hw_res_ok", "add_ok", "q_active", "q_doorbell_ctl", "fault_status", "sched_version", "kiq_version", "sched_rptr", "sched_wptr", "mepc", "mcause", "ring_fence_late", "p0_pc_end"};
+                uint32_t mv[25] = {mr.step, mr.cntl, mr.p0_pc, mr.p0_pc10, mr.p1_pc, mr.p1_pc10, mr.kiq_active, mr.kiq_doorbell_ctl, mr.kiq_rptr,
+                                   mr.sched_active, mr.ring_fence, mr.api_status, static_cast<uint32_t>(mr.hw_res_ok), static_cast<uint32_t>(mr.add_ok),
+                                   mr.q_active, mr.q_doorbell_ctl, mr.fault_status,
+                                   mr.sched_version, mr.kiq_version, mr.sched_rptr, mr.sched_wptr, mr.mepc, mr.mcause, mr.ring_fence_late, mr.p0_pc_end};
+                rnPublish(this, "mes-start", mn, mv, 25);
+                {
+                    char ln[32][12];
+                    const char *lp[32];
+                    uint32_t lv[32];
+                    for (int i = 0; i < 16; i++) {
+                        snprintf(ln[i], 12, "h%d", i); lp[i] = ln[i]; lv[i] = mr.log_hist[i];
+                        snprintf(ln[16 + i], 12, "s%d", i); lp[16 + i] = ln[16 + i]; lv[16 + i] = mr.log_scratch[i];
+                    }
+                    rnPublish(this, "mes-log", lp, lv, 32);
+                }
+                if (mr.q_active & 1u) computeRingOff = 0x0C0A0000 + 0x30000;   // the queue the MES mapped
+            }
             // Opt-in (rednavi_kiq_test=1): the way Linux runs compute queues. The queue programmed by hand above is reset by the
             // firmware on the next doorbell after the boot-time tests; a queue mapped through the KIQ is the firmware's own.
             uint32_t kiqArg = 0;
