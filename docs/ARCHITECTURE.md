@@ -72,3 +72,20 @@ PSP initialises before display and graphics: the DMUB firmware used by the displ
 3. PSP bring-up, load DMUB firmware (done); SMU bring-up (not done).
 4. Display: a replay of a lit Linux pipe for one fixed mode (done, `DP_BRINGUP.md`); a port of DC for DCN 3.2 with modes from the EDID is still open.
 5. `IOFramebuffer` subclass publishing the display to WindowServer. Done for one mode (`RedNaviFB`).
+
+## Navi 33 (RX 7600, `1002:7480`) compared with Navi 32
+
+From a community capture on Linux (issue #6; `docs/logs/navi33/ip_discovery.txt`, made with `tools/linux_ip_discovery.py`). 8 GB VRAM, 8 GB BAR0 (Resizable BAR on), 1 MB register BAR (BAR5), four memory channels (UMC x4).
+
+| Block | Navi 32 (7800 XT) | Navi 33 (7600) | Consequence |
+|---|---|---|---|
+| GC | 11.0.3 | 11.0.2 | `gc_11_0_2_*.bin`; the memory hub is `gfxhub_v3_0` (the `gfxhub_v3_0_3` special case in `gmc_v11_0.c` is for 11.0.3 only), so the `gc_11_0_0` register offsets apply (unverified on hardware) |
+| SDMA | 6.0.3 | 6.0.2 | `sdma_6_0_2.bin` |
+| MP0 (PSP), MP1 (SMU) | 13.0.10 | 13.0.7 | `psp_13_0_7_*.bin`, `smu_13_0_7.bin`; the boot chain and the message set are not known to match (unverified) |
+| DMU (DCN) | 3.2.0 | 3.2.1 | `dcn_3_2_1_dmcub.bin`; the first four DMU bases are the same |
+| NBIF | 4.3.0 | 4.3.1 | |
+| MMHUB, OSSSYS, HDP | 3.0.0, 6.0.0, 6.0.0 | 3.0.2, 6.0.2, 6.0.1 | |
+
+The register bases are the same as on Navi 32: GC `0x1260 0xa000 0x1c000 0x2402c00`, MP0/MP1 `0x16000`, DMU `0x12 0xc0 0x34c0 0x9000`, NBIF `0x0 0x14 ...`. All 538 registers of the Navi 32 pipe list have the same addresses in the Navi 33 DCN capture, so the display engine registers carry over.
+
+What does not carry over: the firmware (every file above), and the connector. The reporter's monitor is on HDMI-A-2 (the two DisplayPort connectors read `disconnected`), and `SYMCLKB_CLOCK_ENABLE` is the one enabled (`0x101`, front end 1), so the lit path is DIG1, not DIG4, and it is HDMI. The DisplayPort bring-up in this repository does not cover HDMI (TMDS/HDMI output, DDC over I2C instead of AUX). The Linux dump script has the groups `hpd_aux1 dig1_hdmi` for that path.

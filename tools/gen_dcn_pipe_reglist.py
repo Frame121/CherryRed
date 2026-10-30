@@ -23,6 +23,9 @@ GROUPS = [
     ("hubp0", r"HUBP0_|HUBPREQ0_|HUBPRET0_|SURFACE|DCHUBP0"),
     ("dpp0", r"CNVC_CFG0_|CNVC_CUR0_|DSCL0_|CM0_|DPP_TOP0_|CURSOR0_|DPP0_"),
     ("dcnvm", r"DCN_VM_|DCN_"),
+    # The HDMI path of a board whose monitor is on DIG1 (an RX 7600 on HDMI-A-2 has SYMCLKB enabled): safest first, like the others.
+    ("hpd_aux1", r"HPD1_|DP_AUX1_"),
+    ("dig1_hdmi", r"DIG1_|DP1_|AFMT1_|HDMI_|HDMICHARCLK|HDMISTREAMCLK"),
 ]
 PLANE_GROUPS = ("hubp0", "dpp0")
 

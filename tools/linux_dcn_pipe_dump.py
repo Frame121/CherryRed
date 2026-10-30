@@ -9,7 +9,7 @@ Every line is written to the output file and fsynced before the next register is
 fsynced) before the first register of each group, so if a read ever locks the machine the file shows the group and the last
 register reached.
 
-Groups, safest first: hpd_aux4 dig4_dp4 clocks otg0 opp0 mpc hubbub hubp0 dpp0 dcnvm dcio. With no group names it reads the first six.
+Groups, safest first: hpd_aux4 dig4_dp4 clocks otg0 opp0 mpc hubbub hubp0 dpp0 dcnvm dcio; for a monitor on DIG1 (e.g. HDMI on a Navi 33): hpd_aux1 dig1_hdmi. With no group names it reads the first six.
 The list is for the DisplayPort path of the Navi 32 development board (HPD4/AUX4/DIG4): if your monitor is on another connector
 the DIG4/HPD4 registers read as idle (DIG4_DIG_FE_CNTL 0). The DMU register bases are read from the kernel's IP discovery in sysfs
 (hw_id 271) and fall back to Navi 32's.
