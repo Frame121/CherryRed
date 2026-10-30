@@ -23,10 +23,14 @@ GROUPS = [
     ("hubp0", r"HUBP0_|HUBPREQ0_|HUBPRET0_|SURFACE|DCHUBP0"),
     ("dpp0", r"CNVC_CFG0_|CNVC_CUR0_|DSCL0_|CM0_|DPP_TOP0_|CURSOR0_|DPP0_"),
     ("dcnvm", r"DCN_VM_|DCN_"),
-    # The HDMI path of a board whose monitor is on DIG1 (an RX 7600 on HDMI-A-2 has SYMCLKB enabled): safest first, like the others.
+    # A monitor on another DIG (an RX 7600 on HDMI-A-2 has SYMCLKB enabled, front end 1): the same two groups as for DIG4.
     ("hpd_aux1", r"HPD1_|DP_AUX1_"),
-    ("dig1_hdmi", r"DIG1_|DP1_|AFMT1_|HDMI_|HDMICHARCLK|HDMISTREAMCLK"),
-] + [(f"hpd_aux{n}", rf"HPD{n}_|DP_AUX{n}_") for n in (0, 2, 3, 5)] + [(f"dig{n}_dp{n}", rf"DIG{n}_|DP{n}_|AFMT{n}_") for n in (0, 2, 3, 5)]
+    ("dig1_hdmi", r"DIG1_|DP1_"),
+] + [(f"hpd_aux{n}", rf"HPD{n}_|DP_AUX{n}_") for n in (0, 2, 3, 5)] + [(f"dig{n}_dp{n}", rf"DIG{n}_|DP{n}_") for n in (0, 2, 3, 5)] + [
+    # NOT safe: the HDMI encoder and the audio format blocks are gated when unused, and reading them froze an RX 7600 (issue #6).
+    # Not part of any default, and tools/linux_collect.py never reads them.
+    ("unsafe_hdmi_afmt", r"AFMT\d_|HDMI_|HDMICHARCLK|HDMISTREAMCLK"),
+]
 PLANE_GROUPS = ("hubp0", "dpp0")
 
 
