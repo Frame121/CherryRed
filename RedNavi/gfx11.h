@@ -27,6 +27,19 @@ struct rn_sdma_result {
     int ok;
 };
 
+// Program counter start of the RS64 CP firmware, from the firmware headers (gfx_firmware_header_v2_0.ucode_start_addr_lo/hi).
+struct rn_cp_start {
+    u32 pfp_lo, pfp_hi, me_lo, me_hi, mec_lo, mec_hi;
+};
+
+struct rn_gfx_result {
+    u32 step;                                 // 0 = not started, higher = how far it got
+    u32 me_cntl_before, cp_stat_before;       // CP_ME_CNTL and CP_STAT before the CP is touched
+    u32 me_cntl, cp_stat, rptr, wptr, scratch;
+    u32 rptr_shadow, ring0;                   // memory read back after the test
+    int ok;
+};
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -38,6 +51,12 @@ void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc);
 // asks it to write a magic value to target_vram_offset. Everything lives in VRAM, so no GART mapping is needed.
 // va_base is added to the offsets to form the addresses the SDMA uses: RN_VRAM_MC_BASE (system aperture) or 0 (the identity GART window).
 void rn_sdma0_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 target_vram_offset, struct rn_sdma_result *res);
+
+// First command on the graphics ring (gfx_v11_0_config_gfx_rs64, gfx_v11_0_cp_gfx_resume and gfx_v11_0_ring_test_ring): points the CP
+// at its firmware entry, programs ring 0 of the gfx pipe 0 in VRAM (no doorbell, no MES) and asks it to write a magic value to
+// SCRATCH_REG0 with SET_UCONFIG_REG. Needs rn_gfxhub_enable and the RLC booted. Written from the Linux sources, NOT yet run on hardware.
+void rn_gfx_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, const struct rn_cp_start *pc,
+                      struct rn_gfx_result *res);
 
 #ifdef __cplusplus
 }

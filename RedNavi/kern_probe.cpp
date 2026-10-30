@@ -1683,6 +1683,21 @@ void RedNaviProbe::sdmaTest() {
     uint32_t v[25] = {static_cast<uint32_t>(res.ok), res.step, res.value, res.pre_value, res.rptr, res.wptr, res.f32_cntl, res.rb_cntl, res.fault_status, res.fault_addr_lo, res.fault_addr_hi, res.sdma_status, res.sdma_status1, res.ctx_status,
                       res.version, res.cntl, res.power_cntl, res.checksum, res.freeze, res.chicken, res.program, res.ring0, res.ring3, res.rptr_shadow, res.wptr_shadow};
     rnPublish(this, "sdma-test", n, v, 25);
+
+#ifdef RN_HAVE_GC_FW
+    // Opt-in (rednavi_gfx_test=1, on top of rednavi_sdma_test=1, which turns the memory hub on): a first command on the graphics
+    // ring. Written from the Linux sources and not yet run on hardware.
+    uint32_t gfx = 0;
+    if (PE_parse_boot_argn("rednavi_gfx_test", &gfx, sizeof(gfx)) && gfx == 1) {
+        struct rn_cp_start pc = {kRNGcPfpStartLo, kRNGcPfpStartHi, kRNGcMeStartLo, kRNGcMeStartHi, kRNGcMecStartLo, kRNGcMecStartHi};
+        struct rn_gfx_result gr;
+        rn_gfx_ring_test(&gpu, kRNVramMcBase, 0x0C010000, 4096, &pc, &gr);
+        const char *gn[11] = {"step", "me_cntl_before", "cp_stat_before", "me_cntl", "cp_stat", "rptr", "wptr", "scratch", "rptr_shadow", "ring0", "ok"};
+        uint32_t gv[11] = {gr.step, gr.me_cntl_before, gr.cp_stat_before, gr.me_cntl, gr.cp_stat, gr.rptr, gr.wptr, gr.scratch,
+                           gr.rptr_shadow, gr.ring0, static_cast<uint32_t>(gr.ok)};
+        rnPublish(this, "gfx-test", gn, gv, 11);
+    }
+#endif
 }
 
 void RedNaviProbe::loadDmcub() {

@@ -210,4 +210,138 @@ void rn_sdma0_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringByte
     res->step = 5;
 }
 
+// soc21_grbm_select: pick the ME / pipe / VMID / queue that the per-queue registers below refer to.
+static void grbmSelect(struct rn_device *adev, u32 me, u32 pipe, u32 vmid, u32 queue) {
+    u32 t = REG_SET_FIELD(0, GRBM_GFX_CNTL, PIPEID, pipe);
+    t = REG_SET_FIELD(t, GRBM_GFX_CNTL, MEID, me);
+    t = REG_SET_FIELD(t, GRBM_GFX_CNTL, VMID, vmid);
+    t = REG_SET_FIELD(t, GRBM_GFX_CNTL, QUEUEID, queue);
+    WREG32_SOC15(RN_GC, 0, regGRBM_GFX_CNTL, t);
+}
+
+#define RN_PACKET3(op, n) ((3u << 30) | (((n) & 0x3FFFu) << 16) | (((op) & 0xFFu) << 8))
+#define RN_PACKET3_NOP 0x10u
+#define RN_PACKET3_SET_UCONFIG_REG 0x79u
+#define RN_PACKET3_SET_UCONFIG_REG_START 0x0000c000u
+
+void rn_gfx_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, const struct rn_cp_start *pc,
+                      struct rn_gfx_result *res) {
+    memset(res, 0, sizeof(*res));
+    const u64 ringVa = vaBase + ringOff;
+    const u64 rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008;      // pointer shadows after the ring page
+    u32 tmp;
+    res->me_cntl_before = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
+    res->cp_stat_before = RREG32_SOC15(RN_GC, 0, regCP_STAT);
+
+    // gfx_v11_0_config_gfx_rs64: the entry point of each RS64 processor, then a reset pulse of its pipes
+    for (u32 pipe = 0; pipe < 2; pipe++) {
+        grbmSelect(adev, 0, pipe, 0, 0);
+        WREG32_SOC15(RN_GC, 0, regCP_PFP_PRGRM_CNTR_START, (pc->pfp_hi << 30) | (pc->pfp_lo >> 2));
+        WREG32_SOC15(RN_GC, 0, regCP_PFP_PRGRM_CNTR_START_HI, pc->pfp_hi >> 2);
+    }
+    grbmSelect(adev, 0, 0, 0, 0);
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, PFP_PIPE0_RESET, 1);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, PFP_PIPE1_RESET, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_ME_CNTL, tmp);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, PFP_PIPE0_RESET, 0);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, PFP_PIPE1_RESET, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_ME_CNTL, tmp);
+    for (u32 pipe = 0; pipe < 2; pipe++) {
+        grbmSelect(adev, 0, pipe, 0, 0);
+        WREG32_SOC15(RN_GC, 0, regCP_ME_PRGRM_CNTR_START, (pc->me_hi << 30) | (pc->me_lo >> 2));
+        WREG32_SOC15(RN_GC, 0, regCP_ME_PRGRM_CNTR_START_HI, pc->me_hi >> 2);
+    }
+    grbmSelect(adev, 0, 0, 0, 0);
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, ME_PIPE0_RESET, 1);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, ME_PIPE1_RESET, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_ME_CNTL, tmp);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, ME_PIPE0_RESET, 0);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, ME_PIPE1_RESET, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_ME_CNTL, tmp);
+    for (u32 pipe = 0; pipe < 4; pipe++) {
+        grbmSelect(adev, 1, pipe, 0, 0);
+        WREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_PRGRM_CNTR_START, (pc->mec_lo >> 2) | (pc->mec_hi << 30));
+        WREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_PRGRM_CNTR_START_HI, pc->mec_hi >> 2);
+    }
+    grbmSelect(adev, 0, 0, 0, 0);
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_CNTL);
+    tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_PIPE0_RESET, 1);
+    tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_PIPE1_RESET, 1);
+    tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_PIPE2_RESET, 1);
+    tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_PIPE3_RESET, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_CNTL, tmp);
+    tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_PIPE0_RESET, 0);
+    tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_PIPE1_RESET, 0);
+    tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_PIPE2_RESET, 0);
+    tmp = REG_SET_FIELD(tmp, CP_MEC_RS64_CNTL, MEC_PIPE3_RESET, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_CNTL, tmp);
+    res->step = 1;
+
+    // the packet of ring_test_ring: SET_UCONFIG_REG SCRATCH_REG0 = 0xDEADBEEF, padded with a NOP packet to 8 dwords
+    const u32 scratchDw = 0xc000u + 0x40u;                                   // regSCRATCH_REG0 is at GC base 1 (0xa000) + 0x2040
+    const u32 pkt[8] = {RN_PACKET3(RN_PACKET3_SET_UCONFIG_REG, 1), scratchDw - RN_PACKET3_SET_UCONFIG_REG_START, 0xDEADBEEFu,
+                        RN_PACKET3(RN_PACKET3_NOP, 3), 0, 0, 0, 0};
+    for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
+    for (u32 i = 0; i < 8; i++) rn_vram_wr32(adev, ringOff + i * 4, pkt[i]);
+    rn_vram_wr32(adev, rptrOff, 0); rn_vram_wr32(adev, rptrOff + 4, 0);
+    rn_vram_wr32(adev, wptrOff, 0); rn_vram_wr32(adev, wptrOff + 4, 0);
+    WREG32_SOC15(RN_GC, 0, regSCRATCH_REG0, 0xCAFEDEADu);
+
+    // gfx_v11_0_cp_gfx_resume: ring 0 of pipe 0
+    WREG32_SOC15(RN_GC, 0, regCP_RB_WPTR_DELAY, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_RB_VMID, 0);
+    grbmSelect(adev, 0, 0, 0, 0);
+    u32 rbBufsz = 0;
+    while ((8u << rbBufsz) < ringBytes) rbBufsz++;                           // order_base_2(ring_size / 8)
+    u32 rbCntl = REG_SET_FIELD(0, CP_RB0_CNTL, RB_BUFSZ, rbBufsz);
+    rbCntl = REG_SET_FIELD(rbCntl, CP_RB0_CNTL, RB_BLKSZ, rbBufsz - 2);
+    rbCntl = REG_SET_FIELD(rbCntl, CP_RB0_CNTL, KMD_QUEUE, 1);
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_CNTL, rbCntl);
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR_HI, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_RPTR_ADDR, lower_32_bits(vaBase + rptrOff));
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_RPTR_ADDR_HI, upper_32_bits(vaBase + rptrOff) & 0xFFFFu);
+    WREG32_SOC15(RN_GC, 0, regCP_RB_WPTR_POLL_ADDR_LO, lower_32_bits(vaBase + wptrOff));
+    WREG32_SOC15(RN_GC, 0, regCP_RB_WPTR_POLL_ADDR_HI, upper_32_bits(vaBase + wptrOff));
+    mdelay(1);
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_CNTL, rbCntl);
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_BASE, lower_32_bits(ringVa >> 8));
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_BASE_HI, upper_32_bits(ringVa >> 8));
+    WREG32_SOC15(RN_GC, 0, regCP_RB_ACTIVE, 1);
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_RB_DOORBELL_CONTROL);                 // no doorbell: the wptr register is written directly
+    tmp = REG_SET_FIELD(tmp, CP_RB_DOORBELL_CONTROL, DOORBELL_EN, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_RB_DOORBELL_CONTROL, tmp);
+    res->step = 2;
+
+    // gfx_v11_0_cp_gfx_start, without the clear state: MAX_CONTEXT, DEVICE_ID, then unhalt PFP and ME
+    WREG32_SOC15(RN_GC, 0, regCP_MAX_CONTEXT, 7);
+    WREG32_SOC15(RN_GC, 0, regCP_DEVICE_ID, 1);
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, ME_HALT, 0);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, PFP_HALT, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_ME_CNTL, tmp);
+    for (int i = 0; i < 1000; i++) {                                         // CP_STAT reads 0 once the CP is idle and up
+        if (RREG32_SOC15(RN_GC, 0, regCP_STAT) == 0) break;
+        udelay(1);
+    }
+    res->step = 3;
+
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR, 8);                               // 8 dwords
+    WREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR_HI, 0);
+    res->step = 4;
+    for (int i = 0; i < 2000; i++) {                                         // up to 2 s
+        res->scratch = RREG32_SOC15(RN_GC, 0, regSCRATCH_REG0);
+        if (res->scratch == 0xDEADBEEFu) { res->ok = 1; break; }
+        msleep(1);
+    }
+    res->me_cntl = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
+    res->cp_stat = RREG32_SOC15(RN_GC, 0, regCP_STAT);
+    res->rptr = RREG32_SOC15(RN_GC, 0, regCP_RB0_RPTR);
+    res->wptr = RREG32_SOC15(RN_GC, 0, regCP_RB0_WPTR);
+    res->rptr_shadow = rn_vram_rd32(adev, rptrOff);
+    res->ring0 = rn_vram_rd32(adev, ringOff);
+}
+
 }

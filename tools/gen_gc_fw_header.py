@@ -107,6 +107,10 @@ def main():
             f.write(f'    {{"{name}", {typ}u, {off}u, {len(data)}u}},\n')
             off += len(data)
         f.write("};\n")
+        # program counter start of the RS64 CP firmware (gfx_firmware_header_v2_0: ucode_start_addr_lo/hi at 52/56), for gfx11.cpp
+        for n in ("pfp", "me", "mec"):
+            d = open(f"{sys.argv[1]}/gc_11_0_3_{n}.bin", "rb").read()
+            f.write(f"#define kRNGc{n.capitalize()}StartLo 0x{u32(d, 52):x}u\n#define kRNGc{n.capitalize()}StartHi 0x{u32(d, 56):x}u\n")
         f.write("static const unsigned char kRNGcFwBlob[] = {\n")
         blob = b"".join(d for _, _, d in items)
         for j in range(0, len(blob), 16):
