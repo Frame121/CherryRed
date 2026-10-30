@@ -1,20 +1,20 @@
 #ifndef COBALT64_NAVI33_PCI_MATCH_HPP
 #define COBALT64_NAVI33_PCI_MATCH_HPP
 
-#include <cstdint>
+#include <stdint.h>
 
 namespace cobalt64::navi33 {
 
-inline constexpr std::uint16_t kAmdVendorId = 0x1002;
-inline constexpr std::uint16_t kRx7600DeviceId = 0x7480;
-inline constexpr std::uint16_t kCapturedSubsystemVendorId = 0x148C;
-inline constexpr std::uint16_t kCapturedSubsystemDeviceId = 0x2421;
+inline constexpr uint16_t kAmdVendorId = 0x1002;
+inline constexpr uint16_t kRx7600DeviceId = 0x7480;
+inline constexpr uint16_t kCapturedSubsystemVendorId = 0x148C;
+inline constexpr uint16_t kCapturedSubsystemDeviceId = 0x2421;
 
 struct PciIdentity {
-    std::uint16_t vendorId = 0;
-    std::uint16_t deviceId = 0;
-    std::uint16_t subsystemVendorId = 0;
-    std::uint16_t subsystemDeviceId = 0;
+    uint16_t vendorId = 0;
+    uint16_t deviceId = 0;
+    uint16_t subsystemVendorId = 0;
+    uint16_t subsystemDeviceId = 0;
 };
 
 // Primary recognition is a PCI vendor/device identity check. Do not tie the

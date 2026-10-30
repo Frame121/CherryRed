@@ -203,7 +203,8 @@ void Navi33Bringup::surveyBars(IOPCIDevice *pci)
 
 void Navi33Bringup::surveyPcieLink(IOPCIDevice *pci)
 {
-	IOByteCount off = 0;
+	// findPCICapability returns a UInt8 config-space offset (IOPCIDevice.h).
+	UInt8 off = 0;
 	if (!pci->findPCICapability(kPcieCapId, &off) || off == 0) {
 		setProperty("Navi33Bringup,PCIeCapabilityFound", false);
 		N33LOG("PCIe capability not found");
