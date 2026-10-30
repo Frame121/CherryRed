@@ -6,7 +6,11 @@
 #include "Navi33PciMatch.hpp"
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
-#include <pexpert/pexpert.h>
+#include <IOKit/IORegistryEntry.h>
+#include <IOKit/IODeviceTreeSupport.h>
+#include <libkern/c++/OSData.h>
+#include <libkern/c++/OSIterator.h>
+#include <string.h>
 
 #define N33LOG(fmt, ...) IOLog("Navi33Bringup: " fmt "\n", ##__VA_ARGS__)
 
@@ -35,13 +39,65 @@ static const char *const kBarRangeValidKeys[6] = {
 
 OSDefineMetaClassAndStructors(Navi33Bringup, IOService)
 
+static bool bootArgTokenPresent(const char *args, const char *token)
+{
+	// Whole-token match: "navi33bringup=1" matches, "xnavi33bringup=1" does not.
+	const size_t tlen = strlen(token);
+	for (const char *p = args; *p != '\0'; p++) {
+		if (strncmp(p, token, tlen) != 0)
+			continue;
+		const bool leftBounded = (p == args) || p[-1] == ' ' || p[-1] == '\t';
+		const char after = p[tlen];
+		const bool rightBounded = after == '\0' || after == ' ' || after == '\t';
+		if (leftBounded && rightBounded)
+			return true;
+	}
+	return false;
+}
+
 bool Navi33Bringup::optInEnabled()
 {
-	char enabled[8] = {};
-	if (!PE_parse_boot_argn("navi33bringup", enabled, sizeof(enabled)) ||
-	    enabled[0] != '1' || enabled[1] != '\0')
-		return false;                                  // exact opt-in only
-	return true;
+	// Read the effective boot-args from the device-tree "chosen" node instead of
+	// the pexpert boot-argument API: com.apple.kpi.pexpert no longer exists as a
+	// linkable library on macOS 26, and kxld refuses to link a kext whose
+	// symbols cannot be resolved from the declared OSBundleLibraries. gIODTPlane
+	// and IORegistryEntry::fromPath come from the declared com.apple.kpi.iokit.
+	IORegistryEntry *root = IORegistryEntry::getRegistryRoot();
+	if (!root)
+		return false;
+
+	IORegistryEntry *chosen = IORegistryEntry::fromPath("/chosen", gIODTPlane);
+	OSIterator *children = nullptr;
+	if (!chosen) {
+		children = root->getChildIterator(gIODTPlane);
+		if (!children)
+			return false;
+		while ((chosen = OSDynamicCast(IORegistryEntry, children->getNextObject())) != nullptr) {
+			if (chosen->getName() && !strcmp(chosen->getName(), "chosen"))
+				break;
+		}
+		if (chosen && (!chosen->getName() || strcmp(chosen->getName(), "chosen") != 0))
+			chosen = nullptr;
+		children->release();
+	}
+	if (!chosen)
+		return false;
+
+	OSData *data = OSDynamicCast(OSData, chosen->getProperty("boot-args"));
+	if (!data)
+		return false;
+	size_t len = data->getLength();
+	const char *bytes = static_cast<const char *>(data->getBytesNoCopy());
+	if (!bytes || len == 0)
+		return false;
+
+	char args[256];
+	if (len >= sizeof(args))
+		len = sizeof(args) - 1;
+	memcpy(args, bytes, len);
+	args[len] = '\0';
+
+	return bootArgTokenPresent(args, "navi33bringup=1");
 }
 
 bool Navi33Bringup::identityMatchesGpu(IOPCIDevice *pci)

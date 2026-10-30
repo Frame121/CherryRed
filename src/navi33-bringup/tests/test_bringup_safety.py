@@ -26,12 +26,18 @@ def main():
         if not cond:
             failures.append(msg)
 
-    # Opt-in: exact boot argument, checked before device identity.
-    check('PE_parse_boot_argn("navi33bringup", enabled, sizeof(enabled))' in src,
-          "opt-in boot argument guard missing")
-    check("enabled[0] != '1' || enabled[1] != '\\0'" in src,
-          "opt-in exact-string check missing")
-    opt_in = src.index('PE_parse_boot_argn("navi33bringup"')
+    # Opt-in: exact boot-arg token, read from the device-tree "chosen" node
+    # (com.apple.kpi.pexpert no longer exists as a linkable KPI on macOS 26, so
+    # PE_parse_boot_argn must NOT be used — kxld would refuse to link the kext).
+    check('bootArgTokenPresent(args, "navi33bringup=1")' in src,
+          "opt-in boot-arg token check missing")
+    check("/chosen" in src and "gIODTPlane" in src,
+          "boot-args must be read from the device-tree chosen node")
+    check("PE_parse_boot_argn" not in src,
+          "pexpert boot-arg API must not be used (kpi.pexpert absent on Tahoe)")
+    check("sizeof(args) - 1" in src and "args[len] = '\\0'" in src,
+          "boot-args copy into the fixed buffer must be bounded and NUL-terminated")
+    opt_in = src.index('bootArgTokenPresent(args, "navi33bringup=1")')
     identity = src.index("kIOPCIConfigVendorID", opt_in)
     check(opt_in < identity, "opt-in must be checked before device identity")
 
