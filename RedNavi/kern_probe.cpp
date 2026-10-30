@@ -2233,6 +2233,11 @@ void RedNaviProbe::sdmaTest() {
                 struct rn_kiq_result kr;
                 uint32_t kiqStep = 4;
                 PE_parse_boot_argn("rednavi_kiq_step", &kiqStep, sizeof(kiqStep));
+                uint32_t kiqPipe = 3, kiqQueue = 0;
+                PE_parse_boot_argn("rednavi_kiq_pipe", &kiqPipe, sizeof(kiqPipe));
+                PE_parse_boot_argn("rednavi_kiq_queue", &kiqQueue, sizeof(kiqQueue));
+                uint32_t kiqRlc = 0;
+                PE_parse_boot_argn("rednavi_kiq_rlc", &kiqRlc, sizeof(kiqRlc));   // 1: also write RLC_CP_SCHEDULERS (hung the machine)
                 rn_kiq_map_compute(&gpu, kRNVramMcBase, 0x0C080000, 0x0C090000, kiqStep,
                                    [](void *ctx, uint32_t step) {
                                        // the step about to run, published first: if the machine stops here, this is the last one that said so
@@ -2242,12 +2247,14 @@ void RedNaviProbe::sdmaTest() {
                                        rnPublish(self, "kiq-progress", pn, pv, 1);
                                        IOLog("RedNavi: KIQ step %u\n", step);
                                        IOSleep(100);
-                                   }, this, &kr);
+                                   }, this, kiqRlc == 1, kiqPipe, kiqQueue, &kr);
                 if (kr.ok) computeRingOff = 0x0C090000;
-                const char *kn[11] = {"step", "ok", "kiq_active", "kiq_rptr", "kiq_wptr", "map_active", "map_pq_control", "map_doorbell_ctl", "map_rptr", "map_wptr", "fault_status"};
-                uint32_t kv[11] = {kr.step, static_cast<uint32_t>(kr.ok), kr.kiq_active, kr.kiq_rptr, kr.kiq_wptr, kr.map_active, kr.map_pq_control,
-                                   kr.map_doorbell_ctl, kr.map_rptr, kr.map_wptr, kr.fault_status};
-                rnPublish(this, "kiq-test", kn, kv, 11);
+                const char *kn[19] = {"step", "ok", "kiq_active", "kiq_rptr", "kiq_wptr", "map_active", "map_pq_control", "map_doorbell_ctl", "map_rptr", "map_wptr", "fault_status",
+                                      "kiq_doorbell_ctl", "kiq_pq_control", "kiq_pq_base", "kiq_pq_status", "cp_stat", "kiq_rptr_late", "ring_dw0", "ring_dw1"};
+                uint32_t kv[19] = {kr.step, static_cast<uint32_t>(kr.ok), kr.kiq_active, kr.kiq_rptr, kr.kiq_wptr, kr.map_active, kr.map_pq_control,
+                                   kr.map_doorbell_ctl, kr.map_rptr, kr.map_wptr, kr.fault_status,
+                                   kr.kiq_doorbell_ctl, kr.kiq_pq_control, kr.kiq_pq_base, kr.kiq_pq_status, kr.cp_stat, kr.kiq_rptr_late, kr.ring_dw0, kr.ring_dw1};
+                rnPublish(this, "kiq-test", kn, kv, 19);
             }
             // Opt-in (rednavi_bo_test=1): two buffers in host memory, a shader and its command buffer in the first, the result and the fence in
             // the second; the command buffer is submitted through an INDIRECT_BUFFER packet and the fence is read from host memory.

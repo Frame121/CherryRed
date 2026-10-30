@@ -909,7 +909,14 @@ int rn_compute_submit_ib(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ri
     pk[n++] = (1u << 29);
     pk[n++] = lower_32_bits(fenceVa); pk[n++] = upper_32_bits(fenceVa);
     pk[n++] = fenceValue; pk[n++] = 0; pk[n++] = 0;
-    while ((n & 7) != 0) { pk[n++] = RN_PACKET3(RN_PACKET3_NOP, 0); pk[n++] = 0; }
+    // Pad to a multiple of 8 dwords with one NOP packet. (The earlier loop added two dwords at a time to an odd count, never reached a
+    // multiple of 8, and ran off the end of pk[]: the kernel stack overflow of 2026-10-30.)
+    u32 pad = (8u - (n & 7u)) & 7u;
+    if (pad == 1) pad = 9;
+    if (pad) {
+        pk[n++] = RN_PACKET3(RN_PACKET3_NOP, pad - 2);
+        for (u32 i = 1; i < pad; i++) pk[n++] = 0;
+    }
     if (n + gComputeWptr - gComputeWptr > mask) return -1;
     if (gMapped) {                                                           // the queue mapped through the KIQ: ring and wptr are its own
         const u32 w = gMappedWptr;
@@ -1064,18 +1071,22 @@ static void programHqdFromMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u
 }
 
 void rn_kiq_map_compute(struct rn_device *adev, u64 vaBase, u64 kiqOff, u64 queueOff, u32 maxStep, void (*progress)(void *, u32),
-                        void *progressCtx, struct rn_kiq_result *res) {
+                        void *progressCtx, bool rlcSched, u32 kiqPipe, u32 kiqQueue, struct rn_kiq_result *res) {
     memset(res, 0, sizeof(*res));
-    const u32 kiqMe = 1, kiqPipe = 3, kiqQueue = 0, kiqDoorbellDword = 0;
+    const u32 kiqMe = 1, kiqDoorbellDword = 0;
     const u32 qMe = 1, qPipe = 0, qQueue = 3;
     const u32 ringBytes = 4096;
 
     // gfx_v11_0_kiq_setting: tell the RLC which queue is the KIQ
     if (progress) progress(progressCtx, 1);
-    u32 tmp = RREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS);
-    tmp &= 0xffffff00u;
-    tmp |= (kiqMe << 5) | (kiqPipe << 3) | kiqQueue;
-    WREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS, tmp | 0x80);
+    // Writing this register hung the machine (step 1 alone, 2026-10-30), so it is skipped unless rlcSched is set.
+    u32 tmp;
+    if (rlcSched) {
+        tmp = RREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS);
+        tmp &= 0xffffff00u;
+        tmp |= (kiqMe << 5) | (kiqPipe << 3) | kiqQueue;
+        WREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS, tmp | 0x80);
+    }
     res->step = 1;
     if (maxStep < 2) return;
 
@@ -1107,7 +1118,14 @@ void rn_kiq_map_compute(struct rn_device *adev, u64 vaBase, u64 kiqOff, u64 queu
     const u64 mqdVa = vaBase + queueOff + 0x2000, wptrVa = vaBase + queueOff + 0x1008;
     pk[n++] = lower_32_bits(mqdVa); pk[n++] = upper_32_bits(mqdVa);
     pk[n++] = lower_32_bits(wptrVa); pk[n++] = upper_32_bits(wptrVa);
-    while ((n & 7) != 0) { pk[n++] = RN_PACKET3(RN_PACKET3_NOP, 0); pk[n++] = 0; }
+    // Pad to a multiple of 8 dwords with one NOP packet. (The earlier loop added two dwords at a time to an odd count, never reached a
+    // multiple of 8, and ran off the end of pk[]: the kernel stack overflow of 2026-10-30.)
+    u32 pad = (8u - (n & 7u)) & 7u;
+    if (pad == 1) pad = 9;
+    if (pad) {
+        pk[n++] = RN_PACKET3(RN_PACKET3_NOP, pad - 2);
+        for (u32 i = 1; i < pad; i++) pk[n++] = 0;
+    }
     for (u32 i = 0; i < n; i++) rn_vram_wr32(adev, kiqOff + i * 4, pk[i]);
     if (progress) progress(progressCtx, 4);
     res->step = 4;
@@ -1129,7 +1147,16 @@ void rn_kiq_map_compute(struct rn_device *adev, u64 vaBase, u64 kiqOff, u64 queu
     res->kiq_active = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
     res->kiq_rptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
     res->kiq_wptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
+    res->kiq_doorbell_ctl = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL);
+    res->kiq_pq_control = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_CONTROL);
+    res->kiq_pq_base = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_BASE);
+    res->kiq_pq_status = RREG32_SOC15(RN_GC, 0, regCP_PQ_STATUS);
+    res->cp_stat = RREG32_SOC15(RN_GC, 0, regCP_STAT);
+    msleep(200);
+    res->kiq_rptr_late = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
     grbmSelect(adev, 0, 0, 0, 0);
+    res->ring_dw0 = rn_vram_rd32(adev, kiqOff);
+    res->ring_dw1 = rn_vram_rd32(adev, kiqOff + 4);
     res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
     res->fault_addr_lo = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_ADDR_LO32);
     res->ok = (res->map_active & 1u) != 0;

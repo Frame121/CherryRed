@@ -39,6 +39,7 @@ struct rn_kiq_result {
     u32 kiq_active, kiq_rptr, kiq_wptr;           // the KIQ queue after the commands
     u32 map_active, map_pq_control, map_doorbell_ctl, map_rptr, map_wptr;   // the mapped compute queue, read from its HQD
     u32 fault_status, fault_addr_lo;
+    u32 kiq_doorbell_ctl, kiq_pq_control, kiq_pq_base, kiq_pq_status, cp_stat, kiq_rptr_late, ring_dw0, ring_dw1;   // diagnostics of the KIQ after the doorbell
     int ok;
 };
 
@@ -169,7 +170,7 @@ u32 rn_build_dispatch_ib(struct rn_device *adev, u32 *ib, u64 shader_va);
 // max_step stops early, to find a step that hangs the machine: 1 RLC_CP_SCHEDULERS, 2 + program the KIQ registers, 3 + the compute queue's
 // MQD, 4 + SET_RESOURCES/MAP_QUEUES and the KIQ doorbell. progress (if set) receives the step about to run, before it runs.
 void rn_kiq_map_compute(struct rn_device *adev, u64 va_base, u64 kiq_off, u64 queue_off, u32 max_step, void (*progress)(void *ctx, u32 step),
-                        void *progress_ctx, struct rn_kiq_result *res);
+                        void *progress_ctx, bool rlc_sched, u32 kiq_pipe, u32 kiq_queue, struct rn_kiq_result *res);
 
 void rn_ih_enable(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 wptr_shadow_vram_offset, int msi);
 // Acknowledge: the read pointer is set to the current write pointer (which re-arms the next MSI). Returns the write pointer.
