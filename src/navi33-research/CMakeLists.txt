@@ -8,6 +8,8 @@ add_library(navi33_research STATIC
     src/Navi33BringupPlan.cpp
     src/Navi33ResourceSurvey.cpp
     src/Navi33LinuxResourceParser.cpp
+    src/Navi33TargetProfile.cpp
+    src/Navi33IpDiscovery.cpp
 )
 target_include_directories(navi33_research PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(navi33_research PUBLIC cxx_std_17)
@@ -27,6 +29,16 @@ target_link_libraries(navi33_resource_survey_tests PRIVATE navi33_research)
 add_executable(navi33_linux_resource_parser_tests tests/test_Navi33LinuxResourceParser.cpp)
 target_link_libraries(navi33_linux_resource_parser_tests PRIVATE navi33_research)
 
+add_executable(navi33_target_profile_tests tests/test_Navi33TargetProfile.cpp)
+target_link_libraries(navi33_target_profile_tests PRIVATE navi33_research)
+
+add_executable(navi33_pci_identity_tests tests/test_Navi33PciIdentity.cpp)
+target_include_directories(navi33_pci_identity_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../navi33-bringup)
+target_compile_features(navi33_pci_identity_tests PRIVATE cxx_std_17)
+
+add_executable(navi33_ipdiscovery_tests tests/test_Navi33IpDiscovery.cpp)
+target_link_libraries(navi33_ipdiscovery_tests PRIVATE navi33_research)
+
 add_executable(ipdiscovery_bounds_tests
     tests/test_ipdiscovery_bounds.cpp
     ../navi48-bringup/src/ipdiscovery.cpp
@@ -36,7 +48,8 @@ target_include_directories(ipdiscovery_bounds_tests PRIVATE ${CMAKE_CURRENT_SOUR
 set(navi33_targets
     navi33_research navi33_research_tests navi33_driver_core_tests
     navi33_bringup_plan_tests navi33_resource_survey_tests
-    navi33_linux_resource_parser_tests ipdiscovery_bounds_tests)
+    navi33_linux_resource_parser_tests navi33_target_profile_tests
+    navi33_pci_identity_tests navi33_ipdiscovery_tests ipdiscovery_bounds_tests)
 set_target_properties(${navi33_targets} PROPERTIES CXX_EXTENSIONS OFF)
 
 if(MSVC)
@@ -55,12 +68,21 @@ add_test(NAME navi33_driver_core_tests COMMAND navi33_driver_core_tests)
 add_test(NAME navi33_bringup_plan_tests COMMAND navi33_bringup_plan_tests)
 add_test(NAME navi33_resource_survey_tests COMMAND navi33_resource_survey_tests)
 add_test(NAME navi33_linux_resource_parser_tests COMMAND navi33_linux_resource_parser_tests)
+add_test(NAME navi33_target_profile_tests COMMAND navi33_target_profile_tests)
+add_test(NAME navi33_pci_identity_tests COMMAND navi33_pci_identity_tests)
+add_test(NAME navi33_ipdiscovery_capture_tests
+    COMMAND navi33_ipdiscovery_tests
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../RX7600-Linux-Evidence/amdgpu_discovery.bin")
 add_test(NAME ipdiscovery_bounds_tests COMMAND ipdiscovery_bounds_tests)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_test(NAME firmware_dependency_audit_tests
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_firmware_dependency_audit.py)
+    add_test(NAME navi33_firmware_source_trace
+        COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_navi33_firmware_source_trace.py)
+    add_test(NAME navi33_firmware_header_bounds
+        COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_navi33_firmware_header_bounds.py)
     add_test(NAME navi48_routing_isolation
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_navi48_isolation.py)
     add_test(NAME navi33_survey_safety

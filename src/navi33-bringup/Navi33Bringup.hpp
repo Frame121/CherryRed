@@ -3,7 +3,9 @@
 //
 //  This is a fail-closed bring-up skeleton, NOT a working GPU driver. At this
 //  stage it:
-//    - matches ONLY the RX 7600 (PCI 1002:7480, subsystem 148c:2421),
+//    - recognizes RX 7600 by PCI vendor/device ID (1002:7480), independent
+//      of board-vendor subsystem IDs; reports whether the subsystem matches
+//      the one captured in the Linux evidence (148c:2421),
 //    - is opt-in (navi33bringup=1) and refuses to start otherwise,
 //    - performs READ-ONLY PCI identity / BAR / PCIe / ReBAR discovery,
 //    - REFUSES to load firmware and REFUSES to write any register.
@@ -30,7 +32,8 @@ public:
 
 private:
 	bool optInEnabled();
-	bool identityMatchesBoard(IOPCIDevice *pci);
+	bool identityMatchesGpu(IOPCIDevice *pci);
+	bool identityMatchesEvidenceBoard(IOPCIDevice *pci);
 	void publishPreflightState();
 	void surveyIdentity(IOPCIDevice *pci);
 	void surveyBars(IOPCIDevice *pci);

@@ -3,17 +3,13 @@
 //  READ-ONLY discovery only; no register BAR mapped, no writes, no firmware load.
 //
 #include "Navi33Bringup.hpp"
+#include "Navi33PciMatch.hpp"
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <pexpert/pexpert.h>
 
 #define N33LOG(fmt, ...) IOLog("Navi33Bringup: " fmt "\n", ##__VA_ARGS__)
 
-static constexpr uint16_t kAmdVendorId   = 0x1002;
-static constexpr uint16_t kNavi33Device  = 0x7480;   // Radeon RX 7600
-// Restrict this bring-up to the exact board captured in the Linux evidence.
-static constexpr uint16_t kTargetSubsystemVendorId = 0x148C;
-static constexpr uint16_t kTargetSubsystemDeviceId  = 0x2421;
 static constexpr uint32_t kPcieCapId     = 0x10;     // PCI Express capability (standard list)
 static constexpr uint32_t kReBarExtCapId = 0x0015;   // Resizable BAR (extended list)
 static const char *const kBarRegisterKeys[6] = {
@@ -48,14 +44,29 @@ bool Navi33Bringup::optInEnabled()
 	return true;
 }
 
-bool Navi33Bringup::identityMatchesBoard(IOPCIDevice *pci)
+bool Navi33Bringup::identityMatchesGpu(IOPCIDevice *pci)
 {
 	if (!pci)
 		return false;
-	return pci->configRead16(kIOPCIConfigVendorID) == kAmdVendorId &&
-	       pci->configRead16(kIOPCIConfigDeviceID) == kNavi33Device &&
-	       pci->configRead16(kIOPCIConfigSubSystemVendorID) == kTargetSubsystemVendorId &&
-	       pci->configRead16(kIOPCIConfigSubSystemID) == kTargetSubsystemDeviceId;
+	const cobalt64::navi33::PciIdentity identity = {
+		pci->configRead16(kIOPCIConfigVendorID),
+		pci->configRead16(kIOPCIConfigDeviceID),
+	};
+	return cobalt64::navi33::isRx7600(identity);
+}
+
+bool Navi33Bringup::identityMatchesEvidenceBoard(IOPCIDevice *pci)
+{
+	// This is a provenance match only; it is deliberately not the GPU match gate.
+	if (!pci)
+		return false;
+	const cobalt64::navi33::PciIdentity identity = {
+		pci->configRead16(kIOPCIConfigVendorID),
+		pci->configRead16(kIOPCIConfigDeviceID),
+		pci->configRead16(kIOPCIConfigSubSystemVendorID),
+		pci->configRead16(kIOPCIConfigSubSystemID),
+	};
+	return cobalt64::navi33::matchesCapturedEvidenceBoard(identity);
 }
 
 IOService *Navi33Bringup::probe(IOService *provider, SInt32 *score)
@@ -64,8 +75,8 @@ IOService *Navi33Bringup::probe(IOService *provider, SInt32 *score)
 		return nullptr;                                  // exact opt-in only
 
 	IOPCIDevice *pci = OSDynamicCast(IOPCIDevice, provider);
-	if (!pci || !identityMatchesBoard(pci))
-		return nullptr;                                  // exact evidenced board only
+	if (!pci || !identityMatchesGpu(pci))
+		return nullptr;                                  // RX 7600 PCI ID only
 
 	return super::probe(provider, score);
 }
@@ -81,8 +92,8 @@ bool Navi33Bringup::start(IOService *provider)
 		return false;
 
 	IOPCIDevice *pci = OSDynamicCast(IOPCIDevice, provider);
-	if (!identityMatchesBoard(pci)) {
-		N33LOG("start refused: PCI identity/subsystem is outside the evidenced RX 7600 board");
+	if (!identityMatchesGpu(pci)) {
+		N33LOG("start refused: PCI identity is not AMD Radeon RX 7600 (1002:7480)");
 		super::stop(provider);
 		return false;
 	}
@@ -108,15 +119,21 @@ void Navi33Bringup::stop(IOService *provider)
 void Navi33Bringup::publishPreflightState()
 {
 	// Status only. None of these enable BAR access, firmware load, or GPU init.
-	setProperty("Navi33Bringup,Stage", "bringup-scaffold");
+	setProperty("Navi33Bringup,Stage", "gpu-identified-read-only");
+	setProperty("Navi33Bringup,RecognitionStatus", "PCI-ID matched: AMD Radeon RX 7600");
+	setProperty("Navi33Bringup,GPUName", "AMD Radeon RX 7600");
+	setProperty("Navi33Bringup,Architecture", "Navi 33");
+	setProperty("Navi33Bringup,GfxTarget", "gfx1102");
+	setProperty("Navi33Bringup,PCIIdentifier", "1002:7480");
 	setProperty("Navi33Bringup,OptInRequired", true);
 	setProperty("Navi33Bringup,RegisterBARMapped", false);
 	setProperty("Navi33Bringup,HardwareWrites", false);
 	setProperty("Navi33Bringup,FirmwareLoaded", false);
 	setProperty("Navi33Bringup,GPUInitialized", false);
 	setProperty("Navi33Bringup,Acceleration", false);
-	setProperty("Navi33Bringup,GfxTarget", "gfx1102");
 	setProperty("Navi33Bringup,DcnVersion", "3.2.1");
+	setProperty("Navi33Bringup,IPDiscoveryLive", false);
+	setProperty("Navi33Bringup,ProfileSource", "offline RX7600 evidence; runtime IP Discovery not yet connected");
 }
 
 void Navi33Bringup::refuseFirmwareAndWrites()
@@ -140,11 +157,17 @@ void Navi33Bringup::surveyIdentity(IOPCIDevice *pci)
 	setProperty("Navi33Bringup,VendorID", static_cast<uint64_t>(vendor), 16);
 	setProperty("Navi33Bringup,DeviceID", static_cast<uint64_t>(device), 16);
 	setProperty("Navi33Bringup,RevisionID", static_cast<uint64_t>(revision), 8);
+	bool evidenceBoardMatch = identityMatchesEvidenceBoard(pci);
 	setProperty("Navi33Bringup,SubsystemVendorID", static_cast<uint64_t>(subVendor), 16);
 	setProperty("Navi33Bringup,SubsystemID", static_cast<uint64_t>(subDevice), 16);
-	setProperty("Navi33Bringup,ExactEvidenceBoardMatch", true);
-	N33LOG("id %04x:%04x rev %02x subsystem %04x:%04x",
-	       vendor, device, revision, subVendor, subDevice);
+	setProperty("Navi33Bringup,ExactEvidenceBoardMatch", evidenceBoardMatch);
+	setProperty("Navi33Bringup,BoardSupportStatus",
+	            evidenceBoardMatch ? "matches captured subsystem 148c:2421"
+	                               : "RX 7600 PCI ID recognized; subsystem not evidence-matched");
+	setProperty("Navi33Bringup,FutureHardwareInitAllowed", false);
+	N33LOG("GPU recognized: AMD Radeon RX 7600 (1002:7480), Navi 33 gfx1102");
+	N33LOG("revision %02x subsystem %04x:%04x (evidence board match=%u)",
+	       revision, subVendor, subDevice, evidenceBoardMatch);
 }
 
 void Navi33Bringup::surveyBars(IOPCIDevice *pci)
@@ -205,18 +228,53 @@ void Navi33Bringup::surveyResizableBar(IOPCIDevice *pci)
 		N33LOG("Resizable BAR capability not found");
 		return;
 	}
-	uint32_t cap = pci->configRead32(off + 4);   // supported sizes (bit n => 2^(n+20) bytes)
-	uint32_t ctl = pci->configRead32(off + 8);   // current size field in bits 13:8
+
+	// PCIe Resizable BAR Capability: BAR Index in bits 2:0, Supported Sizes in
+	// bits 31:4 (encoding N is bit N+4; size = 2^(N+20) bytes).
+	// Control: BAR Index in bits 2:0, Number of Resizable BARs in bits 7:5,
+	// and the selected size encoding in bits 13:8. This stage only reads config.
+	uint32_t cap = pci->configRead32(off + 4);
+	uint32_t ctl = pci->configRead32(off + 8);
+	uint32_t capBarIndex = cap & 0x7;
+	uint32_t ctlBarIndex = ctl & 0x7;
+	uint32_t supportedSizes = cap >> 4;          // encodings 0..27 (1 MiB..128 TiB)
+	uint32_t extendedSupportedSizes = ctl >> 16; // encodings 28..43 (256 TiB..8 EiB)
+	uint32_t count = (ctl >> 5) & 0x7;
+	uint32_t sizeEncoding = (ctl >> 8) & 0x3F;
+
 	setProperty("Navi33Bringup,ResizableBARFound", true);
-	setProperty("Navi33Bringup,ResizableBARSizes", static_cast<uint64_t>(cap), 32);
-	setProperty("Navi33Bringup,ResizableBARControl", static_cast<uint64_t>(ctl), 32);
-	unsigned curShift = ((ctl >> 8) & 0x3F) + 20;
-	if (curShift > 62) {                         // bogus/unreadable value: do not shift
-		N33LOG("ReBAR cap 0x%08x ctl 0x%08x (size field out of range)", cap, ctl);
+	setProperty("Navi33Bringup,ResizableBARCapabilityRaw", static_cast<uint64_t>(cap), 32);
+	setProperty("Navi33Bringup,ResizableBARControlRaw", static_cast<uint64_t>(ctl), 32);
+	setProperty("Navi33Bringup,ResizableBARIndex", static_cast<uint64_t>(capBarIndex), 3);
+	setProperty("Navi33Bringup,ResizableBARControlIndex", static_cast<uint64_t>(ctlBarIndex), 3);
+	setProperty("Navi33Bringup,ResizableBARCount", static_cast<uint64_t>(count), 3);
+	setProperty("Navi33Bringup,ResizableBARSizes", static_cast<uint64_t>(supportedSizes), 28);
+	setProperty("Navi33Bringup,ResizableBARLargeSizes", static_cast<uint64_t>(extendedSupportedSizes), 16);
+	setProperty("Navi33Bringup,ResizableBARSizeEncoding", static_cast<uint64_t>(sizeEncoding), 6);
+
+	// PCIe 4.0+: encodings 0..27 live in Capability bits 31:4; encodings
+	// 28..43 live in Control bits 31:16. Do not reject valid large BAR sizes.
+	bool encodingValid = sizeEncoding <= 43;
+	bool encodingSupported = false;
+	if (encodingValid) {
+		if (sizeEncoding <= 27)
+			encodingSupported = (supportedSizes & (1U << sizeEncoding)) != 0;
+		else
+			encodingSupported = (extendedSupportedSizes & (1U << (sizeEncoding - 28))) != 0;
+	}
+	bool indicesMatch = capBarIndex == ctlBarIndex;
+	setProperty("Navi33Bringup,ResizableBARSizeEncodingValid", encodingValid);
+	setProperty("Navi33Bringup,ResizableBARCurrentSizeSupported", encodingSupported);
+	setProperty("Navi33Bringup,ResizableBARIndicesMatch", indicesMatch);
+
+	if (!encodingValid || !encodingSupported || !indicesMatch) {
+		N33LOG("ReBAR metadata rejected: cap 0x%08x ctl 0x%08x (encoding valid=%u supported=%u indices-match=%u)",
+		       cap, ctl, encodingValid, encodingSupported, indicesMatch);
 		return;
 	}
-	setProperty("Navi33Bringup,ResizableBARCurrentSizeMiB",
-	             static_cast<uint64_t>((1ULL << curShift) >> 20), 32);
-	N33LOG("ReBAR cap 0x%08x ctl 0x%08x (current BAR size 2^%u = %llu MiB)",
-	       cap, ctl, curShift, (unsigned long long)(1ULL << curShift) >> 20);
+
+	uint64_t currentSizeMiB = 1ULL << sizeEncoding;
+	setProperty("Navi33Bringup,ResizableBARCurrentSizeMiB", currentSizeMiB, 64);
+	N33LOG("ReBAR cap 0x%08x ctl 0x%08x (BAR%u current size encoding %u = %llu MiB; supported)",
+	       cap, ctl, capBarIndex, sizeEncoding, (unsigned long long)currentSizeMiB);
 }
