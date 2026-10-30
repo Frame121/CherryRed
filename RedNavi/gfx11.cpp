@@ -1333,8 +1333,11 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         p.paging_vmid = 0;
         p.g_sch_ctx_gpu_mc_ptr = vaBase + schCtxOff;
         p.query_status_fence_gpu_mc_ptr = vaBase + queryFenceOff;
-        for (int i = 0; i < 4; i++) p.compute_hqd_mask[i] = 0xf0;                      // queues 4..7 of each pipe; 0..3 stay with the hand-programmed ones
-        p.gfx_hqd_mask[0] = 0; p.sdma_hqd_mask[0] = 0xfc; p.sdma_hqd_mask[1] = 0xfc;
+        // Linux (6.x, same card, docs/logs/linux-reference/mes_dmesg_linux.txt) reports compute_hqd_mask 0x0000000c: the MES schedules only queues 2 and 3 of a
+        // pipe. 0xf0 named queues the scheduler never uses, so it found no hardware queue to load a process queue into. Pipe 0 is left to the hand-programmed queues.
+        p.compute_hqd_mask[0] = 0;
+        for (int i = 1; i < 4; i++) p.compute_hqd_mask[i] = 0xc;
+        p.gfx_hqd_mask[0] = 0x2; p.sdma_hqd_mask[0] = 0xfc; p.sdma_hqd_mask[1] = 0xfc;
         for (int i = 0; i < AMD_PRIORITY_NUM_LEVELS; i++) p.aggregated_doorbells[i] = kMesDbStart + i * 2;   // one doorbell per priority level, in the page after the kernel doorbells (amdgpu_mes_doorbell_init)
         for (int i = 0; i < 5; i++) {
             p.gc_base[i] = adev->reg_offset[RN_GC_HWIP][0][i];
