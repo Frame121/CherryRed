@@ -75,6 +75,14 @@ void rn_gart_map_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page
     rn_vram_wr32(adev, slot + 4, upper_32_bits(pte));
 }
 
+// A GART page that points at VRAM: VALID | EXECUTABLE | READABLE | WRITEABLE, no SYSTEM bit, the address is the MC address of the VRAM page.
+void rn_gart_map_vram_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 mc) {
+    const u64 pte = (mc & 0x0000FFFFFFFFF000ull) | 0x1ull | 0x10ull | 0x20ull | 0x40ull;
+    const u64 slot = gmc->pt_vram_offset + (u64)page * 8;
+    rn_vram_wr32(adev, slot, lower_32_bits(pte));
+    rn_vram_wr32(adev, slot + 4, upper_32_bits(pte));
+}
+
 void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc) {
     u32 tmp;
 
@@ -431,6 +439,7 @@ static u32 gMappedWptr;
 static u32 gMappedPipe = 0;
 static u32 gMappedQueue = 3;           // queue index (ME 1, pipe 0) of the mapped queue: 3 through the KIQ, 4 through the MES
 static const u32 kMappedDoorbellDword = 8;
+static u32 gMappedDoorbell = kMappedDoorbellDword;   // doorbell dword of the mapped queue: 8 through the KIQ, in the user queue range (26..276) for a MES process queue
 static u32 gComputeWptr;                // running write pointer of the compute queue, in dwords
 static volatile u8 *gDoorbellBase;      // mapped doorbell BAR, or null for plain register submission
 static u32 gDoorbellDword;              // the compute queue's doorbell, in dwords
@@ -925,7 +934,7 @@ int rn_compute_submit_ib(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ri
         const u32 w = gMappedWptr;
         for (u32 i = 0; i < n; i++) rn_vram_wr32(adev, ringOff + ((w + i) & mask) * 4, pk[i]);
         gMappedWptr = w + n;
-        *reinterpret_cast<volatile u64 *>(gDoorbellBase + kMappedDoorbellDword * 4) = w + n;
+        *reinterpret_cast<volatile u64 *>(gDoorbellBase + gMappedDoorbell * 4) = w + n;
         return 0;
     }
     const u32 w = gComputeWptr;
@@ -1178,7 +1187,7 @@ void rn_scan_hqds(struct rn_device *adev, u32 out[33]) {
     out[32] = n;
 }
 
-void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const u32 start[4], u32 maxStep, void (*progress)(void *, u32), void *ctx,
+void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_gmc *gmc, const u32 start[4], u32 maxStep, void (*progress)(void *, u32), void *ctx,
                   struct rn_mes_result *res) {
     static_assert(sizeof(union MESAPI_SET_HW_RESOURCES) == 256 && sizeof(union MESAPI__ADD_QUEUE) == 256 &&
                   sizeof(union MESAPI__QUERY_MES_STATUS) == 256, "MES API frames are 64 dwords");
@@ -1362,7 +1371,29 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const u32 start[
         // The scheduler hierarchy as mes_userq_map builds it: the v11 API has no separate ADD_PROCESS or ADD_GANG opcode; the process context
         // (4 KB) and the gang context (4 KB) are buffers handed to ADD_QUEUE, which creates the process and the gang the first time it sees them.
         const u64 procCtxOff = sharedOff + 0x2000, gangCtxOff = sharedOff + 0x3000;
+        // The process runs in a VM context, so the queue's ring, write-back words, MQD and EOP buffer need virtual addresses it can translate: map
+        // the six VRAM pages of the queue (ring, rptr/wptr page, MQD, EOP) into the GART window and use those addresses everywhere.
+        const u32 procDoorbell = 40;                                    // inside the user queue doorbell range, where the MES watches
+        gMappedDoorbell = procDoorbell;
+        const u32 gartPage = 12000;
+        for (u32 k = 0; k < 6; k++) rn_gart_map_vram_page(adev, gmc, gartPage + k, vaBase + qOff + k * 4096ull);
+        const u64 vaQ = gmc->gart_start + gartPage * 4096ull - qOff;         // vaQ + qOff is the GART address of the queue's first page
+        writeComputeMqd(adev, vaQ, qOff, 4096, qOff + 0x2000, qOff + 0x4000, procDoorbell);
         for (u32 o = 0; o < 0x2000; o += 4) rn_vram_wr32(adev, procCtxOff + o, 0);
+        if (maxStep >= 8) {
+            union MESAPI__SET_SCHEDULING_CONFIG c;
+            memset(&c, 0, sizeof(c));
+            c.header.type = MES_API_TYPE_SCHEDULER;
+            c.header.opcode = MES_SCH_API_SET_SCHEDULING_CONFIG;
+            c.header.dwsize = API_FRAME_SIZE_IN_DWORDS;
+            for (int i = 0; i < AMD_PRIORITY_NUM_LEVELS; i++) {
+                c.grace_period_other_levels[i] = 50000;
+                c.process_quantum_for_level[i] = 100000;
+                c.process_grace_period_same_level[i] = 50000;
+            }
+            c.normal_yield_percent = 10;
+            res->sched_cfg_ok = sendFrame(&c, offsetof(union MESAPI__SET_SCHEDULING_CONFIG, api_status) / 4);
+        }
         union MESAPI__ADD_QUEUE p;
         memset(&p, 0, sizeof(p));
         p.header.type = MES_API_TYPE_SCHEDULER;
@@ -1378,9 +1409,9 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const u32 start[
         p.gang_context_addr = vaBase + gangCtxOff;
         p.inprocess_gang_priority = AMD_PRIORITY_LEVEL_NORMAL;
         p.gang_global_priority_level = AMD_PRIORITY_LEVEL_NORMAL;
-        p.doorbell_offset = kMappedDoorbellDword;
-        p.mqd_addr = vaBase + qOff + 0x2000;
-        p.wptr_addr = vaBase + qOff + 0x1008;
+        p.doorbell_offset = procDoorbell;
+        p.mqd_addr = vaQ + qOff + 0x2000;
+        p.wptr_addr = vaQ + qOff + 0x1008;
         p.queue_type = MES_QUEUE_TYPE_COMPUTE;
         p.vm_context_cntl = RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_CNTL);
         p.paging = 0;

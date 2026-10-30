@@ -2240,7 +2240,7 @@ void RedNaviProbe::sdmaTest() {
             if (PE_parse_boot_argn("rednavi_mes_step", &mesStep, sizeof(mesStep)) && mesStep >= 1) {
                 struct rn_mes_result mr;
                 const uint32_t start[4] = {kRNMes0StartLo, kRNMes0StartHi, kRNMes1StartLo, kRNMes1StartHi};
-                rn_mes_start(&gpu, kRNVramMcBase, 0x0C0A0000, start, mesStep,
+                rn_mes_start(&gpu, kRNVramMcBase, 0x0C0A0000, &gmc, start, mesStep,
                              [](void *ctx, uint32_t step) {
                                  RedNaviProbe *self = static_cast<RedNaviProbe *>(ctx);
                                  const char *pn[1] = {"about_to_run"};

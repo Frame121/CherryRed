@@ -94,6 +94,7 @@ void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc);
 // physical address gives it: valid, system, snooped, readable, writeable). Do this before rn_gfxhub_enable, which also flushes the TLBs.
 void rn_gart_map_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 bus_addr);
 void rn_gart_clear(struct rn_device *adev, const struct rn_gmc *gmc);
+void rn_gart_map_vram_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 mc_addr);   // a GART page that points at VRAM
 // With the hub already on: change or remove a PTE (bus 0 = unmap), then flush VMID 0's TLBs through invalidation engine 17, the one
 // Linux reserves for the GART (gmc_v11_0_flush_vm_hub). Returns 0 once the engine acknowledges, -1 on timeout.
 int rn_gart_update_page(struct rn_device *adev, const struct rn_gmc *gmc, u32 page, u64 bus_addr);
@@ -170,6 +171,7 @@ struct rn_mes_result {
     u32 ring_fence, api_status;                    // QUERY_SCHEDULER_STATUS fence and the last frame's completion word
     int hw_res_ok, add_ok;
     u32 hw_res1_status;
+    int sched_cfg_ok;
     u32 q_pipe, q_queue;                          // the hardware queue the MES gave ours
     u32 log_hist[16], log_scratch[16];            // first dwords of the two halves of the MES event log
     u32 q_active, q_doorbell_ctl, fault_status;    // the legacy compute queue mapped by ADD_QUEUE
@@ -177,7 +179,7 @@ struct rn_mes_result {
 };
 // Bring up the MES in stages (docs/COMPAT.md): start[] = {pipe0 start lo, hi, pipe1 start lo, hi} from the firmware headers. Needs the doorbell
 // aperture mapped (rn_doorbell_aperture_enable and rn_set_doorbell). base is a VRAM offset with 0x40000 bytes free.
-void rn_mes_start(struct rn_device *adev, u64 va_base, u64 base, const u32 start[4], u32 max_step, void (*progress)(void *ctx, u32 step),
+void rn_mes_start(struct rn_device *adev, u64 va_base, u64 base, const struct rn_gmc *gmc, const u32 start[4], u32 max_step, void (*progress)(void *ctx, u32 step),
                   void *ctx, struct rn_mes_result *res);   // read-only: MES control and the state of its two pipes
 void rn_gc_safe_mode(struct rn_device *adev, int enter);
 u32 rn_build_dispatch_ib(struct rn_device *adev, u32 *ib, u64 shader_va);
