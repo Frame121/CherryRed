@@ -1,0 +1,76 @@
+[    0.000000] Command line: BOOT_IMAGE=/boot/vmlinuz-linux-neptune-72 console=tty1 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.systemd.gpt_auto=no log_buf_len=4M amd_iommu=off amdgpu.lockup_timeout=5000,10000,10000,5000 ttm.pages_min=2097152 amdgpu.sched_hw_submission=4 amdgpu.dcdebugmask=0x20000 audit=0 fsck.mode=auto fsck.repair=preen loglevel=3 splash quiet plymouth.ignore-serial-consoles fbcon=vc:4-6 steamos.efi=PARTUUID=ba1ea134-b85d-4496-89ef-29b6f3f03c79
+[    0.071876] Kernel command line: BOOT_IMAGE=/boot/vmlinuz-linux-neptune-72 console=tty1 rd.luks=0 rd.lvm=0 rd.md=0 rd.dm=0 rd.systemd.gpt_auto=no log_buf_len=4M amd_iommu=off amdgpu.lockup_timeout=5000,10000,10000,5000 ttm.pages_min=2097152 amdgpu.sched_hw_submission=4 amdgpu.dcdebugmask=0x20000 audit=0 fsck.mode=auto fsck.repair=preen loglevel=3 splash quiet plymouth.ignore-serial-consoles fbcon=vc:4-6 steamos.efi=PARTUUID=ba1ea134-b85d-4496-89ef-29b6f3f03c79
+[   10.305313] amdgpu: Virtual CRAT table created for CPU
+[   10.305322] amdgpu: Topology: Add CPU node
+[   10.305454] amdgpu 0000:03:00.0: enabling device (0006 -> 0007)
+[   10.305552] amdgpu 0000:03:00.0: initializing kernel modesetting (IP DISCOVERY 0x1002:0x7480 0x1458:0x242B 0xCF).
+[   10.305565] amdgpu 0000:03:00.0: register mmio base: 0x60000000
+[   10.305566] amdgpu 0000:03:00.0: register mmio size: 1048576
+[   10.308833] amdgpu 0000:03:00.0: detected ip block number 0 <common_v1_0_0> (soc21_common)
+[   10.308834] amdgpu 0000:03:00.0: detected ip block number 1 <gmc_v11_0_0> (gmc_v11_0)
+[   10.308836] amdgpu 0000:03:00.0: detected ip block number 2 <ih_v6_0_0> (ih_v6_0)
+[   10.308837] amdgpu 0000:03:00.0: detected ip block number 3 <psp_v13_0_0> (psp)
+[   10.308838] amdgpu 0000:03:00.0: detected ip block number 4 <smu_v13_0_0> (smu)
+[   10.308839] amdgpu 0000:03:00.0: detected ip block number 5 <dce_v1_0_0> (dm)
+[   10.308840] amdgpu 0000:03:00.0: detected ip block number 6 <gfx_v11_0_0> (gfx_v11_0)
+[   10.308841] amdgpu 0000:03:00.0: detected ip block number 7 <sdma_v6_0_0> (sdma_v6_0)
+[   10.308842] amdgpu 0000:03:00.0: detected ip block number 8 <vcn_v4_0_0> (vcn_v4_0)
+[   10.308843] amdgpu 0000:03:00.0: detected ip block number 9 <jpeg_v4_0_0> (jpeg_v4_0)
+[   10.308844] amdgpu 0000:03:00.0: detected ip block number 10 <mes_v11_0_0> (mes_v11_0)
+[   10.308861] amdgpu 0000:03:00.0: Fetched VBIOS from VFCT
+[   10.308865] amdgpu 0000:03:00.0: [drm] ATOM BIOS: 113-R76GO-F91, build: 00175427, ver: 022.003.001.037.000001, 2026/01/18
+[   10.317836] amdgpu 0000:03:00.0: CP RS64 enable
+[   10.325595] amdgpu 0000:03:00.0: vgaarb: deactivate vga console
+[   10.325597] amdgpu 0000:03:00.0: Trusted Memory Zone (TMZ) feature not supported
+[   10.325621] amdgpu 0000:03:00.0: vm size is 262144 GB, 4 levels, block size is 9-bit, fragment size is 9-bit
+[   10.325626] amdgpu 0000:03:00.0: VRAM: 8176M 0x0000008000000000 - 0x00000081FEFFFFFF (8176M used)
+[   10.325627] amdgpu 0000:03:00.0: GART: 512M 0x00007FFF00000000 - 0x00007FFF1FFFFFFF
+[   10.325634] amdgpu 0000:03:00.0: [drm] Detected VRAM RAM=8176M, BAR=8192M
+[   10.325635] amdgpu 0000:03:00.0: [drm] RAM width 128bits GDDR6
+[   10.325707] amdgpu 0000:03:00.0:  8176M of VRAM memory ready
+[   10.325708] amdgpu 0000:03:00.0:  8192M of GTT memory ready.
+[   10.325720] amdgpu 0000:03:00.0: [drm] GART: num cpu pages 131072, num gpu pages 131072
+[   10.325862] amdgpu 0000:03:00.0: [drm] PCIE GART of 512M enabled (table at 0x00000081FEB00000).
+[   10.326581] amdgpu 0000:03:00.0: [drm] Loading DMUB firmware via PSP: version=0x07002D00
+[   10.326753] amdgpu 0000:03:00.0: [VCN instance 0] Found VCN firmware Version ENC: 1.23 DEC: 9 VEP: 0 Revision: 16
+[   10.326857] amdgpu 0000:03:00.0: MES: vmid_mask_mmhub 0x0000ff00, vmid_mask_gfxhub 0x0000ff00
+[   10.326860] amdgpu 0000:03:00.0: MES: gfx_hqd_mask 0x00000002, compute_hqd_mask 0x0000000c, sdma_hqd_mask 0x000000fc
+[   10.384606] amdgpu 0000:03:00.0: reserve 0x1300000 from 0x81fc000000 for PSP TMR
+[   10.479409] amdgpu 0000:03:00.0: RAS: optional ras ta ucode is not available
+[   10.487183] amdgpu 0000:03:00.0: RAP: optional rap ta ucode is not available
+[   10.487187] amdgpu 0000:03:00.0: SECUREDISPLAY: optional securedisplay ta ucode is not available
+[   10.487259] amdgpu 0000:03:00.0: smu driver if version = 0x00000035, smu fw if version = 0x00000040, smu fw program = 0, smu fw version = 0x00525c00 (82.92.0)
+[   10.535362] amdgpu 0000:03:00.0: SMU is initialized successfully!
+[   10.536127] amdgpu 0000:03:00.0: [drm] Display Core v3.2.384 initialized on DCN 3.2.1
+[   10.536130] amdgpu 0000:03:00.0: [drm] DP-HDMI FRL PCON supported
+[   10.537992] amdgpu 0000:03:00.0: [drm] DMUB hardware initialized: version=0x07002D00
+[   10.827709] amdgpu 0000:03:00.0: [drm] REG_WAIT timeout 1us * 150000 tries - optc32_disable_crtc line:196
+[   10.830755] snd_hda_intel 0000:03:00.1: bound 0000:03:00.0 (ops amdgpu_dm_audio_component_bind_ops [amdgpu])
+[   10.831258] amdgpu 0000:03:00.0: [drm] DP-1: PSR support 0, DC PSR ver -1, sink PSR ver 0 DPCD caps 0x0 su_y_granularity 0
+[   10.831282] amdgpu 0000:03:00.0: [drm] DP-2: PSR support 0, DC PSR ver -1, sink PSR ver 0 DPCD caps 0x0 su_y_granularity 0
+[   10.831315] amdgpu 0000:03:00.0: [drm] HDMI-A-1: PSR support 0, DC PSR ver -1, sink PSR ver 0 DPCD caps 0x0 su_y_granularity 0
+[   10.861029] amdgpu 0000:03:00.0: [drm] HDMI-A-2: PSR support 0, DC PSR ver -1, sink PSR ver 0 DPCD caps 0x0 su_y_granularity 0
+[   10.876374] amdgpu: Virtual CRAT table created for GPU
+[   10.876429] amdgpu: Topology: Add GPU node [0x1002:0x7480]
+[   10.876441] amdgpu 0000:03:00.0: SE 2, SH per SE 2, CU per SH 8, active_cu_number 32
+[   10.876444] amdgpu 0000:03:00.0: ring gfx_0.0.0 uses VM inv eng 0 on hub 0
+[   10.876445] amdgpu 0000:03:00.0: ring comp_1.0.0 uses VM inv eng 1 on hub 0
+[   10.876445] amdgpu 0000:03:00.0: ring comp_1.1.0 uses VM inv eng 4 on hub 0
+[   10.876446] amdgpu 0000:03:00.0: ring comp_1.2.0 uses VM inv eng 6 on hub 0
+[   10.876446] amdgpu 0000:03:00.0: ring comp_1.3.0 uses VM inv eng 7 on hub 0
+[   10.876447] amdgpu 0000:03:00.0: ring comp_1.0.1 uses VM inv eng 8 on hub 0
+[   10.876447] amdgpu 0000:03:00.0: ring comp_1.1.1 uses VM inv eng 9 on hub 0
+[   10.876448] amdgpu 0000:03:00.0: ring comp_1.2.1 uses VM inv eng 10 on hub 0
+[   10.876448] amdgpu 0000:03:00.0: ring comp_1.3.1 uses VM inv eng 11 on hub 0
+[   10.876449] amdgpu 0000:03:00.0: ring sdma0 uses VM inv eng 12 on hub 0
+[   10.876450] amdgpu 0000:03:00.0: ring sdma1 uses VM inv eng 13 on hub 0
+[   10.876450] amdgpu 0000:03:00.0: ring vcn_unified_0 uses VM inv eng 0 on hub 8
+[   10.876451] amdgpu 0000:03:00.0: ring jpeg_dec uses VM inv eng 1 on hub 8
+[   10.876451] amdgpu 0000:03:00.0: ring mes_kiq_3.1.0 uses VM inv eng 14 on hub 0
+[   11.069428] amdgpu: HMM registered 8176MB device memory
+[   11.070247] amdgpu 0000:03:00.0: Using BACO for runtime pm
+[   11.245980] [drm] Initialized amdgpu 3.65.0 for 0000:03:00.0 on minor 0
+[   11.251049] fbcon: amdgpudrmfb (fb0) is primary device
+[   11.251076] amdgpu 0000:03:00.0: [drm] fb0: amdgpudrmfb frame buffer device
+[   13.393222] [drm] pre_validate_dsc:1746 MST_DSC dsc precompute is not needed
+[   13.668123] amdgpu 0000:03:00.0: [drm] REG_WAIT timeout 1us * 150000 tries - optc32_disable_crtc line:196

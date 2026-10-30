@@ -112,7 +112,13 @@ def main():
                 if g not in groups:
                     groups.append(g)
         groups += ["otg0", "opp0", "mpc"]
-    dump.dump(card, dev, reglist, pipe, groups, bases)
+    values.update(dump.dump(card, dev, reglist, pipe, groups, bases))
+    asleep = values.get("OTG0_OTG_CONTROL") == 0xFFFFFFFF
+    if asleep:
+        print("WARNING: the display engine registers read 0xffffffff, so the GPU is probably in a power-saving state (runtime PM) and "
+              "this dump is not usable.\nKeep the screen awake (move the mouse, no screen blanking), then run\n"
+              "    echo on | sudo tee /sys/bus/pci/devices/%s/power/control\nand rerun this script." % bdf)
+        write(out + "/WARNING_display_asleep.txt", "OTG0_OTG_CONTROL read 0xffffffff: the display engine was powered down during the dump.\n")
     write(out + "/lit_outputs.txt", "\n".join("SYMCLK%s DIG front end %d" % x for x in lit) + "\n")
 
     tar = out + ".tar.gz"
