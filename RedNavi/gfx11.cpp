@@ -557,7 +557,7 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
 #define RN_COMPUTE_PGM_RSRC3 0x1bc8u
 
 void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u64 shaderOff, u64 fenceOff, u64 targetOff, u64 targetVaOverride,
-                              volatile u32 *hostTarget, u32 intSel, struct rn_dispatch_result *res) {
+                              volatile u32 *hostTarget, u32 intSel, int (*waitDone)(void *, u32), void *waitCtx, struct rn_dispatch_result *res) {
     memset(res, 0, sizeof(*res));
     const u64 shaderVa = vaBase + shaderOff, fenceVa = vaBase + fenceOff;
     const u64 wptrOff = ringOff + 0x1008;
@@ -620,16 +620,22 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u
     grbmSelect(adev, 1, 0, 0, 2);
     computeSubmit(adev, wptrOff, start + n);
     res->step = 2;
-    static const u32 sampleDelayMs[6] = {0, 1, 4, 15, 80, 400};              // cumulative: 0, 1, 5, 20, 100, 500 ms
-    for (u32 i = 0; i < 6; i++) {
-        if (sampleDelayMs[i]) msleep(sampleDelayMs[i]);
-        res->trace[i][0] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
-        res->trace[i][1] = rn_vram_rd32(adev, fenceOff);
-    }
-    for (int i = 0; i < 1500; i++) {                                         // up to 1.5 s more
+    if (waitDone) {                                                          // no fence polling: the caller waits for the interrupt
+        waitDone(waitCtx, 1500);
         res->fence = rn_vram_rd32(adev, fenceOff);
-        if (res->fence == 0xF00DF00Du) { res->ok = 1; break; }
-        msleep(1);
+        res->ok = res->fence == 0xF00DF00Du;
+    } else {
+        static const u32 sampleDelayMs[6] = {0, 1, 4, 15, 80, 400};          // cumulative: 0, 1, 5, 20, 100, 500 ms
+        for (u32 i = 0; i < 6; i++) {
+            if (sampleDelayMs[i]) msleep(sampleDelayMs[i]);
+            res->trace[i][0] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
+            res->trace[i][1] = rn_vram_rd32(adev, fenceOff);
+        }
+        for (int i = 0; i < 1500; i++) {                                     // up to 1.5 s more
+            res->fence = rn_vram_rd32(adev, fenceOff);
+            if (res->fence == 0xF00DF00Du) { res->ok = 1; break; }
+            msleep(1);
+        }
     }
     res->rptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
     res->wptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
@@ -644,7 +650,7 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u
     #undef SHREG
 }
 
-void rn_ih_enable(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, u64 wptrShadowOff) {
+void rn_ih_enable(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, u64 wptrShadowOff, int msi) {
     u32 tmp;
     for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
     rn_vram_wr32(adev, wptrShadowOff, 0); rn_vram_wr32(adev, wptrShadowOff + 4, 0);
@@ -680,7 +686,7 @@ void rn_ih_enable(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes
     tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, MC_SNOOP, 0);                       // VRAM
     tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, MC_RO, 0);
     tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, MC_VMID, 0);
-    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, RPTR_REARM, 0);                     // no MSI
+    tmp = REG_SET_FIELD(tmp, IH_RB_CNTL, RPTR_REARM, msi ? 1 : 0);
     WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_CNTL, tmp);
     WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_WPTR_ADDR_LO, lower_32_bits(vaBase + wptrShadowOff));
     WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_WPTR_ADDR_HI, upper_32_bits(vaBase + wptrShadowOff) & 0xFFFFu);
@@ -703,6 +709,12 @@ void rn_ih_enable(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes
     tmp = RREG32_SOC15(RN_GC, 0, regCP_ME1_PIPE0_INT_CNTL);
     tmp = REG_SET_FIELD(tmp, CP_ME1_PIPE0_INT_CNTL, TIME_STAMP_INT_ENABLE, 1);
     WREG32_SOC15(RN_GC, 0, regCP_ME1_PIPE0_INT_CNTL, tmp);
+}
+
+u32 rn_ih_ack(struct rn_device *adev, u32 ringBytes) {
+    const u32 wptr = RREG32_SOC15(RN_OSSSYS, 0, regIH_RB_WPTR);
+    WREG32_SOC15(RN_OSSSYS, 0, regIH_RB_RPTR, wptr & (ringBytes - 1));
+    return wptr;
 }
 
 void rn_ih_read(struct rn_device *adev, u64 ringOff, u64 wptrShadowOff, struct rn_ih_result *res) {

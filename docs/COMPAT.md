@@ -174,3 +174,11 @@ Verified on the RX 7800 XT (`gart-test`, `rn_sdma0_run`): SDMA0 writes `0x112233
 Notes: the page table is cleared before the pages are mapped and not by `rn_gfxhub_enable`, which flushes the L1 TLBs and the L2 when it switches the hub on, so the mapping has to be in place first. COPY_LINEAR layout (`sdma_v6_0_emit_copy_buffer`): header (op 1, sub-op 0), byte count minus one, a flags dword, source address, destination address.
 
 Not done: mapping and unmapping at runtime (a TLB invalidation through `GCVM_INVALIDATE_ENG*_REQ` is needed when a PTE changes after the hub is on), more than a few pages, per-process page tables (VMID > 0), the ring and the IH ring in system memory.
+
+## M4 step 9: the interrupt reaches the CPU as an MSI (2026-10-30)
+
+`rednavi_msi_test=1` (with `rednavi_ih_test=1`) registers a message-signalled interrupt for the GPU, and the dispatch test waits for it instead of polling the fence. The PCI node of the GPU lists two interrupt sources: index 0 of type 1 (level, legacy INTx) and index 1 of type `0x10000` (`kIOInterruptTypePCIMessaged`, the MSI); the others are absent. The first attempt looked for type 0 (edge) and found nothing: for PCI devices the MSI is flagged by `kIOInterruptTypePCIMessaged`, not by the edge type.
+
+The handler is an `IOInterruptEventSource` on the MSI index, run on the PCI work loop. It acknowledges the IH ring by writing the read pointer from the write pointer (`rn_ih_ack`), which re-arms the next message (`IH_RB_CNTL.RPTR_REARM` is set when MSI is on), and counts. Verified on the RX 7800 XT (`msi-test`): `msi_count` 1 and `msi_last_wptr` 0x20 after the fence interrupt of the dispatch, the fence read once afterwards is there, no panic. The fence is not polled: `rn_compute_dispatch_test` takes a wait callback for that.
+
+Not done: more than one interrupt in a row (only one is tested), the other interrupt sources of the IH (page faults, SDMA), an interrupt-driven wait on a thread instead of a sleep loop, and the IH ring in system memory.

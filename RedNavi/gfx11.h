@@ -115,7 +115,9 @@ void rn_compute_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_off
 // instruction words hand-assembled from the encodings in LLVM's MC tests, llvm/test/MC/AMDGPU/gfx11_asm_*.s).
 void rn_compute_dispatch_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u64 shader_vram_offset, u64 fence_vram_offset,
                               u64 target_vram_offset, u64 target_gpu_va, volatile u32 *host_target, u32 int_sel,
-                              struct rn_dispatch_result *res);
+                              int (*wait_done)(void *ctx, u32 timeout_ms), void *wait_ctx, struct rn_dispatch_result *res);
+// (With wait_done set, the fence is not polled: after the submission the caller's function waits, e.g. for the interrupt, and the fence
+// is read once afterwards.)
 // (With target_gpu_va and host_target set, the shader stores to that GPU address instead - a GART-mapped host page - and the result is
 // read from host_target; target_vram_offset is then ignored.)
 
@@ -130,7 +132,10 @@ void rn_compute_dispatch_test(struct rn_device *adev, u64 va_base, u64 ring_vram
 void rn_doorbell_aperture_enable(struct rn_device *adev, int write_s2a, u32 before[3]);
 void rn_set_doorbell(volatile void *base, u32 dword_index);
 
-void rn_ih_enable(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 wptr_shadow_vram_offset);
+// msi: IH_RB_CNTL.RPTR_REARM, the ring re-arms the message-signalled interrupt when the read pointer is written.
+void rn_ih_enable(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 wptr_shadow_vram_offset, int msi);
+// Acknowledge: the read pointer is set to the current write pointer (which re-arms the next MSI). Returns the write pointer.
+u32 rn_ih_ack(struct rn_device *adev, u32 ring_bytes);
 void rn_ih_read(struct rn_device *adev, u64 ring_vram_offset, u64 wptr_shadow_vram_offset, struct rn_ih_result *res);
 
 #ifdef __cplusplus

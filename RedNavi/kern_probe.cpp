@@ -88,6 +88,8 @@
 #include "mode_regs.h"
 #include "smu13.h"
 #include <IOKit/IODMACommand.h>
+#include <IOKit/IOInterruptEventSource.h>
+#include <IOKit/IOWorkLoop.h>
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include "gfx11.h"
 #include "gc_regs.h"
@@ -262,6 +264,11 @@ class RedNaviProbe : public IOService {
     IODMACommand *hostDma {nullptr};
     uint64_t hostBus {0};                          // its bus address as the device must use it
     uint32_t hostBusLen {0};
+    IOInterruptEventSource *msiSrc {nullptr};      // the message-signalled interrupt of the GPU (rednavi_msi_test)
+    volatile uint32_t msiCount {0};
+    volatile uint32_t msiLastWptr {0};
+    static void msiHandler(OSObject *owner, IOInterruptEventSource *src, int count);
+    static int waitMsi(void *ctx, uint32_t timeoutMs);
     OSData *disc {nullptr};   // copy of the IP discovery table
     OSData *vbiosCopy {nullptr};   // VBIOS image read from the PCI ROM
     bool dmubUp {false};           // our DMCUB is running and its mailbox is set up
@@ -1584,6 +1591,20 @@ void RedNaviProbe::loadGcFw() {
 
 // First command on the graphics engines (boot-arg rednavi_sdma_test=1, needs the GC firmware and the SMU features enabled so the RLC has
 // booted): enable the GC memory hub on VRAM, start SDMA0 on a ring in VRAM and have it write a magic value that the CPU then reads.
+// The GPU's interrupt: ack the IH ring (which re-arms the next one) and count it.
+void RedNaviProbe::msiHandler(OSObject *owner, IOInterruptEventSource *, int) {
+    RedNaviProbe *self = OSDynamicCast(RedNaviProbe, owner);
+    if (!self) return;
+    self->msiLastWptr = rn_ih_ack(&self->gpu, 4096);
+    self->msiCount = self->msiCount + 1;
+}
+
+int RedNaviProbe::waitMsi(void *ctx, uint32_t timeoutMs) {
+    RedNaviProbe *self = static_cast<RedNaviProbe *>(ctx);
+    for (uint32_t ms = 0; ms < timeoutMs && self->msiCount == 0; ms++) IOSleep(1);
+    return self->msiCount != 0;
+}
+
 void RedNaviProbe::sdmaTest() {
     uint32_t arg = 0;
     if (!PE_parse_boot_argn("rednavi_sdma_test", &arg, sizeof(arg)) || arg != 1) return;
@@ -1806,14 +1827,36 @@ void RedNaviProbe::sdmaTest() {
                 // Opt-in (rednavi_ih_test=1): an interrupt ring in VRAM, and the fence packet asks the CP for an interrupt.
                 uint32_t ihTest = 0;
                 const bool ih = PE_parse_boot_argn("rednavi_ih_test", &ihTest, sizeof(ihTest)) && ihTest == 1;
-                if (ih) rn_ih_enable(&gpu, kRNVramMcBase, 0x0C040000, 4096, 0x0C041000);
+                // Opt-in (rednavi_msi_test=1, with the IH test): the interrupt vector is delivered to the CPU as a message-signalled interrupt.
+                uint32_t msiArg = 0;
+                bool msi = false;
+                if (ih && PE_parse_boot_argn("rednavi_msi_test", &msiArg, sizeof(msiArg)) && msiArg == 1) {
+                    int types[8], chosen = -1;
+                    for (int i = 0; i < 8; i++) {
+                        int type = -1;
+                        types[i] = pci->getInterruptType(i, &type) == kIOReturnSuccess ? type : -1;   // 0x10000 PCI messaged (MSI), 1 level (legacy INTx), -1 none
+                        if (chosen < 0 && types[i] >= 0 && (types[i] & kIOInterruptTypePCIMessaged)) chosen = i;   // MSI: type 0x10000
+                    }
+                    IOWorkLoop *wl = getWorkLoop();
+                    if (chosen >= 0 && wl) {
+                        msiSrc = IOInterruptEventSource::interruptEventSource(this, &RedNaviProbe::msiHandler, pci, chosen);
+                        if (msiSrc && wl->addEventSource(msiSrc) == kIOReturnSuccess) { msiSrc->enable(); msi = true; }
+                    }
+                    const char *mn[10] = {"type0", "type1", "type2", "type3", "type4", "type5", "type6", "type7", "chosen", "enabled"};
+                    uint32_t mv[10];
+                    for (int i = 0; i < 8; i++) mv[i] = static_cast<uint32_t>(types[i]);
+                    mv[8] = static_cast<uint32_t>(chosen);
+                    mv[9] = msi;
+                    rnPublish(this, "msi-info", mn, mv, 10);
+                }
+                if (ih) rn_ih_enable(&gpu, kRNVramMcBase, 0x0C040000, 4096, 0x0C041000, msi);
                 uint32_t store = 0;
                 PE_parse_boot_argn("rednavi_dispatch_store", &store, sizeof(store));   // 1: the shader stores a dword, 0: s_endpgm only
                 uint32_t dispGart = 0;
                 const bool toHost = gartTest && hostBus && PE_parse_boot_argn("rednavi_dispatch_gart", &dispGart, sizeof(dispGart)) && dispGart == 1;
                 volatile uint32_t *hostWord = toHost ? static_cast<volatile uint32_t *>(hostBuf->getBytesNoCopy()) + 2 : nullptr;   // dword 2 of the host page
                 rn_compute_dispatch_test(&gpu, kRNVramMcBase, 0x0C020000, 0x0C030000, 0x0C031000, store == 1 ? 0x0C032000 : 0,
-                                         toHost ? kGartVa + 8 : 0, hostWord, ih ? 2 : 0, &dr);
+                                         toHost ? kGartVa + 8 : 0, hostWord, ih ? 2 : 0, msi ? &RedNaviProbe::waitMsi : nullptr, this, &dr);
                 const char *dn[26] = {"step", "ok", "fence", "fence_before", "rptr", "wptr", "active", "scratch", "fault_status", "fault_addr_lo", "fault_addr_hi",
                                       "t0_rptr", "t0_fence", "t1_rptr", "t1_fence", "t5_rptr", "t5_fence", "t20_rptr", "t20_fence",
                                       "t100_rptr", "t100_fence", "t500_rptr", "t500_fence", "target", "target_before"};
@@ -1831,6 +1874,11 @@ void RedNaviProbe::sdmaTest() {
                     for (int i = 0; i < 16; i++) iv[6 + i] = ir.entry[i];
                     iv[22] = ir.wptr_reg != 0 || ir.wptr_shadow != 0;
                     rnPublish(this, "ih-test", in, iv, 23);
+                    if (msi) {
+                        const char *cn2[3] = {"msi_count", "msi_last_wptr", "fence_ok"};
+                        uint32_t cv2[3] = {msiCount, msiLastWptr, static_cast<uint32_t>(dr.ok)};
+                        rnPublish(this, "msi-test", cn2, cv2, 3);
+                    }
                 }
             }
             if (doorbellMap) { rn_set_doorbell(nullptr, 0); doorbellMap->release(); }
@@ -2107,6 +2155,7 @@ void RedNaviProbe::stop(IOService *provider) {
     if (modeLock) { IOLockFree(modeLock); modeLock = nullptr; }
     if (disc) { disc->release(); disc = nullptr; }
     if (vbiosCopy) { vbiosCopy->release(); vbiosCopy = nullptr; }
+    if (msiSrc) { msiSrc->disable(); if (getWorkLoop()) getWorkLoop()->removeEventSource(msiSrc); msiSrc->release(); msiSrc = nullptr; }
     if (hostDma) { hostDma->complete(); hostDma->clearMemoryDescriptor(); hostDma->release(); hostDma = nullptr; }
     if (hostBuf) { hostBuf->release(); hostBuf = nullptr; }
     if (regs) { regs->release(); regs = nullptr; }
