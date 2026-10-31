@@ -56,11 +56,6 @@ inline bool smu13Send(const RegBar &bar, uint32_t msg, uint32_t arg,
     return smuResponseOk(response);
 }
 
-inline uint64_t mp1ByteOffset(uint32_t dword)
-{
-    return (static_cast<uint64_t>(kMp1BaseDwords) + dword) * 4ull;
-}
-
 // Zero a VRAM region through the window, paced.
 inline bool ringVramZero(const RegBar &bar, uint64_t vramByte, uint32_t bytes)
 {
