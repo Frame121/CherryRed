@@ -1,5 +1,30 @@
 # Recovery Checkpoint
 
+- **CHECKPOINT: 2026-10-31 (session 6) — gc11_regs.h (GC 11 register
+  constants generated from the real Linux gc_11_0_0 headers) + shared
+  ring-submit/smu13 helpers; TWO CONCURRENT AGENT SESSIONS MERGED.** A second
+  agent session worked this tree in parallel and has written (not yet
+  committed at checkpoint time) Navi33Memory (5.4: gfxhub/GART/VMID0 →
+  MemoryVerified), Navi33Queue (5.5: SDMA0 + GFX ring submission →
+  QueueVerified) and Navi33UserClient (5.7). This session's duplicate SDMA
+  port was discarded in favour of theirs; the surviving contributions are:
+  - `gc11_regs.h` + `tools/gen-navi33-gc-regs.py`: 61 registers + 37 field
+    masks extracted (hard-fail generator) from the REAL Linux gc_11_0_0
+    asic_reg headers — the register file GC 11.0.2 uses (only GC 11.0.3 has
+    its own gfxhub layout). The memory/queue stages should consume these
+    instead of open-coded hex; provenance records torvalds/linux master
+    36aad21d50d1.
+  - `Navi33RingSubmit.hpp`: shared ringSubmit + ringVramZero + smu13Send for
+    the post-ring stages.
+  - CI-blocking fixes across the concurrent session's stages (strstr, IOKit
+    includes, duplicate MP0 base, namespace closes).
+  CI green at adbaa7d; kext installed to `E:\EFI\OC\Kexts\` (backups kept).
+  Boot-args on the EFI still carry only `navi33bringup=1 navi33psp=1` (safe
+  read-only boot); the full write ladder runs when the operator adds
+  `navi33psp_load=1 navi33psp_chain=1 navi33psp_ring=1 navi33psp_smu=1
+  navi33gc_load=1` (+ memory/queue args once those stages land). Every
+  behaviour stays UNVERIFIED until the card answers.
+
 - **CHECKPOINT: 2026-10-31 (session 5) — THE WRITE LADDER IS FULLY WRITTEN
   AND CI-BUILT: PSP CHAIN → RING → TOC/TMR → SMU (M2b) → GC IMAGES → RLC
   AUTOLOAD.** Note: a second concurrent agent session committed the PSP load
