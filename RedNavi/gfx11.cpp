@@ -1275,6 +1275,9 @@ void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]) {
     grbmSelect(adev, 0, 0, 0, 0);
 }
 
+bool gMesDmDump = false;
+u32 gMesDm[2][256];
+
 void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_gmc *gmc, const u32 start[4], u32 maxStep, void (*progress)(void *, u32), void *ctx,
                   struct rn_mes_result *res) {
     static_assert(sizeof(union MESAPI_SET_HW_RESOURCES) == 256 && sizeof(union MESAPI__ADD_QUEUE) == 256 &&
@@ -1591,6 +1594,19 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     res->log_hist[13] = rn_vram_rd32(adev, qOff + 0x1000);
     res->log_hist[14] = rn_vram_rd32(adev, apiStatusOff);
     res->log_hist[15] = rn_rreg32(adev, adev->reg_offset[RN_GC_HWIP][0][0] + 0xda4);   // GRBM_STATUS
+    // The scheduler's own data memory (0x80000 bytes, GFX_MES_DRAM_SIZE) through the index registers, ME 3 pipe 0: where the loop it spins in keeps its state.
+    if (gMesDmDump) {   // opt-in (rednavi_mes_dm=1). With the MES running every read of the index registers returned 0xffffffff, so the MES is halted first (diagnostic: it is stuck anyway).
+    WREG32_SOC15(RN_GC, 0, regCP_MES_CNTL, RREG32_SOC15(RN_GC, 0, regCP_MES_CNTL) | CP_MES_CNTL__MES_HALT_MASK);
+    udelay(100);
+    grbmSelect(adev, 3, 0, 0, 0);
+    for (u32 i = 0; i < 256; i++) {
+        WREG32_SOC15(RN_GC, 0, regCP_MES_DM_INDEX_ADDR, i * 4);
+        gMesDm[0][i] = RREG32_SOC15(RN_GC, 0, regCP_MES_DM_INDEX_DATA);
+        WREG32_SOC15(RN_GC, 0, regCP_MES_DM_INDEX_ADDR, 0x80000 - 1024 + i * 4);
+        gMesDm[1][i] = RREG32_SOC15(RN_GC, 0, regCP_MES_DM_INDEX_DATA);
+    }
+    grbmSelect(adev, 0, 0, 0, 0);
+    }
     res->step = 5;
     if ((res->q_active & 1u) || res->add_ok) { gMapped = true; gMappedWptr = 0; gMappedPipe = foundPipe; gMappedQueue = foundQueue; }   // later rn_compute_submit_ib calls use this queue
 }

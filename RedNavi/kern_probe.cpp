@@ -2203,6 +2203,7 @@ void RedNaviProbe::sdmaTest() {
             if (gcAwake == 1) rn_gc_safe_mode(&gpu, 1);
             uint32_t mesClean = 0;    // rednavi_mes_clean=1: no hand-programmed queue at all, only the MEC running and the doorbells mapped; the MES maps the queue
             PE_parse_boot_argn("rednavi_mes_clean", &mesClean, sizeof(mesClean));
+            { uint32_t dm = 0; gMesDmDump = PE_parse_boot_argn("rednavi_mes_dm", &dm, sizeof(dm)) && dm == 1; }
             if (mesClean == 1 || mesClean == 2) {
                 memset(&cr, 0, sizeof(cr));
                 rn_mec_enable(&gpu);
@@ -2323,6 +2324,14 @@ void RedNaviProbe::sdmaTest() {
                         snprintf(ln[16 + i], 12, "s%d", i); lp[16 + i] = ln[16 + i]; lv[16 + i] = mr.log_scratch[i];
                     }
                     rnPublish(this, "mes-log", lp, lv, 32);
+                    {
+                        static char dmn[512][8];
+                        const char *dp[256];
+                        for (int half = 0; half < 2; half++) {
+                            for (int i = 0; i < 256; i++) { snprintf(dmn[half * 256 + i], 8, "%c%03x", half ? 'h' : 'l', i * 4); dp[i] = dmn[half * 256 + i]; }
+                            rnPublish(this, half ? "mes-dm-hi" : "mes-dm-lo", dp, gMesDm[half], 256);
+                        }
+                    }
                     {
                         const char *dn[6] = {"c1", "c2", "c3", "c4", "c5", "c6"};
                         rnPublish(this, "mes-db", dn, mr.mes_db, 6);
