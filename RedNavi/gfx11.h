@@ -168,6 +168,10 @@ extern u64 gMesHostWbVa;            // rednavi_mes_hostwb=1: the legacy queue's 
 extern volatile u32 *gMesHostWbMem;
 extern u64 gMesHostRingVa;          // rednavi_mes_hostring=1: the legacy queue's ring (8 KB) in host memory, with the write-back words
 extern volatile u32 *gMesHostRingMem;
+extern u32 gMesKiqRing[96];   // the first 96 dwords of the MES KIQ ring after the failed map
+extern bool gMesCleaner;      // rednavi_mes_cleaner=1: a cleaner shader (one s_endpgm) and its address in the KIQ SET_RESOURCES, as gfx11_kiq_set_resources sends it
+extern bool gMesHwResLinux;   // rednavi_mes_hwres=1: SET_HW_RESOURCES with Linux's gds_size 0x1000, oversubscription_timer 50 and disable_mes_log 1
+extern bool gMesSelfMap;   // rednavi_mes_selfmap=1: after the stuck map, put the scheduler's MAP_QUEUES on the KIQ ring ourselves
 extern bool gMesDmDump;   // rednavi_mes_dm=1: read the two event log windows after the last frame
 extern u32 gMesDbg[2][256];   // MES firmware log (mes_dbgext): the first 2 KB of the buffer, dwords 0..3 are the header the firmware leaves
 extern bool gMesDbgExt;   // rednavi_mes_dbgext=1 (host buffer, as Linux) or 2 (the VRAM area): hand the scheduler a log buffer after the resource frames and dump what it wrote
@@ -186,6 +190,8 @@ struct rn_mes_result {
     int hw_res_ok, add_ok;
     u32 hw_res1_status;
     int dbg_ok; u32 dbg_status;                    // SETUP_MES_DBGEXT frame and its completion word (opt-in, rednavi_mes_dbgext=1)
+    u32 kiq_end[16];                                // KIQ HQD wptr, rptr, doorbell control, active and ring dwords 16..19 after the failed map
+    u32 parity[2];                                 // [0] cleaner shader address sent in the KIQ SET_RESOURCES (>> 8, low half), [1] bit 0 rednavi_mes_cleaner, bit 1 rednavi_mes_hwres
     u32 hqd_active;                                // MEC queues with CP_HQD_ACTIVE set before the legacy map, bit pipe * 8 + queue
     u32 cp_me_cntl, mec_cntl, rlc_sched;           // CP_ME_CNTL, CP_MEC_RS64_CNTL, RLC_CP_SCHEDULERS before the MES start
     u32 bootload, rlc_srm, cp_stat0;               // RLC_RLCS_BOOTLOAD_STATUS, RLC_SRM_CNTL and CP_STAT before the MES start

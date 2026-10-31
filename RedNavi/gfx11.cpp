@@ -1060,6 +1060,7 @@ void rn_compute_diag2(struct rn_device *adev, u32 out[8]) {
 }
 
 // MQD image for a compute queue (struct v11_compute_mqd, offsets in dwords), as gfx_v11_0_compute_mqd_init fills it.
+bool gMesSelfMap = false;
 u64 gMesHostWbVa = 0;            // rednavi_mes_hostwb=1: GART address of a host page that holds the legacy queue's rptr (+0) and wptr (+8), as Linux's write-back slots do
 volatile u32 *gMesHostWbMem = nullptr;
 u64 gMesHostRingVa = 0;          // rednavi_mes_hostring=1: the legacy queue's 8 KB ring in host memory too (GART address), as Linux allocates it
@@ -1290,6 +1291,9 @@ void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]) {
 bool gMesDmDump = false;
 u32 gMesDm[2][256];
 u32 gMesMqd[512];
+u32 gMesKiqRing[96];
+bool gMesCleaner = false;
+bool gMesHwResLinux = false;
 bool gMesDbgExt = false;
 u64 gMesDbgHostVa = 0;
 void *gMesDbgHostMem = nullptr;
@@ -1477,7 +1481,11 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
             p.osssys_base[i] = adev->reg_offset[RN_OSSSYS_HWIP][0][i];
         }
         p.disable_reset = 1;
-        p.disable_mes_log = 0;
+        p.disable_mes_log = gMesHwResLinux ? 1 : 0;
+        if (gMesHwResLinux) {                              // the three fields mes_v11_0_set_hw_resources (Linux 7.0) sets and RedNavi left at 0
+            p.gds_size = 0x1000;                           // adev->gds.gds_size for GFX11 (gfx_v11_0_set_gds_init)
+            p.oversubscription_timer = 50;
+        }
         p.enable_mes_event_int_logging = 1;
         p.event_intr_history_gpu_mc_ptr = logVa;
         p.use_different_vmid_compute = 1;
@@ -1545,10 +1553,22 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     gWbHostNow = false;
     {
         // amdgpu_gfx_mes_enable_kcq: SET_RESOURCES on the KIQ ring with every queue in the mask comes before the legacy queue is mapped
+        // Dwords 4 and 5 are the cleaner shader's MC address >> 8. Linux 7.0 enables the cleaner shader on GC 11.0.3 with these firmware versions
+        // (gfx_v11_0_sw_init: ME >= 2280, PFP >= 2370, MEC >= 2450, MES >= 99) and sends its address here; RedNavi sent 0. The scheduler does touch
+        // the cleaner path in ADD_QUEUE (with the SET_HW_RESOURCES_1 fence reading 0xffffffff it spun there), so a null shader is a suspect.
+        // Linux's shader binary is not copied: a single s_endpgm (GFX11 encoding 0xbfb00000) is enough to see whether the address matters.
+        u64 cleanerMc = 0;
+        if (gMesCleaner) {
+            const u64 shOff = sharedOff + 0x1800;                          // 256-byte aligned, clear of the fence area (+0x200..+0x1200) and the contexts (+0x2000)
+            for (u32 o = 0; o < 0x100; o += 4) rn_vram_wr32(adev, shOff + o, 0xbfb00000u);
+            cleanerMc = (vaBase + shOff) >> 8;
+        }
+        res->parity[0] = lower_32_bits(cleanerMc);
+        res->parity[1] = (gMesCleaner ? 1u : 0u) | (gMesHwResLinux ? 2u : 0u);
         u32 pk[8];
         pk[0] = RN_PACKET3(0xA0u, 6);
         pk[1] = (0u << 0) | (0xau << 16) | (0u << 29);
-        pk[2] = 0xffffffffu; pk[3] = 0xffffffffu; pk[4] = 0; pk[5] = 0; pk[6] = 0; pk[7] = 0;
+        pk[2] = 0xffffffffu; pk[3] = 0xffffffffu; pk[4] = lower_32_bits(cleanerMc); pk[5] = upper_32_bits(cleanerMc); pk[6] = 0; pk[7] = 0;
         mesRingSubmit(adev, kiqOff, kiqOff + 0x1008, kMesKiqDoorbell, &kiqWptr, pk, 8);
         msleep(20);
         grbmSelect(adev, 3, 1, 0, 0);
@@ -1640,6 +1660,46 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
     msleep(1000);
     res->ring_fence_late = rn_vram_rd32(adev, ringFenceOff);
+    // The MES KIQ queue (ME 3 pipe 1 queue 0) after the failed map: did the scheduler hand it anything? Its HQD pointers and the ring after our own packets.
+    grbmSelect(adev, 3, 1, 0, 0);
+    res->kiq_end[0] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
+    res->kiq_end[1] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
+    res->kiq_end[2] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL);
+    res->kiq_end[3] = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
+    grbmSelect(adev, 0, 0, 0, 0);
+    grbmSelect(adev, 1, 0, 0, 0);                                      // the target of the scheduler's MAP_QUEUES: ME 1 pipe 0 queue 0
+    res->kiq_end[4] = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
+    res->kiq_end[5] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_BASE);
+    res->kiq_end[6] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_CONTROL);
+    res->kiq_end[7] = RREG32_SOC15(RN_GC, 0, regCP_MQD_BASE_ADDR);
+    res->kiq_end[8] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL);
+    res->kiq_end[9] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PERSISTENT_STATE);
+    res->kiq_end[10] = RREG32_SOC15(RN_GC, 0, regCP_HQD_VMID);
+    res->kiq_end[11] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
+    grbmSelect(adev, 0, 0, 0, 0);
+    for (u32 i = 0; i < 96; i++) gMesKiqRing[i] = rn_vram_rd32(adev, kiqOff + i * 4);   // everything on the KIQ ring: our packets and what the scheduler appended
+    if (gMesSelfMap && !res->add_ok) {
+        // rednavi_mes_selfmap=1: send the MAP_QUEUES the scheduler put on the KIQ ring ourselves (same packet: ME 1 pipe 0 queue 0, our MQD), after the scheduler
+        // is stuck. If the KIQ firmware programs the HQD for our packet, the KIQ and the MQD are fine and the scheduler's own request is what fails.
+        kiqWptr = res->kiq_end[0];
+        u32 pk[16];
+        memset(pk, 0, sizeof(pk));
+        pk[0] = RN_PACKET3(0xA2u, 5);
+        pk[1] = 1u << 29;                                                  // one queue, compute engine, ME 1, pipe 0, queue 0
+        pk[2] = legDb << 2;
+        pk[3] = lower_32_bits(vaBase + qOff + 0x2000); pk[4] = upper_32_bits(vaBase + qOff + 0x2000);
+        pk[5] = lower_32_bits(vaBase + qOff + 0x1008); pk[6] = upper_32_bits(vaBase + qOff + 0x1008);
+        pk[7] = RN_PACKET3(0x10u, 7);                                      // NOP to the 16-dword boundary
+        mesRingSubmit(adev, kiqOff, kiqOff + 0x1008, kMesKiqDoorbell, &kiqWptr, pk, 16);
+        msleep(50);
+        grbmSelect(adev, 3, 1, 0, 0);
+        res->kiq_end[12] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
+        grbmSelect(adev, 1, 0, 0, 0);
+        res->kiq_end[13] = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
+        res->kiq_end[14] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_BASE);
+        res->kiq_end[15] = RREG32_SOC15(RN_GC, 0, regCP_MQD_BASE_ADDR);
+        grbmSelect(adev, 0, 0, 0, 0);
+    }   // dwords 16..19: after the SET_RESOURCES and MAP_QUEUES packets
     res->rlc_sched = RREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS);              // again, after the KIQ setting: Linux 0x000030e8
     res->cp_me_cntl = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
     res->api_status = rn_vram_rd32(adev, apiStatusOff);

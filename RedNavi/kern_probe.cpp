@@ -2204,10 +2204,13 @@ void RedNaviProbe::sdmaTest() {
             uint32_t mesClean = 0;    // rednavi_mes_clean=1: no hand-programmed queue at all, only the MEC running and the doorbells mapped; the MES maps the queue
             PE_parse_boot_argn("rednavi_mes_clean", &mesClean, sizeof(mesClean));
             { uint32_t dm = 0; gMesDmDump = PE_parse_boot_argn("rednavi_mes_dm", &dm, sizeof(dm)) && dm == 1; }
+            { uint32_t v = 0; gMesCleaner = PE_parse_boot_argn("rednavi_mes_cleaner", &v, sizeof(v)) && v == 1; }
+            { uint32_t v = 0; gMesHwResLinux = PE_parse_boot_argn("rednavi_mes_hwres", &v, sizeof(v)) && v == 1; }
             // rednavi_mes_dbgext=1: the firmware log in host memory, a GART BO as Linux allocates it (its "mc address" is the GART window);
             // =2: the VRAM area at base + 0x50000, the two runs of 2026-10-31 that stayed empty.
             gMesDbgExt = false; gMesDbgHostVa = 0; gMesDbgHostMem = nullptr;
             gMesHostWbVa = 0; gMesHostWbMem = nullptr;
+            { uint32_t sm = 0; gMesSelfMap = PE_parse_boot_argn("rednavi_mes_selfmap", &sm, sizeof(sm)) && sm == 1; }
             gMesHostRingVa = 0; gMesHostRingMem = nullptr;
             { uint32_t hw = 0;
               if (PE_parse_boot_argn("rednavi_mes_hostwb", &hw, sizeof(hw)) && hw == 1) {
@@ -2382,6 +2385,16 @@ void RedNaviProbe::sdmaTest() {
                         const char *vn[9] = {"sched", "kiq", "bootload", "rlc_srm", "cp_stat", "cp_me_cntl", "mec_cntl", "rlc_sched", "hqd_active"};
                         uint32_t vv[9] = {mr.fw_ver0, mr.fw_ver1, mr.bootload, mr.rlc_srm, mr.cp_stat0, mr.cp_me_cntl, mr.mec_cntl, mr.rlc_sched, mr.hqd_active};
                         rnPublish(this, "mes-fw-version", vn, vv, 9);
+                        const char *kn[16] = {"kiq_wptr", "kiq_rptr", "kiq_dbctl", "kiq_active", "t_active", "t_pq_base", "t_pq_ctl", "t_mqd_base", "t_db_ctl", "t_persist", "t_vmid", "t_wptr", "s_kiq_rptr", "s_active", "s_pq_base", "s_mqd_base"};
+                        rnPublish(this, "mes-kiq-end", kn, mr.kiq_end, 16);
+                        const char *pn[2] = {"cleaner", "flags"};
+                        rnPublish(this, "mes-parity", pn, mr.parity, 2);
+                        {
+                            static char kn2[96][6];
+                            static const char *kp2[96];
+                            for (int i = 0; i < 96; i++) { snprintf(kn2[i], 6, "r%02x", i); kp2[i] = kn2[i]; }
+                            rnPublish(this, "mes-kiq-ring", kp2, gMesKiqRing, 96);
+                        }
                         const char *bn[9] = {"gc0", "gc1", "gc2", "gc3", "mmhub0", "mmhub1", "mmhub2", "oss0", "oss1"};
                         uint32_t bv[9] = {gpu.reg_offset[RN_GC_HWIP][0][0], gpu.reg_offset[RN_GC_HWIP][0][1], gpu.reg_offset[RN_GC_HWIP][0][2], gpu.reg_offset[RN_GC_HWIP][0][3],
                                           gpu.reg_offset[RN_MMHUB_HWIP][0][0], gpu.reg_offset[RN_MMHUB_HWIP][0][1], gpu.reg_offset[RN_MMHUB_HWIP][0][2],
