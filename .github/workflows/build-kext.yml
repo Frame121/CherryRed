@@ -51,12 +51,21 @@ jobs:
         run: make -C src/navi33-bringup test
 
       - name: Build Navi33Bringup.kext
-        run: make -C src/navi33-bringup MKSDK="$GITHUB_WORKSPACE/MacKernelSDK" all
+        run: |
+          set -o pipefail
+          make -C src/navi33-bringup MKSDK="$GITHUB_WORKSPACE/MacKernelSDK" all 2>&1 | tee kext-build.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kext-build-log
+          path: kext-build.log
+          if-no-files-found: ignore
 
       - name: CTest host suites (portable research core)
         run: |
-          cmake -S src/navi33-research -B build/host-ctest \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+          cmake -S src/navi33-research -B build/host-ctest -DCMAKE_BUILD_TYPE=Release
           cmake --build build/host-ctest --config Release -j 4
           ctest --test-dir build/host-ctest -C Release --output-on-failure
 

@@ -77,7 +77,7 @@ void SurveyPspMailbox(IOPCIDevice *pci, IOService *publisher)
 	}
 
 	IOMemoryMap *regs = pci->mapDeviceMemoryWithRegister(
-	    kIOPCIConfigBaseAddress0 + kRegBarIndex * 4);
+	    static_cast<UInt8>(kIOPCIConfigBaseAddress0 + kRegBarIndex * 4));
 	if (!regs) {
 		publisher->setProperty("Navi33Bringup,PspStage",
 		                       "aborted: register BAR5 map failed");

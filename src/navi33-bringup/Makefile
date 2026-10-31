@@ -20,6 +20,11 @@ BUILD := build
 KEXT  := $(BUILD)/$(PRODUCT).kext
 EXEC  := $(KEXT)/Contents/MacOS/$(PRODUCT)
 
+# The C++ kmod runtime ships in Library/x86_64 in the RDNA4FB-bundled SDK and
+# in Library/universal in acidanthera/MacKernelSDK; accept either layout.
+KMODCPP := $(firstword $(wildcard $(MKSDK)/Library/x86_64/libkmodc++.a \
+                             $(MKSDK)/Library/universal/libkmodc++.a))
+
 CXX := clang++
 CC  := clang
 
@@ -56,7 +61,8 @@ COMMON := -arch $(ARCH) -target $(ARCH)-apple-macos$(DEPLOY) -isysroot $(SDK) \
 CXXFLAGS := $(COMMON) -std=c++17 -fno-exceptions -fno-rtti -fcheck-new -fno-c++-static-destructors
 CFLAGS   := $(COMMON)
 LDFLAGS  := -arch $(ARCH) -target $(ARCH)-apple-macos$(DEPLOY) -isysroot $(SDK) \
-  -nostdlib -Xlinker -kext -L$(MKSDK)/Library/x86_64 -lkmodc++ -lkmod -Wl,-no_deduplicate
+  -nostdlib -Xlinker -kext -L$(MKSDK)/Library/x86_64 -L$(MKSDK)/Library/universal \
+  -lkmodc++ -lkmod -Wl,-no_deduplicate
 
 .PHONY: all preflight test clean
 all: preflight $(KEXT)
@@ -64,7 +70,7 @@ all: preflight $(KEXT)
 preflight:
 	@test -n "$(SDK)" || { echo 'ERROR: xcrun/macOS SDK unavailable. Build on a macOS host.'; exit 1; }
 	@test -f "$(MKSDK)/Headers/IOKit/IOService.h" || { echo 'ERROR: MacKernelSDK headers missing; set MKSDK=/path/to/MacKernelSDK'; exit 1; }
-	@test -f "$(MKSDK)/Library/x86_64/libkmodc++.a" || { echo 'ERROR: MacKernelSDK x86_64 libkmodc++.a missing'; exit 1; }
+	@test -n "$(KMODCPP)" || { echo 'ERROR: MacKernelSDK libkmodc++.a missing (looked in Library/x86_64 and Library/universal)'; exit 1; }
 	@test -f "$(MKSDK)/Library/x86_64/libkmod.a" || { echo 'ERROR: MacKernelSDK x86_64 libkmod.a missing'; exit 1; }
 
 $(OBJS): | check-firmware
