@@ -1,5 +1,29 @@
 # Recovery Checkpoint
 
+- **CHECKPOINT: 2026-10-31 (Windows-side integration) — MAC-DAY BUNDLE MERGED;
+  HOST SUITES RE-RUN ON MSVC; TWO COMMITTED DEFECTS FIXED.** The Mac-day git
+  bundle (7 commits on `research/rx7600-linux-evidence-2026-10-23`, head
+  `d9d932f`) was fetched from the USB handoff package and the local branch was
+  fast-forwarded to it; the superseded pre-Mac-day working-tree draft was
+  preserved as a stash. The RedNavi multi-target probe work (`gpu_target.h`:
+  Navi 31/32/33 identity table, Navi 32-only register path) was committed on
+  its own branch (`contrib/navi33-pci-profile`) after its host test passed
+  under MSVC. Verification of the merged tree found two defects committed on
+  the Mac-day side, fixed here: (1)
+  `src/navi33-research/CMakeLists.txt` had an unterminated `if/else` block, a
+  duplicate `add_test`, and a flags list omitting six pre-existing targets,
+  which tripped the no-exceptions compile guard; (2)
+  `src/navi33-survey/tests/test_survey_safety.py` still asserted the
+  pre-rewrite opt-in form. After the fixes: MSVC Debug build clean, CTest
+  **20/20 PASS**. Two Python suites are Windows-host-incompatible by
+  environment, not by regression: the symlink rejection case needs elevated
+  symlink privileges, and the Linux inventory tests create sysfs-like paths
+  containing colons, which Windows forbids; both passed on the macOS target
+  (recorded 2026-10-30). The target EFI carries boot-arg `navi33psp=1`, which
+  no committed kext source reads — inert, left untouched. **Stage 3 reboot
+  verification on the Tahoe target remains the next pending action; Metal and
+  acceleration remain unimplemented (Stages 5.3–5.7) and are not claimed.**
+
 - **LATEST CHECKPOINT: 2026-10-31 — MAC-DAY STAGES 0–2 COMPLETE ON TARGET;
   Navi33Bringup.kext BUILT+SIGNED; STAGE 3 PACKED AND WAITING FOR ONE SUDO
   COMMAND.** The bring-up scaffold was compiled for the first time on the

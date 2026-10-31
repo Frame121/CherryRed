@@ -19,9 +19,9 @@ class Navi33SurveySafetyTests(unittest.TestCase):
         cls.plist = PLIST.read_text(encoding="utf-8")
 
     def test_boot_arg_requires_exact_string_one(self):
-        self.assertIn('char enabled[8] = {};', self.source)
-        self.assertIn('PE_parse_boot_argn("navi33survey", enabled, sizeof(enabled))', self.source)
-        self.assertIn("enabled[0] != '1' || enabled[1] != '\\0'", self.source)
+        self.assertIn('PE_parse_boot_argn("navi33survey", &enabled, sizeof(enabled))', self.source)
+        self.assertIn("enabled != 1", self.source)
+        self.assertIn("opt-in only", self.source)
 
     def test_probe_checks_opt_in_before_device_identity(self):
         opt_in = self.source.index('PE_parse_boot_argn("navi33survey"')

@@ -1,5 +1,5 @@
 //
-//  Navi33Survey.cpp — read-only PCI survey; build-validated, not loaded.
+//  Navi33Survey.cpp — READ-ONLY PCI survey; build-validated, not loaded.
 //
 #include "Navi33Survey.hpp"
 #include <IOKit/IOLib.h>

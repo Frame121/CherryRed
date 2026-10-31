@@ -68,35 +68,23 @@ set(navi33_targets
     navi33_research navi33_research_tests navi33_driver_core_tests
     navi33_bringup_plan_tests navi33_resource_survey_tests
     navi33_linux_resource_parser_tests navi33_target_profile_tests
-    navi33_pci_identity_tests navi33_ipdiscovery_tests ipdiscovery_bounds_tests)
+    navi33_pci_identity_tests navi33_ipdiscovery_tests
+    navi33_bringup_model_tests navi33_integration_contract_tests
+    navi33_display_contract_tests navi33_compute_contract_tests
+    navi33_gfx11_manifest_tests navi33_gfx11_bringup_tests
+    ipdiscovery_bounds_tests)
 set_target_properties(${navi33_targets} PROPERTIES CXX_EXTENSIONS OFF)
 
-if(MSVC)
-    foreach(target IN LISTS navi33_targets)
-        target_compile_options(${target} PRIVATE /W4 /WX /GR- /EHs-c-)
-    endforeach()
-else()
-    foreach(target IN LISTS navi33_targets)
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -pedantic -fno-exceptions -fno-rtti)
 target_include_directories(ipdiscovery_bounds_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../navi48-bringup/src
 )
 
-set_target_properties(navi33_research navi33_research_tests
-    navi33_driver_core_tests navi33_bringup_model_tests
-    navi33_integration_contract_tests navi33_display_contract_tests navi33_compute_contract_tests navi33_gfx11_manifest_tests navi33_gfx11_bringup_tests ipdiscovery_bounds_tests PROPERTIES CXX_EXTENSIONS OFF
-)
-
 if(MSVC)
-    foreach(target navi33_research navi33_research_tests
-                   navi33_driver_core_tests navi33_bringup_model_tests
-                   navi33_integration_contract_tests navi33_display_contract_tests navi33_compute_contract_tests navi33_gfx11_manifest_tests navi33_gfx11_bringup_tests ipdiscovery_bounds_tests)
+    foreach(target IN LISTS navi33_targets)
         target_compile_options(${target} PRIVATE /W4 /WX /GR- /EHs-c-)
     endforeach()
 else()
-    foreach(target navi33_research navi33_research_tests
-                   navi33_driver_core_tests navi33_bringup_model_tests
-                   navi33_integration_contract_tests navi33_display_contract_tests navi33_compute_contract_tests navi33_gfx11_manifest_tests navi33_gfx11_bringup_tests ipdiscovery_bounds_tests)
+    foreach(target IN LISTS navi33_targets)
         target_compile_options(${target} PRIVATE
             -Wall -Wextra -Werror -pedantic -fno-exceptions -fno-rtti
         )
@@ -134,7 +122,4 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_navi48_isolation.py)
     add_test(NAME navi33_survey_safety
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/../navi33-survey/tests/test_survey_safety.py)
-    add_test(NAME navi48_routing_isolation
-        COMMAND ${Python3_EXECUTABLE} -B
-                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_navi48_isolation.py)
 endif()
