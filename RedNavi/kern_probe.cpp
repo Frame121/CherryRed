@@ -1963,6 +1963,7 @@ void RedNaviProbe::sdmaTest() {
     for (uint32_t i = 0; i < 4; i++) ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i);
     ipBase(kRNHwIdMp1, &gpu.reg_offset[RN_MP1_HWIP][0][0]);
     for (uint32_t i = 0; i < 2; i++) ipBase(kRNHwIdOsssys, &gpu.reg_offset[RN_OSSSYS_HWIP][0][i], i);
+    for (uint32_t i = 0; i < 5; i++) ipBase(kRNHwIdMmhub, &gpu.reg_offset[RN_MMHUB_HWIP][0][i], i);   // SET_HW_RESOURCES hands these to the MES
     for (uint32_t i = 0; i < 6; i++) ipBase(kRNHwIdNbif, &gpu.reg_offset[RN_NBIO_HWIP][0][i], i);
     // After the features are enabled the SMU may be busy for a while with C2PMSG_90 at 0: wait for it (up to 10 s) and record how long.
     {
@@ -2328,6 +2329,11 @@ void RedNaviProbe::sdmaTest() {
                         const char *vn[8] = {"sched", "kiq", "bootload", "rlc_srm", "cp_stat", "cp_me_cntl", "mec_cntl", "rlc_sched"};
                         uint32_t vv[8] = {mr.fw_ver0, mr.fw_ver1, mr.bootload, mr.rlc_srm, mr.cp_stat0, mr.cp_me_cntl, mr.mec_cntl, mr.rlc_sched};
                         rnPublish(this, "mes-fw-version", vn, vv, 8);
+                        const char *bn[9] = {"gc0", "gc1", "gc2", "gc3", "mmhub0", "mmhub1", "mmhub2", "oss0", "oss1"};
+                        uint32_t bv[9] = {gpu.reg_offset[RN_GC_HWIP][0][0], gpu.reg_offset[RN_GC_HWIP][0][1], gpu.reg_offset[RN_GC_HWIP][0][2], gpu.reg_offset[RN_GC_HWIP][0][3],
+                                          gpu.reg_offset[RN_MMHUB_HWIP][0][0], gpu.reg_offset[RN_MMHUB_HWIP][0][1], gpu.reg_offset[RN_MMHUB_HWIP][0][2],
+                                          gpu.reg_offset[RN_OSSSYS_HWIP][0][0], gpu.reg_offset[RN_OSSSYS_HWIP][0][1]};
+                        rnPublish(this, "mes-bases", bn, bv, 9);   // the register bases SET_HW_RESOURCES gave the MES
                     }
                 }
                 if ((mr.q_active & 1u) || mr.add_ok) computeRingOff = 0x0C0A0000 + 0x30000;   // the queue the MES mapped
