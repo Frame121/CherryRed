@@ -21,6 +21,9 @@
   — it proves Stage 3 injection AND captures the PSP/SMU mailbox readback in
   the same boot.** The mailbox VALUES stay UNVERIFIED until then; no write
   stage may be started from them. Metal/acceleration remain unimplemented.
+  CI reached fully green at `600d4bb` (kext build + publish + full research
+  CTest on Apple clang); the deliverable kext is refreshed on the
+  `kext-builds` branch on every green build.
 
 - **CHECKPOINT: 2026-10-31 (session 2) — PSP/SMU MAILBOX SURVEY STAGE
   IMPLEMENTED; CI KEXT BUILD WIRED UP.** The next bring-up stage
