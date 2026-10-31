@@ -30,6 +30,7 @@ extern "C" const size_t  fw_smu_13_0_7_size;
 #define N33SMU_STEP(...) do { N33SMU_LOG(__VA_ARGS__); IOSleep(40); } while (0)
 
 using cobalt64::navi33::psp::kC2pmsg81Dword;
+using cobalt64::navi33::psp::kCmdLoadIpFw;
 using cobalt64::navi33::psp::kFbLocationBaseDword;
 using cobalt64::navi33::psp::kFbLocationTopDword;
 using cobalt64::navi33::psp::kFenceBufVramOffset;
@@ -39,7 +40,11 @@ using cobalt64::navi33::psp::kMp1BaseDwords;
 using cobalt64::navi33::psp::kMp1C2pmsg66Dword;
 using cobalt64::navi33::psp::kMp1C2pmsg82Dword;
 using cobalt64::navi33::psp::kMp1C2pmsg90Dword;
+using cobalt64::navi33::psp::kPpsmcMsgGetDriverIfVersion;
+using cobalt64::navi33::psp::kPpsmcMsgGetSmuVersion;
+using cobalt64::navi33::psp::kPpsmcMsgTestMessage;
 using cobalt64::navi33::psp::kStagingVramOffset;
+using cobalt64::navi33::psp::mp0ByteOffset;
 
 namespace {
 
@@ -89,7 +94,6 @@ bool smu13Exchange(const cobalt64::navi33::psp::RegBar &bar, uint32_t msg,
     return cobalt64::navi33::psp::smuResponseOk(response);
 }
 
-}  // namespace
 }  // namespace
 
 void RunNavi33SmuStage(IOPCIDevice *pci, IOService *publisher)
