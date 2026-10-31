@@ -35,6 +35,19 @@
 			<key>IOProviderClass</key>
 			<string>IOPCIDevice</string>
 		</dict>
+		<key>Navi33Accelerator</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.navi33.bringup</string>
+			<key>IOClass</key>
+			<string>Navi33Accelerator</string>
+			<key>IOMatchCategory</key>
+			<string>Navi33Accelerator</string>
+			<key>IOProbeScore</key>
+			<integer>100</integer>
+			<key>IOProviderClass</key>
+			<string>Navi33Bringup</string>
+		</dict>
 	</dict>
 	<key>OSBundleLibraries</key>
 	<dict>

@@ -30,7 +30,7 @@ CC  := clang
 
 EMBED := ../navi48-bringup/tools/embed-firmware.py
 
-CXX_SRCS := Navi33Bringup.cpp Navi33PspSurvey.cpp
+CXX_SRCS := Navi33Bringup.cpp Navi33PspSurvey.cpp Navi33Accelerator.cpp
 
 # Firmware blobs (firmware/*.bin, gitignored) are embedded as C arrays generated at
 # build time into src/fw/ (gitignored) by the shared embed tool: symbol fw_<blob>[] +
@@ -54,7 +54,7 @@ src/fw/fw_%.c: firmware/%.bin $(EMBED)
 OBJS := $(patsubst %.cpp,$(BUILD)/%.o,$(CXX_SRCS)) $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
 
 COMMON := -arch $(ARCH) -target $(ARCH)-apple-macos$(DEPLOY) -isysroot $(SDK) \
-  -I$(MKSDK)/Headers -I. -mmacosx-version-min=$(DEPLOY) \
+  -I$(MKSDK)/Headers -I. -I../navi33-research/include -mmacosx-version-min=$(DEPLOY) \
   -DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE -DAPPLE -DNeXT \
   -D_FORTIFY_SOURCE=0 -nostdinc -fno-builtin -fno-common -fno-stack-protector \
   -mkernel -fapple-kext -Wall -Wextra -Werror -Os -g
