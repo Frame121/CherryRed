@@ -19,7 +19,9 @@
 #include "Navi33PspMailbox.hpp"
 #include "Navi33MmWindow.hpp"
 #include <IOKit/IOLib.h>
+#include <IOKit/IOService.h>
 #include <IOKit/IOMemoryDescriptor.h>
+#include <IOKit/pci/IOPCIDevice.h>
 #include <string.h>
 
 #define N33RL(fmt, ...) IOLog("Navi33Bringup/PSPRING: " fmt "\n", ##__VA_ARGS__)
