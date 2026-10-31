@@ -30,6 +30,11 @@ inline constexpr uint16_t kPciCommandMemorySpace = 0x2;  // PCI command bit 1
 // kMp0BaseDwords lives in Navi33PspLoad.hpp (single shared definition).
 inline constexpr uint32_t kMp1BaseDwords = 0x16000;  // hw_id 1   (MP1) base[0]
 
+// MP1 mailbox dwords, relative to the MP1 base (smu_v13_0.c).
+inline constexpr uint32_t kMp1C2pmsg66Dword = 0x282;  // SMU message
+inline constexpr uint32_t kMp1C2pmsg82Dword = 0x292;  // SMU argument / result
+inline constexpr uint32_t kMp1C2pmsg90Dword = 0x29a;  // SMU response: 1 = OK, 0xFF = refused
+
 struct MailboxSpec {
     const char *name;
     uint32_t baseDwords;
