@@ -1,5 +1,42 @@
 # Recovery Checkpoint
 
+- **CHECKPOINT: 2026-10-31 (session 5) — THE WRITE LADDER IS FULLY WRITTEN
+  AND CI-BUILT: PSP CHAIN → RING → TOC/TMR → SMU (M2b) → GC IMAGES → RLC
+  AUTOLOAD.** Note: a second concurrent agent session committed the PSP load
+  stage (3d01024) and the ring stage (9cc5243) in this working tree while
+  this session was porting the same stages; the duplicate port was discarded
+  and the sessions' work merged by building on theirs. This session added:
+  - `Navi33SmuLoad` (navi33psp_smu=1, M2b): stages the SMU 13.0.7 ucode via
+    LOAD_IP_FW (GFX_FW_TYPE_SMU), then the smu_v13 message protocol
+    (GetSmuVersion / GetDriverIfVersion / TestMessage). On a correct SMU
+    answer it publishes `Navi33Bringup,FirmwareVerified=true` — the property
+    the Navi33Accelerator compute gate consumes.
+  - `Navi33GcLoad` (navi33gc_load=1): the GC 11.0.2 / SDMA 6.0.2 image set
+    (26 images, AMDGPU_UCODE_ID order, RLC_G last) through LOAD_IP_FW, then
+    GFX_CMD_ID_AUTOLOAD_RLC, then a READ-ONLY autoload-completion check
+    (CP_STAT == 0, RLC_RLCS_BOOTLOAD_STATUS bit 31). The plan comes from the
+    pure bounds-checked parser (RS64 v2.0 / SDMA v2.0 / MES v1.0 / IMU v1.0 /
+    RLC v2.3), validated against the REAL hash-pinned blobs by
+    `navi33_gc_firmware_tests` (SMU ucode 0x526100 / 261632 bytes; 26 images
+    / 1333328 bytes; a corrupted header refuses the whole plan).
+  - `Navi33RingSubmit.hpp`: shared ring submission for the post-ring stages.
+  - Fixed the concurrent session's CI-blocking compile errors (strstr not in
+    libkern, missing IOKit includes in the load/ring stages, duplicate MP0
+    base, missing MP1 mailbox dwords).
+  Host verification: CTest **32/32** (Release + Debug, MSVC), safety
+  contracts for every stage. CI green; the kext with the full ladder is on
+  `kext-builds` and installed to `E:\EFI\OC\Kexts\Navi33Bringup.kext`
+  (previous kexts in `EFI_BACKUP_KEXT_BEFORE_PSPSTAGE_20261031/Kexts/`).
+  **The EFI boot-args still carry only `navi33bringup=1 navi33psp=1`: the
+  next macOS boot runs the read-only survey + mailbox readback with the
+  accelerator correctly blocked. The write ladder runs ONLY when the
+  operator extends boot-args with
+  `navi33psp_load=1 navi33psp_chain=1 navi33psp_ring=1 navi33psp_smu=1
+  navi33gc_load=1` — one boot then walks every stage with per-step logging
+  and stops at the first failure.** Every Navi 33 behaviour stays UNVERIFIED
+  until that boot; rollback is the USB-stick removal plus the kept kext
+  backups.
+
 - **CHECKPOINT: 2026-10-31 (session 4) — METAL-LAYER SKELETON WRITTEN AND
   INSTALLED: CLIENT CONTRACTS (C4) + SELF-GATING ACCELERATOR (C6 DIRECTION).**
   Per the operator's call to build the Metal layer ahead of the hardware
