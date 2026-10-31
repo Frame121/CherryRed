@@ -63,6 +63,15 @@ jobs:
           path: kext-build.log
           if-no-files-found: ignore
 
+      - name: Surface the build log as annotations
+        if: failure()
+        run: |
+          if [ -f kext-build.log ]; then
+            tail -40 kext-build.log | while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error title=kext-build::$line"
+            done
+          fi
+
       - name: CTest host suites (portable research core)
         run: |
           cmake -S src/navi33-research -B build/host-ctest -DCMAKE_BUILD_TYPE=Release
