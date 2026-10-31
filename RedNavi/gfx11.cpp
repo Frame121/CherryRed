@@ -1547,6 +1547,8 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
             if (RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE) & 1u) res->hqd_active |= 1u << (pipe * 8 + q);
         }
     grbmSelect(adev, 0, 0, 0, 0);
+    for (u32 pipe = 0; pipe < 4; pipe++) { grbmSelect(adev, 1, pipe, 0, 0); res->mec_pc[pipe] = RREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_INSTR_PNTR); }
+    grbmSelect(adev, 0, 0, 0, 0);
     gMappedDoorbell = legDb;
     gWbHostNow = true;
     writeComputeMqd(adev, vaBase, qOff, gMesHostRingVa != 0 ? 8192 : 4096, qOff + 0x2000, qOff + 0x4000, legDb);
@@ -1573,6 +1575,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         msleep(20);
         grbmSelect(adev, 3, 1, 0, 0);
         res->kiq_rptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);       // 0x10 once both the MAP_QUEUES and the SET_RESOURCES are consumed
+        for (u32 i = 0; i < 2; i++) { res->kiq_pc_pre[i] = RREG32_SOC15(RN_GC, 0, regCP_MES_INSTR_PNTR); udelay(47); }   // the KIQ pipe idle, SET_RESOURCES consumed
         grbmSelect(adev, 0, 0, 0, 0);
     }
     // The MQD must be 4 KB aligned and a full struct v11_compute_mqd (512 dwords, written and zeroed by writeComputeMqd above).
@@ -1677,6 +1680,11 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     res->kiq_end[10] = RREG32_SOC15(RN_GC, 0, regCP_HQD_VMID);
     res->kiq_end[11] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
     grbmSelect(adev, 0, 0, 0, 0);
+    for (u32 k = 0; k < 3; k++) {                                       // MEC pipes' program counters after the map, three samples apart
+        for (u32 pipe = 0; pipe < 4; pipe++) { grbmSelect(adev, 1, pipe, 0, 0); res->mec_pc[4 + k * 4 + pipe] = RREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_INSTR_PNTR); }
+        udelay(100);
+    }
+    grbmSelect(adev, 0, 0, 0, 0);
     for (u32 i = 0; i < 96; i++) gMesKiqRing[i] = rn_vram_rd32(adev, kiqOff + i * 4);   // everything on the KIQ ring: our packets and what the scheduler appended
     if (gMesSelfMap && !res->add_ok) {
         // rednavi_mes_selfmap=1: send the MAP_QUEUES the scheduler put on the KIQ ring ourselves (same packet: ME 1 pipe 0 queue 0, our MQD), after the scheduler
@@ -1711,6 +1719,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     res->sched_rptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
     res->sched_wptr = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_LO);
     grbmSelect(adev, 3, 1, 0, 0);
+    for (u32 i = 0; i < 4; i++) { res->kiq_pc_end[i] = RREG32_SOC15(RN_GC, 0, regCP_MES_INSTR_PNTR); udelay(53 * (i + 1)); }   // the KIQ pipe's own program counter after the failed map
     res->kiq_version = RREG32_SOC15(RN_GC, 0, regCP_MES_GP3_LO);
     grbmSelect(adev, 0, 0, 0, 0);
     res->mes_db[0] = RREG32_SOC15(RN_GC, 0, regCP_MES_DOORBELL_CONTROL1);

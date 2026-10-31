@@ -190,6 +190,9 @@ struct rn_mes_result {
     int hw_res_ok, add_ok;
     u32 hw_res1_status;
     int dbg_ok; u32 dbg_status;                    // SETUP_MES_DBGEXT frame and its completion word (opt-in, rednavi_mes_dbgext=1)
+    u32 kiq_pc_pre[2];                             // the same pointer after SET_RESOURCES, before ADD_QUEUE (the KIQ pipe idle)
+    u32 kiq_pc_end[4];                             // CP_MES_INSTR_PNTR of the KIQ pipe (ME 3 pipe 1), four samples after the failed map
+    u32 mec_pc[16];                                // CP_MEC_RS64_INSTR_PNTR of MEC pipes 0..3: [0..3] before the map, [4..15] three samples after it
     u32 kiq_end[16];                                // KIQ HQD wptr, rptr, doorbell control, active and ring dwords 16..19 after the failed map
     u32 parity[2];                                 // [0] cleaner shader address sent in the KIQ SET_RESOURCES (>> 8, low half), [1] bit 0 rednavi_mes_cleaner, bit 1 rednavi_mes_hwres
     u32 hqd_active;                                // MEC queues with CP_HQD_ACTIVE set before the legacy map, bit pipe * 8 + queue
