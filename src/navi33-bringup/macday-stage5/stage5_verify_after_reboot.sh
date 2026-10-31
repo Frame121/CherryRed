@@ -1,10 +1,10 @@
 #!/bin/bash
 # stage5_verify_after_reboot.sh — capture the Stage 5 evidence after a reboot
-# (no sudo needed). Usage:  sh stage5_verify_after_reboot.sh [survey|kdb|chain]
+# (no sudo needed). Usage:  sh stage5_verify_after_reboot.sh [survey|kdb|chain|ring]
 #
-# Captures: the Navi33Bringup ioreg node, the unified log for the PSP survey
-# and PSP load stages, the boot-args, and prints a PASS/FAIL table against the
-# mode's expectations. Everything lands in ./evidence-stage5-<ts>/.
+# Captures: the Navi33Bringup ioreg node, the unified log for the PSP survey,
+# load and ring stages, the boot-args, and prints a PASS/FAIL table against
+# the mode's expectations. Everything lands in ./evidence-stage5-<ts>/.
 set -eu
 
 MODE="${1:-survey}"
@@ -21,9 +21,9 @@ echo "== ioreg node =="
 ioreg -rn Navi33Bringup -l -x > "$OUT/ioreg-Navi33Bringup.txt"
 wc -l < "$OUT/ioreg-Navi33Bringup.txt" | xargs echo "  ioreg lines:"
 
-echo "== unified log (survey + load) =="
+echo "== unified log (survey + load + ring) =="
 log show --last 10m --predicate \
-  'eventMessage CONTAINS "Navi33Bringup/PSP" OR eventMessage CONTAINS "Navi33Bringup/PSPLOAD"' \
+  'eventMessage CONTAINS "Navi33Bringup/PSP" OR eventMessage CONTAINS "Navi33Bringup/PSPLOAD" OR eventMessage CONTAINS "Navi33Bringup/PSPRING"' \
   > "$OUT/log-psp.txt" 2>/dev/null || true
 wc -l < "$OUT/log-psp.txt" | xargs echo "  log lines:"
 
@@ -50,12 +50,19 @@ rows = [
     ("Stage 3 PCI survey", prop("Navi33Bringup,Stage") == "gpu-identified-read-only"),
     ("PspStage ran", prop("Navi33Bringup,PspStage") not in (None, "disabled (boot-arg navi33psp=1 absent)")),
 ]
-if mode in ("kdb", "chain"):
+if mode in ("kdb", "chain", "ring"):
     rows.append(("PspLoad stage ran", prop("Navi33Bringup,PspLoad,Stage") not in (None,)))
     rows.append(("PspLoad aborted early", (prop("Navi33Bringup,PspLoad,Stage") or "").startswith("aborted")))
-    if mode == "chain":
+    if mode in ("chain", "ring"):
         rows.append(("Chain complete (sOS alive)", prop("Navi33Bringup,PspLoad,ChainComplete") in ("true", "1")))
         rows.append(("FirmwareVerified (accelerator gate)", prop("Navi33Bringup,FirmwareVerified") in ("true", "1")))
+if mode == "ring":
+    rows.append(("PspRing stage ran", prop("Navi33Bringup,PspRing,Stage") not in (None,)))
+    rows.append(("Ring created", prop("Navi33Bringup,PspRing,RingCreated") in ("true", "1")))
+    rows.append(("LOAD_TOC fence ok", prop("Navi33Bringup,PspRing,LoadTocFenceOk") in ("true", "1")))
+    rows.append(("LOAD_TOC status 0", prop("Navi33Bringup,PspRing,LoadTocStatus") == "0"))
+    rows.append(("SETUP_TMR fence ok", prop("Navi33Bringup,PspRing,SetupTmrFenceOk") in ("true", "1")))
+    rows.append(("SETUP_TMR status 0", prop("Navi33Bringup,PspRing,SetupTmrStatus") == "0"))
 w = max(len(r[0]) for r in rows)
 fails = 0
 for name, ok in rows:

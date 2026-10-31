@@ -9,8 +9,12 @@
   ผ่าน bootloader mailbox (เล็กสุด, ปลอดภัยสุด)
 - **Stage 5c (full chain)**: `navi33psp_chain=1` — KDB → SPL → SYS_DRV → SOS
   แล้วเช็ค sOS sign-of-life (`C2PMSG_81`) + อ่านเวอร์ชัน (`C2PMSG_58`)
+- **Stage 5d (ring)**: `navi33psp_chain=1 navi33psp_ring=1` — สร้าง GPCOM ring
+  ผ่าน sOS → ส่ง `LOAD_TOC` (ได้ tmr_size) → `SETUP_TMR` (TMR ที่
+  VRAM top − 512 MiB, หรือ `navi33psp_tmr=2` = 32 MiB แบบ diagnostic)
 
-รายละเอียดทางเทคนิคทั้งหมด: `src/navi33-bringup/PSP_LOAD_STAGE.md`
+รายละเอียดทางเทคนิคทั้งหมด: `src/navi33-bringup/PSP_LOAD_STAGE.md` และ
+`src/navi33-bringup/PSP_RING_STAGE.md`
 
 ## ก่อนเริ่ม (สำคัญมาก)
 
@@ -74,6 +78,21 @@ sh stage5/stage5_verify_after_reboot.sh chain
 PASS = `ChainComplete=true`, `SecureOsAlive=true`, `FirmwareVerified=true`
 (ขาข้อ firmware ของ compute gate ของ Navi33Accelerator เปิดแล้ว)
 
+### รีบูตที่ 5 — Stage 5d (ring + LOAD_TOC + SETUP_TMR)
+
+```sh
+sudo sh stage5/stage5_apply.sh ring /path/to/Navi33Bringup.kext
+sudo shutdown -r now
+# กลับมาแล้ว:
+sh stage5/stage5_verify_after_reboot.sh ring
+log show --last 10m --predicate 'eventMessage CONTAINS "PSPRING"'
+```
+
+PASS = `RingCreated=true`, `LoadTocFenceOk=true` + `LoadTocStatus=0` +
+`TmrSize` พลาดไม่ได้, `SetupTmrFenceOk=true` + `SetupTmrStatus=0`
+(บน Navi 32 ค่า tmr_size = 0xA700000; ค่าของ RX 7600 คือหลักฐานที่ต้องเก็บ)
+ถ้า `SETUP_TMR` ไม่ยอมรับ ให้ลอง `navi33psp_tmr=2` (32 MiB) เพื่อเทียบ
+
 ## ถ้า kext ยังไม่โหลด (decision tree)
 
 1. `nvram boot-args` ต้องเห็น `navi33bringup=1` — ถ้าไม่เห็น ให้ Reset NVRAM
@@ -99,6 +118,7 @@ sudo shutdown -r now
 
 Metal ยังไม่มี — ladder ขณะนี้อยู่ขั้น 3-4/9 (PCI/IP inventory → controlled
 hardware init) ตาม `NAVI33_COMPUTE_FIRST_PLAN.md`:
-C1 (firmware/PSP) เริ่มรันแล้ว → C2 (VRAM/GART/queue) → C3 (GFX11 compute IB
-พิสูจน์ GPU เขียน buffer ได้) → C4 (user client) → C5 (RADV/Vulkan) → C6 (Metal)
+C1 (firmware/PSP + ring/TOC/TMR) **เขียนโค้ดครบแล้ว รอพิสูจน์บนการ์ดจริง**
+→ C2 (VRAM/GART/queue) → C3 (GFX11 compute IB พิสูจน์ GPU เขียน buffer ได้) →
+C4 (user client) → C5 (RADV/Vulkan) → C6 (Metal)
 ทุกขั้นต้องมีหลักฐาน PASS บนการ์ดจริงก่อนไปขั้นถัดไป

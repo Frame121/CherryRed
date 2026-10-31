@@ -113,3 +113,10 @@ by the ring-based `LOAD_TOC` command (next stage).
      `FirmwareVerified=true` on the bring-up node.
 - Do not proceed to the ring/TOC/TMR/SMU stage until the chain PASS is
   recorded; every stage stays evidence-gated.
+
+## Next stage
+
+The ring + LOAD_TOC + SETUP_TMR stage (`navi33psp_ring=1`, see
+`PSP_RING_STAGE.md`) completes M2a: it creates the sOS command channel that
+SMU / DMCUB / GC firmware loads ride on, and it requires the secure OS this
+stage starts.

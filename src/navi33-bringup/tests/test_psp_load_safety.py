@@ -34,11 +34,13 @@ def check(cond, msg):
 
 
 def load_source():
-    return LOAD.read_text(encoding="utf-8"), BRINGUP.read_text(encoding="utf-8")
+    return (LOAD.read_text(encoding="utf-8"),
+            BRINGUP.read_text(encoding="utf-8"),
+            (ROOT / "Navi33MmWindow.hpp").read_text(encoding="utf-8"))
 
 
 def main():
-    load, bringup = load_source()
+    load, bringup, mmwindow = load_source()
 
     # 1. Opt-in gating (Navi33Bringup.cpp).
     for arg in ("navi33bringup=1", "navi33psp=1", "navi33psp_load=1",
@@ -55,33 +57,20 @@ def main():
     check("configRead16" in load, "the PCI command read must stay present (precondition)")
 
     # 3. Every register write goes through RegBar::wr with a pinned offset.
+    # The MM_INDEX/MM_DATA window helpers live in the shared Navi33MmWindow.hpp.
     if "bar.wr(" in load:
-        # All direct call sites (not the definition).
-        body = load.split("bool wr(uint64_t byteOff, uint32_t v) const", 1)[1]
-        sites = re.findall(r"bar\.wr\(\s*([A-Za-z_][\w:]*)\s*(?:\([^)]*\))?\s*,", body)
+        raw = re.findall(r"bar\.wr\(([^,;]+),", load)
         allowed = {
-            "kMmIndexByte", "kMmDataByte", "kMmIndexHiByte",
             "mp0ByteOffset(kC2pmsg35Dword)", "mp0ByteOffset(kC2pmsg36Dword)",
         }
-        # The regex captures only the first argument expression; normalize the
-        # two mp0 calls (they may capture as two pieces).
-        normalized = []
-        raw = re.findall(r"bar\.wr\(([^,;]+),", body)
-        for r in raw:
-            r = r.strip()
-            if r in allowed:
-                normalized.append(r)
-            elif "mp0ByteOffset" in r and "kC2pmsg" in r:
-                # Accept any mp0ByteOffset(kC2pmsgXX) spelling as pinned:
-                # the offset arithmetic itself is unit-tested in C++.
-                pass
-            else:
-                normalized.append(r)
-        unexpected = [r for r in normalized if r not in allowed]
+        unexpected = [r.strip() for r in raw if r.strip() not in allowed]
         check(not unexpected,
               f"register writes must stay on the pinned set; found: {unexpected}")
-        check("vramWrite" in load and "vramRead" in load,
-              "the MM_INDEX/MM_DATA window helpers must be present")
+        check("vramWrite" in mmwindow and "vramRead" in mmwindow,
+              "the MM_INDEX/MM_DATA window helpers must live in Navi33MmWindow.hpp")
+        check("kMmIndexByte" in mmwindow and "kMmDataByte" in mmwindow and
+              "kMmIndexHiByte" in mmwindow,
+              "the window offsets must stay in the shared header")
     else:
         check(False, "RegBar::wr must exist (the stage is the write stage)")
 

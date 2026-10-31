@@ -15,6 +15,7 @@
 //
 #include "Navi33PspLoad.hpp"
 #include "Navi33PspMailbox.hpp"
+#include "Navi33MmWindow.hpp"
 #include <IOKit/IOLib.h>
 #include <libkern/c++/OSData.h>
 #include <string.h>
@@ -28,106 +29,36 @@
 extern "C" const uint8_t fw_psp_13_0_7_sos[];
 extern "C" const size_t  fw_psp_13_0_7_sos_size;
 
+using cobalt64::navi33::psp::RegBar;
+using cobalt64::navi33::psp::vramCopyVerify;
+using cobalt64::navi33::psp::vramRead;
+using cobalt64::navi33::psp::vramWrite;
+
 using cobalt64::navi33::psp::kBootloaderReady;
 using cobalt64::navi33::psp::kBootloaderWaitMs;
 using cobalt64::navi33::psp::kC2pmsg35Dword;
 using cobalt64::navi33::psp::kC2pmsg36Dword;
 using cobalt64::navi33::psp::kC2pmsg58Dword;
 using cobalt64::navi33::psp::kC2pmsg81Dword;
-using cobalt64::navi33::psp::kDiscoveryReadBytes;
 using cobalt64::navi33::psp::kDiscoverySignature;
 using cobalt64::navi33::psp::kDiscoveryTopMargin;
 using cobalt64::navi33::psp::kFbLocationBaseDword;
 using cobalt64::navi33::psp::kFbLocationTopDword;
 using cobalt64::navi33::psp::kMaxLoadSteps;
-using cobalt64::navi33::psp::kMmDataByte;
-using cobalt64::navi33::psp::kMmIndexByte;
-using cobalt64::navi33::psp::kMmIndexHiByte;
 using cobalt64::navi33::psp::kRccConfigMemsizeByte;
 using cobalt64::navi33::psp::kSosAliveWaitMs;
 using cobalt64::navi33::psp::kSosPostCmdDelayMs;
-using cobalt64::navi33::psp::kStagingBytes;
 using cobalt64::navi33::psp::kStagingVramOffset;
 using cobalt64::navi33::psp::LoadStep;
 using cobalt64::navi33::psp::bootloaderError;
 using cobalt64::navi33::psp::bootloaderReady;
 using cobalt64::navi33::psp::buildLoadPlan;
-using cobalt64::navi33::psp::mmIndexHigh;
-using cobalt64::navi33::psp::mmIndexLow;
 using cobalt64::navi33::psp::mmhubByteOffset;
 using cobalt64::navi33::psp::mp0ByteOffset;
 using cobalt64::navi33::psp::parseSosHeaderV2;
 using cobalt64::navi33::psp::sosAlive;
 
 namespace {
-
-// The register BAR (BAR5) with bounds-checked 32-bit reads/writes. A write
-// helper exists only because this stage is explicitly the write stage; every
-// call site below goes through it, and the safety test pins the allowed
-// offsets.
-struct RegBar {
-    volatile uint32_t *va = nullptr;
-    uint64_t len = 0;
-
-    bool rd(uint64_t byteOff, uint32_t *out) const
-    {
-        if (!va || byteOff > len || len - byteOff < 4)
-            return false;
-        *out = va[byteOff / 4];
-        return true;
-    }
-
-    bool wr(uint64_t byteOff, uint32_t v) const
-    {
-        if (!va || byteOff > len || len - byteOff < 4)
-            return false;
-        va[byteOff / 4] = v;
-        return true;
-    }
-};
-
-// VRAM access through the SOC15 MM_INDEX/MM_DATA window (NBIF base 0). This is
-// the RedNavi-verified sequence; the Navi 33 window itself is part of what
-// this stage proves.
-bool vramWrite(const RegBar &bar, uint64_t vramByte, uint32_t v)
-{
-    return bar.wr(kMmIndexByte, mmIndexLow(vramByte)) &&
-           bar.wr(kMmIndexHiByte, mmIndexHigh(vramByte)) &&
-           bar.wr(kMmDataByte, v);
-}
-
-bool vramRead(const RegBar &bar, uint64_t vramByte, uint32_t *out)
-{
-    if (!bar.wr(kMmIndexByte, mmIndexLow(vramByte)) ||
-        !bar.wr(kMmIndexHiByte, mmIndexHigh(vramByte)))
-        return false;
-    return bar.rd(kMmDataByte, out);
-}
-
-// Copy `bytes` (dword-multiple) into VRAM through the index/data window and
-// verify every dword on readback. Returns the mismatch count, or -1 when the
-// window itself fails. Paced so a hang leaves a readable log line.
-int32_t vramCopyVerify(const RegBar &bar, uint64_t vramByte,
-                       const uint8_t *src, uint32_t bytes)
-{
-    if (!src || (bytes & 3u) != 0)
-        return -1;
-    uint32_t mismatches = 0;
-    for (uint32_t i = 0; i < bytes; i += 4) {
-        uint32_t v;
-        memcpy(&v, src + i, 4);
-        if (!vramWrite(bar, vramByte + i, v))
-            return -1;
-        if ((i & 0x3FFFu) == 0)
-            IOSleep(1);                       // pace ~every 16 KiB
-        uint32_t back = 0;
-        if (!vramRead(bar, vramByte + i, &back))
-            return -1;
-        if (back != v)
-            mismatches++;
-    }
-    return static_cast<int32_t>(mismatches);
-}
 
 // Poll C2PMSG_35 for the ready bit; returns the last value read and whether
 // the wait finished in time.

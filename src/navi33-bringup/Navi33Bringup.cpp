@@ -15,6 +15,8 @@
 
 // First write stage (PSP firmware chain); defined in Navi33PspLoad.cpp.
 void RunPspLoadStage(IOPCIDevice *pci, IOService *publisher, bool chainEnabled);
+// Ring + LOAD_TOC + SETUP_TMR stage; defined in Navi33PspRing.cpp.
+void RunPspRingStage(IOPCIDevice *pci, IOService *publisher, uint32_t tmrMode);
 
 #define N33LOG(fmt, ...) IOLog("Navi33Bringup: " fmt "\n", ##__VA_ARGS__)
 
@@ -145,6 +147,41 @@ bool Navi33Bringup::pspChainStageEnabled()
 	       bootArgTokenPresent(args, "navi33psp_chain=1");
 }
 
+bool Navi33Bringup::pspRingStageEnabled()
+{
+	// GPCOM ring + LOAD_TOC + SETUP_TMR on top of the survey opt-in. The
+	// stage itself verifies the secure OS is alive, so in practice it needs
+	// the chain to have run in the same boot.
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return false;
+	return bootArgTokenPresent(args, "navi33bringup=1") &&
+	       bootArgTokenPresent(args, "navi33psp=1") &&
+	       bootArgTokenPresent(args, "navi33psp_ring=1");
+}
+
+uint32_t Navi33Bringup::pspTmrMode()
+{
+	// Optional value boot-arg navi33psp_tmr=N: 1 = VRAM top - 512 MiB
+	// (default, Linux-like), 2 = the 32 MiB diagnostic placement.
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return 1;
+	const char *key = "navi33psp_tmr=";
+	const char *p = strstr(args, key);
+	if (!p)
+		return 1;
+	uint32_t v = 0;
+	bool any = false;
+	for (const char *q = p + strlen(key); *q >= '0' && *q <= '9'; ++q) {
+		v = v * 10 + static_cast<uint32_t>(*q - '0');
+		any = true;
+		if (v > 1000)
+			break;
+	}
+	return any ? v : 1;
+}
+
 bool Navi33Bringup::identityMatchesGpu(IOPCIDevice *pci)
 {
 	if (!pci)
@@ -220,6 +257,15 @@ bool Navi33Bringup::start(IOService *provider)
 			setProperty("Navi33Bringup,PspLoadStage",
 			            "disabled (boot-args navi33psp_load=1 / navi33psp_chain=1 absent)");
 			refuseFirmwareAndWrites();
+		}
+		if (pspRingStageEnabled()) {
+			// Fourth opt-in (navi33psp_ring=1): GPCOM ring + LOAD_TOC +
+			// SETUP_TMR. Requires the secure OS to be alive; the stage
+			// verifies that itself and aborts with evidence otherwise.
+			RunPspRingStage(pci, this, pspTmrMode());
+		} else {
+			setProperty("Navi33Bringup,PspRingStage",
+			            "disabled (boot-arg navi33psp_ring=1 absent)");
 		}
 	} else {
 		setProperty("Navi33Bringup,PspStage",

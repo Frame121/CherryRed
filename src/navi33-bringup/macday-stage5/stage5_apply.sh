@@ -14,6 +14,8 @@
 #   survey — navi33bringup=1 navi33psp=1            (read-only mailbox survey)
 #   kdb    — + navi33psp_load=1                     (FIRST WRITE: KDB only)
 #   chain  — + navi33psp_chain=1                    (full chain -> sOS alive)
+#   ring   — + navi33psp_chain=1 navi33psp_ring=1   (GPCOM ring + LOAD_TOC +
+#                                                     SETUP_TMR; needs the chain)
 #
 # Safety mirrors stage3_apply.sh: backs up the EFI first, the kext is
 # fail-closed (no boot-arg = nothing runs), and any navi33psp_* load token
@@ -25,9 +27,9 @@ KEXT_SRC="${2:-}"
 ROLLBACK=0
 if [ "$MODE" = "--rollback" ]; then ROLLBACK=1; MODE="rollback"; fi
 case "$MODE" in
-  survey|kdb|chain) [ -n "$KEXT_SRC" ] || { echo "ERROR: pass the kext path (stage5_apply.sh $MODE /path/to/Navi33Bringup.kext)"; exit 1; } ;;
+  survey|kdb|chain|ring) [ -n "$KEXT_SRC" ] || { echo "ERROR: pass the kext path (stage5_apply.sh $MODE /path/to/Navi33Bringup.kext)"; exit 1; } ;;
   rollback) ;;
-  *) echo "usage: sudo sh $0 [survey|kdb|chain <kext>] | [--rollback]"; exit 1 ;;
+  *) echo "usage: sudo sh $0 [survey|kdb|chain|ring <kext>] | [--rollback]"; exit 1 ;;
 esac
 
 [ "$(id -u)" -eq 0 ] || { echo "ERROR: run with sudo"; exit 1; }
@@ -71,7 +73,7 @@ ba = nv.get('boot-args','')
 tokens = [x for x in ba.split() if x]
 
 # Remove any previous navi33psp load-mode tokens; keep the base opt-ins.
-for drop in ('navi33psp_load=1','navi33psp_chain=1'):
+for drop in ('navi33psp_load=1','navi33psp_chain=1','navi33psp_ring=1'):
     tokens = [t for t in tokens if t != drop]
 
 if mode == 'rollback':
@@ -85,6 +87,10 @@ else:
         if want not in tokens: tokens.append(want)
     if mode == 'kdb': tokens.append('navi33psp_load=1')
     if mode == 'chain': tokens.append('navi33psp_chain=1')
+    if mode == 'ring':
+        # The ring belongs to the secure OS: run the chain in the same boot.
+        tokens.append('navi33psp_chain=1')
+        tokens.append('navi33psp_ring=1')
 
 nv['boot-args'] = ' '.join(tokens)
 # Stale NVRAM must not mask the new value (same fix as stage3_apply.sh).
@@ -129,5 +135,5 @@ fi
 diskutil unmount disk0s1 2>/dev/null || true
 echo
 echo "DONE. Next step: reboot (sudo shutdown -r now), then run:"
-echo "  sh stage5_verify_after_reboot.sh [survey|kdb|chain]"
+echo "  sh stage5_verify_after_reboot.sh [survey|kdb|chain|ring]"
 echo "Rollback: sudo sh $0 --rollback"
