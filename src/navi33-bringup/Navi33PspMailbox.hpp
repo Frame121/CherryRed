@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "Navi33PspLoad.hpp"
+
 // Pure, host-testable pieces of the PSP/SMU mailbox survey. No IOKit includes:
 // this header compiles both in the kext and in the host unit tests.
 //
@@ -25,7 +27,7 @@ namespace cobalt64::navi33::psp {
 inline constexpr uint32_t kRegBarIndex = 5;   // BAR5: MMIO register window (1 MiB)
 inline constexpr uint16_t kPciCommandMemorySpace = 0x2;  // PCI command bit 1
 
-inline constexpr uint32_t kMp0BaseDwords = 0x16000;  // hw_id 255 (MP0) base[0]
+// kMp0BaseDwords lives in Navi33PspLoad.hpp (single shared definition).
 inline constexpr uint32_t kMp1BaseDwords = 0x16000;  // hw_id 1   (MP1) base[0]
 
 struct MailboxSpec {

@@ -17,6 +17,8 @@
 #include "Navi33PspMailbox.hpp"
 #include "Navi33MmWindow.hpp"
 #include <IOKit/IOLib.h>
+#include <IOKit/IOMemoryDescriptor.h>
+#include <IOKit/pci/IOPCIDevice.h>
 #include <libkern/c++/OSData.h>
 #include <string.h>
 
