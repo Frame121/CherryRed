@@ -1,5 +1,20 @@
 # Recovery Checkpoint
 
+- **CHECKPOINT: 2026-10-31 (session 7) — EVERYTHING ON GITHUB; THE COMPLETE
+  LADDER BUILDS GREEN INCLUDING 5.4/5.5/5.7.** The concurrent session's
+  Navi33Memory (5.4, MemoryVerified), Navi33Queue (5.5, QueueVerified) and
+  Navi33UserClient (5.7, C4 contract + ClientBudget) stages are committed
+  (7b433aa) and CI-verified (green at 2458bb4 after fixing an unused
+  constant and giving ClientBudget a fail-closed default constructor). The
+  CI-green kext with every stage is installed to `E:\EFI\OC\Kexts\`.
+  Boot-args on the EFI remain read-only (`navi33bringup=1 navi33psp=1`);
+  the full write ladder runs when the operator extends boot-args with
+  `navi33psp_load=1 navi33psp_chain=1 navi33psp_ring=1 navi33psp_smu=1
+  navi33gc_load=1 navi33mem=1 navi33queue=1` (verify the exact tokens in
+  Navi33Bringup.cpp before booting). Metal remains 0 devices until the
+  ladder verifies and a real IOAccelerator exists.
+
+- **CHECKPOINT: 2026-10-31 (session 6) — gc11_regs.h (GC 11 register
 - **CHECKPOINT: 2026-10-31 (session 6) — gc11_regs.h (GC 11 register
   constants generated from the real Linux gc_11_0_0 headers) + shared
   ring-submit/smu13 helpers; TWO CONCURRENT AGENT SESSIONS MERGED.** A second
