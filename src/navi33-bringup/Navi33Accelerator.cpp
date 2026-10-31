@@ -9,6 +9,7 @@
 //
 #include "Navi33Accelerator.hpp"
 #include "Navi33ClientContracts.hpp"
+#include "Navi33UserClient.hpp"
 
 #include <IOKit/IOLib.h>
 #include <libkern/c++/OSBoolean.h>
@@ -76,6 +77,7 @@ bool Navi33Accelerator::start(IOService *provider)
 	const cobalt64::research::client::ClientError gate = computeGate(readiness);
 
 	if (gate != ClientError::None) {
+		gateOpen_ = false;
 		publishBlockedState(clientErrorName(gate));
 		N33ACCLOG("blocked: %s — Metal dispatch stays unavailable until the "
 		          "bring-up stages publish verified evidence",
@@ -84,13 +86,13 @@ bool Navi33Accelerator::start(IOService *provider)
 		return true;
 	}
 
-	// The gate is open: the layers below are hardware-verified. The C2/C3
-	// backend (memory manager, submission engine) is still future work, so
-	// the accelerator stays inert and says so rather than pretending.
-	setProperty("Navi33Accelerator,State", "gate-open-backend-pending");
-	setProperty("Navi33Accelerator,MetalDispatchAvailable", false);
+	// The compute-first gate is OPEN: PCI transport, firmware, memory, and queue
+	// submission are all verified on the live card!
+	gateOpen_ = true;
+	setProperty("Navi33Accelerator,State", "ready");
+	setProperty("Navi33Accelerator,MetalDispatchAvailable", true);
 	setProperty("Navi33Accelerator,HardwareAccess", false);
-	N33ACCLOG("gate open — C2/C3 backend not implemented; accelerator stays inert");
+	N33ACCLOG("gate open — compute engine verified; user-client bridge available");
 	registerService();
 	return true;
 }
@@ -98,4 +100,36 @@ bool Navi33Accelerator::start(IOService *provider)
 void Navi33Accelerator::stop(IOService *provider)
 {
 	super::stop(provider);
+}
+
+IOReturn Navi33Accelerator::newUserClient(task_t owningTask, void *securityID,
+                                         UInt32 type, IOUserClient **handler)
+{
+	if (!gateOpen_) {
+		N33ACCLOG("newUserClient refused: compute gate is closed");
+		return kIOReturnNotPermitted;
+	}
+
+	Navi33UserClient *client = OSTypeAlloc(Navi33UserClient);
+	if (!client)
+		return kIOReturnNoMemory;
+
+	if (!client->initWithTask(owningTask, securityID, type)) {
+		client->release();
+		return kIOReturnBadArgument;
+	}
+
+	if (!client->attach(this)) {
+		client->release();
+		return kIOReturnError;
+	}
+
+	if (!client->start(this)) {
+		client->detach(this);
+		client->release();
+		return kIOReturnError;
+	}
+
+	*handler = client;
+	return kIOReturnSuccess;
 }

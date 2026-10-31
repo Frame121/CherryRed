@@ -23,6 +23,12 @@ void RunNavi33SmuStage(IOPCIDevice *pci, IOService *publisher);
 // GC firmware stage: LOAD_IP_FW image set + RLC autoload; defined in
 // Navi33GcLoad.cpp.
 void RunNavi33GcLoadStage(IOPCIDevice *pci, IOService *publisher);
+// Memory stage (Stage 5.4 / C2): GFXHUB v3.0 GART aperture; defined in
+// Navi33Memory.cpp.
+void RunNavi33MemoryStage(IOPCIDevice *pci, IOService *publisher);
+// Queue stage (Stage 5.5 / C3): SDMA 6.0.2 & GFX 11.0.2 ring test; defined in
+// Navi33Queue.cpp.
+void RunNavi33QueueStage(IOPCIDevice *pci, IOService *publisher);
 
 #define N33LOG(fmt, ...) IOLog("Navi33Bringup: " fmt "\n", ##__VA_ARGS__)
 
@@ -189,6 +195,24 @@ bool Navi33Bringup::gcStageEnabled()
 	       bootArgTokenPresent(args, "navi33gc_load=1");
 }
 
+bool Navi33Bringup::memoryStageEnabled()
+{
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return false;
+	return gcStageEnabled() &&
+	       bootArgTokenPresent(args, "navi33mem=1");
+}
+
+bool Navi33Bringup::queueStageEnabled()
+{
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return false;
+	return memoryStageEnabled() &&
+	       bootArgTokenPresent(args, "navi33queue=1");
+}
+
 uint32_t Navi33Bringup::pspTmrMode()
 {
 	// Optional value boot-arg navi33psp_tmr=N: 1 = VRAM top - 512 MiB
@@ -324,6 +348,22 @@ bool Navi33Bringup::start(IOService *provider)
 		} else {
 			setProperty("Navi33Bringup,GcLoadStage",
 			            "disabled (boot-arg navi33gc_load=1 absent)");
+		}
+		if (memoryStageEnabled()) {
+			// Seventh opt-in (navi33mem=1): GFXHUB v3.0 GART aperture
+			// setup, VMID 0 page table, L1 TLB & L2 cache enable.
+			RunNavi33MemoryStage(pci, this);
+		} else {
+			setProperty("Navi33Bringup,MemoryStage",
+			            "disabled (boot-arg navi33mem=1 absent)");
+		}
+		if (queueStageEnabled()) {
+			// Eighth opt-in (navi33queue=1): SDMA0 linear write test and
+			// GFX ring command execution proof.
+			RunNavi33QueueStage(pci, this);
+		} else {
+			setProperty("Navi33Bringup,QueueStage",
+			            "disabled (boot-arg navi33queue=1 absent)");
 		}
 	} else {
 		setProperty("Navi33Bringup,PspStage",

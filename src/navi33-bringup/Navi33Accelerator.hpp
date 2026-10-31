@@ -2,19 +2,17 @@
 #define COBALT64_NAVI33_ACCELERATOR_HPP
 
 #include <IOKit/IOService.h>
+#include <IOKit/IOUserClient.h>
 
-// Navi33Accelerator — the C6/IOAccelerator-direction service skeleton.
+// Navi33Accelerator — the C6/IOAccelerator-direction service.
 //
 // It attaches to the Navi33Bringup service (no PCI matching of its own) and
 // evaluates the compute readiness gate from the evidence properties the
-// bring-up stages publish. It performs NO hardware access of any kind: no
-// BAR mapping, no config writes, no firmware. While the gate is closed it
-// stays alive and publishes exactly why Metal dispatch is unavailable; the
-// real accelerator work (command submission backend, user client, Metal
-// device descriptor) only attaches behind those same evidence properties.
+// bring-up stages publish.
 //
-// This skeleton exists so the Metal layer's contract and its refusal
-// behavior are built and reviewed now — not so that Metal works today.
+// When the gate opens (pciTransport, firmware, memory, queue all verified),
+// it publishes "Navi33Accelerator,State" = "ready" and admits user client
+// connections (Navi33UserClient) for userspace compute submission.
 
 class Navi33Accelerator : public IOService {
 	OSDeclareDefaultStructors(Navi33Accelerator)
@@ -25,8 +23,12 @@ public:
 	bool       start(IOService *provider) override;
 	void       stop(IOService *provider) override;
 
+	IOReturn newUserClient(task_t owningTask, void *securityID, UInt32 type,
+	                       IOUserClient **handler) override;
+
 private:
 	void publishBlockedState(const char *reasonName);
+	bool gateOpen_ {false};
 };
 
 #endif
