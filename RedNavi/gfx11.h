@@ -173,6 +173,7 @@ struct rn_mes_result {
     u32 ring_fence, api_status;                    // QUERY_SCHEDULER_STATUS fence and the last frame's completion word
     int hw_res_ok, add_ok;
     u32 hw_res1_status;
+    u32 fw_ver0, fw_ver1;                         // CP_MES_GP3_LO of each pipe right after the start: the version of the image that runs
     u32 mes_db[6];                                // CP_MES_DOORBELL_CONTROL1..6 after the queue was added
     int sched_cfg_ok;
     u32 q_pipe, q_queue;                          // the hardware queue the MES gave ours

@@ -1242,6 +1242,12 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     res->cntl = RREG32_SOC15(RN_GC, 0, regCP_MES_CNTL);
     mesPcSample(adev, 0, &res->p0_pc, &res->p0_pc10);
     mesPcSample(adev, 1, &res->p1_pc, &res->p1_pc10);
+    // The firmware version each pipe reports (mes_v11_0_get_fw_version reads CP_MES_GP3_LO) right after the start: proves which image the PSP really loaded.
+    grbmSelect(adev, 3, 0, 0, 0);
+    res->fw_ver0 = RREG32_SOC15(RN_GC, 0, regCP_MES_GP3_LO);
+    grbmSelect(adev, 3, 1, 0, 0);
+    res->fw_ver1 = RREG32_SOC15(RN_GC, 0, regCP_MES_GP3_LO);
+    grbmSelect(adev, 0, 0, 0, 0);
     res->step = 1;
     if (maxStep < 2) return;
 

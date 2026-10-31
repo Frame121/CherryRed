@@ -2278,6 +2278,9 @@ void RedNaviProbe::sdmaTest() {
                     {
                         const char *dn[6] = {"c1", "c2", "c3", "c4", "c5", "c6"};
                         rnPublish(this, "mes-db", dn, mr.mes_db, 6);
+                        const char *vn[2] = {"sched", "kiq"};
+                        uint32_t vv[2] = {mr.fw_ver0, mr.fw_ver1};
+                        rnPublish(this, "mes-fw-version", vn, vv, 2);
                     }
                 }
                 if ((mr.q_active & 1u) || mr.add_ok) computeRingOff = 0x0C0A0000 + 0x30000;   // the queue the MES mapped
