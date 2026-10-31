@@ -1061,6 +1061,7 @@ void rn_compute_diag2(struct rn_device *adev, u32 out[8]) {
 
 // MQD image for a compute queue (struct v11_compute_mqd, offsets in dwords), as gfx_v11_0_compute_mqd_init fills it.
 bool gMesSelfMap = false;
+bool gMesEarlyMap = false;
 u64 gMesHostWbVa = 0;            // rednavi_mes_hostwb=1: GART address of a host page that holds the legacy queue's rptr (+0) and wptr (+8), as Linux's write-back slots do
 volatile u32 *gMesHostWbMem = nullptr;
 u64 gMesHostRingVa = 0;          // rednavi_mes_hostring=1: the legacy queue's 8 KB ring in host memory too (GART address), as Linux allocates it
@@ -1398,6 +1399,35 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     mesPcSample(adev, 1, &res->p1_pc, &res->p1_pc10);
     res->step = 3;
     if (maxStep < 4 || !(res->sched_active & 1u)) return;
+
+    if (gMesEarlyMap) {
+        // rednavi_mes_earlymap=1: the KIQ's MAP_QUEUES for a MEC queue with no scheduler involved (it has not been given any frame yet). If the HQD of ME 1
+        // pipe 0 queue 0 comes up here, the KIQ firmware, the MQD and the MEC are fine and what differs is the scheduler's request.
+        gWbHostNow = false;
+        writeComputeMqd(adev, vaBase, qOff, 4096, qOff + 0x2000, qOff + 0x4000, legDb);
+        u32 pk[24];
+        memset(pk, 0, sizeof(pk));
+        pk[0] = RN_PACKET3(0xA0u, 6);                                      // SET_RESOURCES as amdgpu_gfx_mes_enable_kcq sends it
+        pk[1] = (0xau << 16);
+        pk[2] = 0xffffffffu; pk[3] = 0xffffffffu;
+        pk[8] = RN_PACKET3(0xA2u, 5);                                      // MAP_QUEUES: one queue, compute engine, ME 1, pipe 0, queue 0
+        pk[9] = 1u << 29;
+        pk[10] = legDb << 2;
+        pk[11] = lower_32_bits(vaBase + qOff + 0x2000); pk[12] = upper_32_bits(vaBase + qOff + 0x2000);
+        pk[13] = lower_32_bits(vaBase + qOff + 0x1008); pk[14] = upper_32_bits(vaBase + qOff + 0x1008);
+        pk[15] = RN_PACKET3(0x10u, 7);                                     // NOP to the 8-dword boundary
+        mesRingSubmit(adev, kiqOff, kiqOff + 0x1008, kMesKiqDoorbell, &kiqWptr, pk, 24);
+        msleep(50);
+        grbmSelect(adev, 3, 1, 0, 0);
+        res->early[0] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_RPTR);
+        grbmSelect(adev, 1, 0, 0, 0);
+        res->early[1] = RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE);
+        res->early[2] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_BASE);
+        res->early[3] = RREG32_SOC15(RN_GC, 0, regCP_MQD_BASE_ADDR);
+        res->early[4] = RREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_DOORBELL_CONTROL);
+        res->early[5] = static_cast<u32>(kiqWptr);
+        grbmSelect(adev, 0, 0, 0, 0);
+    }
 
     // Send one API frame to the scheduler followed by QUERY_SCHEDULER_STATUS whose completion fence is the proof that the scheduler got through
     // the first (mes_v11_0_submit_pkt_and_poll_completion). The frame's own completion word is at apiStatusOff.

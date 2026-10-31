@@ -2210,6 +2210,7 @@ void RedNaviProbe::sdmaTest() {
             // =2: the VRAM area at base + 0x50000, the two runs of 2026-10-31 that stayed empty.
             gMesDbgExt = false; gMesDbgHostVa = 0; gMesDbgHostMem = nullptr;
             gMesHostWbVa = 0; gMesHostWbMem = nullptr;
+            { uint32_t em = 0; gMesEarlyMap = PE_parse_boot_argn("rednavi_mes_earlymap", &em, sizeof(em)) && em == 1; }
             { uint32_t sm = 0; gMesSelfMap = PE_parse_boot_argn("rednavi_mes_selfmap", &sm, sizeof(sm)) && sm == 1; }
             gMesHostRingVa = 0; gMesHostRingMem = nullptr;
             { uint32_t hw = 0;
@@ -2389,6 +2390,8 @@ void RedNaviProbe::sdmaTest() {
                         rnPublish(this, "mes-kiq-end", kn, mr.kiq_end, 16);
                         const char *mpn[16] = {"pre0", "pre1", "pre2", "pre3", "a0p0", "a0p1", "a0p2", "a0p3", "a1p0", "a1p1", "a1p2", "a1p3", "a2p0", "a2p1", "a2p2", "a2p3"};
                         rnPublish(this, "mes-mec-pc", mpn, mr.mec_pc, 16);
+                        const char *epn[6] = {"kiq_rptr", "active", "pq_base", "mqd_base", "db_ctl", "kiq_wptr"};
+                        rnPublish(this, "mes-early", epn, mr.early, 6);
                         const char *kpn[6] = {"k0", "k1", "k2", "k3", "idle0", "idle1"};
                         uint32_t kpv[6] = {mr.kiq_pc_end[0], mr.kiq_pc_end[1], mr.kiq_pc_end[2], mr.kiq_pc_end[3], mr.kiq_pc_pre[0], mr.kiq_pc_pre[1]};
                         rnPublish(this, "mes-kiq-pc", kpn, kpv, 6);

@@ -171,6 +171,7 @@ extern volatile u32 *gMesHostRingMem;
 extern u32 gMesKiqRing[96];   // the first 96 dwords of the MES KIQ ring after the failed map
 extern bool gMesCleaner;      // rednavi_mes_cleaner=1: a cleaner shader (one s_endpgm) and its address in the KIQ SET_RESOURCES, as gfx11_kiq_set_resources sends it
 extern bool gMesHwResLinux;   // rednavi_mes_hwres=1: SET_HW_RESOURCES with Linux's gds_size 0x1000, oversubscription_timer 50 and disable_mes_log 1
+extern bool gMesEarlyMap;  // rednavi_mes_earlymap=1: a MAP_QUEUES for the MEC queue on the KIQ ring before the scheduler gets any frame
 extern bool gMesSelfMap;   // rednavi_mes_selfmap=1: after the stuck map, put the scheduler's MAP_QUEUES on the KIQ ring ourselves
 extern bool gMesDmDump;   // rednavi_mes_dm=1: read the two event log windows after the last frame
 extern u32 gMesDbg[2][256];   // MES firmware log (mes_dbgext): the first 2 KB of the buffer, dwords 0..3 are the header the firmware leaves
@@ -190,6 +191,7 @@ struct rn_mes_result {
     int hw_res_ok, add_ok;
     u32 hw_res1_status;
     int dbg_ok; u32 dbg_status;                    // SETUP_MES_DBGEXT frame and its completion word (opt-in, rednavi_mes_dbgext=1)
+    u32 early[6];                                  // rednavi_mes_earlymap=1: KIQ rptr, then the target HQD's ACTIVE, PQ_BASE, MQD_BASE, DOORBELL_CONTROL, and our KIQ wptr
     u32 kiq_pc_pre[2];                             // the same pointer after SET_RESOURCES, before ADD_QUEUE (the KIQ pipe idle)
     u32 kiq_pc_end[4];                             // CP_MES_INSTR_PNTR of the KIQ pipe (ME 3 pipe 1), four samples after the failed map
     u32 mec_pc[16];                                // CP_MEC_RS64_INSTR_PNTR of MEC pipes 0..3: [0..3] before the map, [4..15] three samples after it
