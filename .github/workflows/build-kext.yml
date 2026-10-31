@@ -100,10 +100,10 @@ jobs:
         run: |
           for f in kext-build.log host-ctest.log; do
             if [ -f "$f" ]; then
-              grep -E "error|Error|FAILED|Failed|undefined" "$f" | head -8 | while IFS= read -r line; do
+              grep -E "error:" "$f" | sort -u | head -12 | while IFS= read -r line; do
                 echo "::error title=$f::$line"
               done
-              if ! grep -qE "error|Error|FAILED|Failed|undefined" "$f"; then
+              if ! grep -qE "error:" "$f"; then
                 tail -8 "$f" | while IFS= read -r line; do
                   [ -n "$line" ] && echo "::error title=$f-tail::$line"
                 done
