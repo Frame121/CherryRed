@@ -389,6 +389,7 @@ void rn_gfx_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringB
     tmp = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
     tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, ME_HALT, 0);
     tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, PFP_HALT, 0);
+    tmp &= ~0x01000000u;   // bit 24 (reset default 1) reads 0 on Linux after its bring-up
     WREG32_SOC15(RN_GC, 0, regCP_ME_CNTL, tmp);
     res->me_cntl_imm = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
     mdelay(10);
@@ -537,6 +538,13 @@ void rn_gfx_constants_init(struct rn_device *adev) {
         tmp = ring == 0 ? REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, GFX_IDLE_INT_ENABLE, 0) : REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, GFX_IDLE_INT_ENABLE, 0);
         if (ring == 0) WREG32_SOC15(RN_GC, 0, regCP_INT_CNTL_RING0, tmp); else WREG32_SOC15(RN_GC, 0, regCP_INT_CNTL_RING1, tmp);
     }
+    // gfx_v11_0_cp_resume with amdgpu_async_gfx_ring: gfx_v11_0_cp_compute_enable(true) then gfx_v11_0_cp_gfx_enable(true), before the MES KIQ init.
+    rn_mec_enable(adev);
+    tmp = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, ME_HALT, 0);
+    tmp = REG_SET_FIELD(tmp, CP_ME_CNTL, PFP_HALT, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_ME_CNTL, tmp);
+    udelay(50);
 }
 
 // gfx_v11_0_cp_compute_enable(true): the four MEC pipes out of reset and active, ucode cache valid, MEC running.
@@ -1275,6 +1283,9 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     res->bootload = RREG32_SOC15(RN_GC, 0, regRLC_RLCS_BOOTLOAD_STATUS);        // gfx_v11_0_wait_for_rlc_autoload_complete wants BOOTLOAD_COMPLETE (bit 31) and CP_STAT 0
     res->rlc_srm = RREG32_SOC15(RN_GC, 0, regRLC_SRM_CNTL);
     res->cp_stat0 = RREG32_SOC15(RN_GC, 0, regCP_STAT);
+    res->cp_me_cntl = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);                    // Linux after its bring-up: 0x00000000
+    res->mec_cntl = RREG32_SOC15(RN_GC, 0, regCP_MEC_RS64_CNTL);                // Linux: 0x3c000000
+    res->rlc_sched = RREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS);              // Linux: 0x000030e8
     if (!gDoorbellBase) return;                                // the rings are driven by doorbell writes
     // VRAM map (all below the GART page table at 0x0C100000): MES KIQ ring at base, MES scheduler ring at base + 0x10000, shared words at +0x20000,
     // the legacy compute queue at +0x30000. In each: ring, rptr at +0x1000, wptr at +0x1008, MQD at +0x2000, EOP at +0x4000.
@@ -1548,6 +1559,8 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     res->fault_status = RREG32_SOC15(RN_GC, 0, regGCVM_L2_PROTECTION_FAULT_STATUS);
     msleep(1000);
     res->ring_fence_late = rn_vram_rd32(adev, ringFenceOff);
+    res->rlc_sched = RREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS);              // again, after the KIQ setting: Linux 0x000030e8
+    res->cp_me_cntl = RREG32_SOC15(RN_GC, 0, regCP_ME_CNTL);
     res->api_status = rn_vram_rd32(adev, apiStatusOff);
     grbmSelect(adev, 3, 0, 0, 0);
     res->sched_version = RREG32_SOC15(RN_GC, 0, regCP_MES_GP3_LO);
