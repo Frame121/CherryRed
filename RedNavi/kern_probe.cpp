@@ -2204,7 +2204,17 @@ void RedNaviProbe::sdmaTest() {
             uint32_t mesClean = 0;    // rednavi_mes_clean=1: no hand-programmed queue at all, only the MEC running and the doorbells mapped; the MES maps the queue
             PE_parse_boot_argn("rednavi_mes_clean", &mesClean, sizeof(mesClean));
             { uint32_t dm = 0; gMesDmDump = PE_parse_boot_argn("rednavi_mes_dm", &dm, sizeof(dm)) && dm == 1; }
-            { uint32_t dx = 0; gMesDbgExt = PE_parse_boot_argn("rednavi_mes_dbgext", &dx, sizeof(dx)) && dx == 1; }
+            // rednavi_mes_dbgext=1: the firmware log in host memory, a GART BO as Linux allocates it (its "mc address" is the GART window);
+            // =2: the VRAM area at base + 0x50000, the two runs of 2026-10-31 that stayed empty.
+            gMesDbgExt = false; gMesDbgHostVa = 0; gMesDbgHostMem = nullptr;
+            { uint32_t dx = 0;
+              if (PE_parse_boot_argn("rednavi_mes_dbgext", &dx, sizeof(dx)) && (dx == 1 || dx == 2)) {
+                  gMesDbgExt = true;
+                  if (dx == 1) {                                  // 16 KB, the size of the VRAM area it replaces
+                      const int hb = createHostBo(0x4000);
+                      if (hb >= 0) { gMesDbgHostVa = bos[hb].gpuVa; gMesDbgHostMem = bos[hb].md->getBytesNoCopy(); }
+                  }
+              } }
             if (mesClean == 1 || mesClean == 2) {
                 memset(&cr, 0, sizeof(cr));
                 rn_mec_enable(&gpu);
@@ -2339,6 +2349,11 @@ void RedNaviProbe::sdmaTest() {
                             for (int half = 0; half < 2; half++) {
                                 for (int i = 0; i < 256; i++) { snprintf(dmn[half * 256 + i], 8, "%c%03x", half ? 'h' : 'l', i * 4); dp[i] = dmn[half * 256 + i]; }
                                 rnPublish(this, half ? "mes-dbg-hi" : "mes-dbg-lo", dp, gMesDbg[half], 256);
+                            }
+                            {   // which of the two buffers the firmware was given: 1 host memory (GART), 0 the VRAM area
+                                const char *wn[1] = {"host"};
+                                uint32_t wv[1] = {gMesDbgHostVa != 0};
+                                rnPublish(this, "mes-dbg-where", wn, wv, 1);
                             }
                         }
                     }

@@ -1279,6 +1279,8 @@ void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]) {
 bool gMesDmDump = false;
 u32 gMesDm[2][256];
 bool gMesDbgExt = false;
+u64 gMesDbgHostVa = 0;
+void *gMesDbgHostMem = nullptr;
 u32 gMesDbg[2][256];
 
 void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_gmc *gmc, const u32 start[4], u32 maxStep, void (*progress)(void *, u32), void *ctx,
@@ -1414,38 +1416,27 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     rn_vram_wr32(adev, schCtxOff, 0); rn_vram_wr32(adev, schCtxOff + 4, 0);
     rn_vram_wr32(adev, queryFenceOff, 0); rn_vram_wr32(adev, queryFenceOff + 4, 0);
 
-    // 3b: arm the MES firmware's own log, before the queue frames, so their records are in it too. The v11 API has a MISC opcode that hands
-    // the scheduler a circular buffer and the firmware's debug extension writes text records into it, which is the only way to see what it
-    // does, or waits for, inside a frame. Linux arms the same thing at the end of mes_v11_0_hw_init (amdgpu_mes_dbgext_start, module
-    // parameter amdgpu_mes_dbgext_buffer_size) and expects nothing else from the driver: the buffer size goes in the first dword as that
-    // function seeds it. The header the firmware leaves behind is dumped with the text, so the layout is read out of the hardware rather
-    // than assumed.
+    // 3b: the MES firmware's own log. The v11 API has a MISC opcode that hands the scheduler a circular buffer, and the firmware's debug
+    // extension writes text records into it: the only way to see what it does, or waits for, inside a frame. Linux arms the same thing at the
+    // end of mes_v11_0_hw_init (amdgpu_mes_dbgext_start, module parameter amdgpu_mes_dbgext_buffer_size) and expects nothing else from the
+    // driver: the buffer size goes in the first dword as that function seeds it, and the header is left by the firmware, so the layout is
+    // read out of the hardware rather than assumed.
     //
-    // The options word is not what the v11 header suggests. MES_DBGEXT_INIT_DATA defines only bit 0 (one host interrupt per record), yet
-    // Linux never sends 0: amdgpu_mes_dbgext_start translates its own options into the layout the firmware actually reads, where bit 1
-    // enables logging, and passes ENABLE_MES_LOG | HOST_POLL, i.e. 0x2 in interrupt mode and 0x3 when polling. Bit 0 stays clear here
-    // because nothing in RedNavi services the MES host interrupt. Bit 1 set is what matters: the first version of this passed 0 and the
-    // scheduler completed the frame without writing anything at all, not even a header (run on the 7800 XT, 2026-10-31), which is what a
-    // setup handler does when logging is off.
+    // Where the buffer lives is a difference worth keeping switchable: Linux allocates it as a GTT BO in host memory and hands the firmware
+    // its GART address, unlike the event log above, which is in VRAM. Two runs with it in VRAM (options word 0, then 3) had the frame
+    // completed and the buffer untouched, not even a header (7800 XT, 2026-10-31), so the host buffer is the remaining arrangement to try.
     const u64 dbgOff = base + 0x50000;
+    const bool dbgHost = gMesDbgHostVa != 0 && gMesDbgHostMem != nullptr;
+    const u64 dbgVa = dbgHost ? gMesDbgHostVa : vaBase + dbgOff;
     auto dumpMesDbg = [&]() {
         if (!gMesDbgExt) return;
+        if (dbgHost) {                                     // the first 2 KB, out of the host mapping instead of VRAM
+            const volatile u32 *p = static_cast<const volatile u32 *>(gMesDbgHostMem);
+            for (u32 i = 0; i < 512; i++) gMesDbg[i >> 8][i & 0xff] = p[i];
+            return;
+        }
         for (u32 i = 0; i < 512; i++) gMesDbg[i >> 8][i & 0xff] = rn_vram_rd32(adev, dbgOff + i * 4);
     };
-    if (gMesDbgExt) {
-        for (u32 o = 0; o < kMesDbgBytes; o += 4) rn_vram_wr32(adev, dbgOff + o, 0);
-        rn_vram_wr32(adev, dbgOff, kMesDbgBytes);
-        union MESAPI__MISC m;
-        memset(&m, 0, sizeof(m));
-        m.header.type = MES_API_TYPE_SCHEDULER;
-        m.header.opcode = MES_SCH_API_MISC;
-        m.header.dwsize = API_FRAME_SIZE_IN_DWORDS;
-        m.opcode = MESAPI_MISC__SETUP_MES_DBGEXT;
-        m.dbgext_init_data.dbg_ext_mc_addr = vaBase + dbgOff;
-        m.dbgext_init_data.u64_all = 3;                    // as amdgpu_mes_dbgext_start_locked in polling mode: bit 1 enables logging, bit 0 is host_poll_msg (inverted sense: set = no interrupt per message)
-        res->dbg_ok = sendFrame(&m, offsetof(union MESAPI__MISC, api_status) / 4);
-        res->dbg_status = res->api_status;
-    }
 
     // step 4: SET_HW_RESOURCES
     if (progress) progress(ctx, 4);
@@ -1493,6 +1484,33 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         p1.cleaner_shader_fence_mc_addr = vaBase + sharedOff + 0x200;
         res->hw_res_ok = sendFrame(&p1, offsetof(union MESAPI_SET_HW_RESOURCES_1, api_status) / 4);
         res->hw_res1_status = res->api_status;
+    }
+
+    // 4b: arm the log here, as Linux does at the end of mes_v11_0_hw_init: after both resource frames, before the first queue frame, so the
+    // records of the ADD_QUEUE attempt are in it. The options word is not what the v11 header suggests: MES_DBGEXT_INIT_DATA defines only
+    // bit 0 (one host interrupt per record), yet Linux never sends 0. amdgpu_mes_dbgext_start translates its own options into the layout the
+    // firmware reads, where bit 1 enables logging and bit 0 is host_poll_msg with the sense inverted, and passes 0x3 when it polls, 0x2 when
+    // it takes interrupts. 0x3 is what is sent here: nothing in RedNavi services the MES host interrupt, and reading the buffer afterwards is
+    // the poll. Note that the VRAM runs of 2026-10-31 already sent 0x3 and still had the buffer untouched.
+    if (gMesDbgExt) {
+        if (dbgHost) {
+            volatile u32 *p = static_cast<volatile u32 *>(gMesDbgHostMem);
+            for (u32 i = 0; i < kMesDbgBytes / 4; i++) p[i] = 0;
+            p[0] = kMesDbgBytes;                           // the size in the first dword, as amdgpu_mes_dbgext_start seeds it
+        } else {
+            for (u32 o = 0; o < kMesDbgBytes; o += 4) rn_vram_wr32(adev, dbgOff + o, 0);
+            rn_vram_wr32(adev, dbgOff, kMesDbgBytes);
+        }
+        union MESAPI__MISC m;
+        memset(&m, 0, sizeof(m));
+        m.header.type = MES_API_TYPE_SCHEDULER;
+        m.header.opcode = MES_SCH_API_MISC;
+        m.header.dwsize = API_FRAME_SIZE_IN_DWORDS;
+        m.opcode = MESAPI_MISC__SETUP_MES_DBGEXT;
+        m.dbgext_init_data.dbg_ext_mc_addr = dbgVa;
+        m.dbgext_init_data.u64_all = 3;
+        res->dbg_ok = sendFrame(&m, offsetof(union MESAPI__MISC, api_status) / 4);
+        res->dbg_status = res->api_status;
     }
     mesPcSample(adev, 0, &res->p0_pc, &res->p0_pc10);
     res->step = 4;
