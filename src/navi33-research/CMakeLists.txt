@@ -67,6 +67,10 @@ add_executable(ipdiscovery_bounds_tests
     ../navi48-bringup/src/ipdiscovery.cpp
 )
 target_include_directories(ipdiscovery_bounds_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../navi48-bringup/src)
+# This target links nothing, so it inherits no C++ standard from another
+# target: without an explicit requirement Apple clang compiles it as C++98,
+# where the enum-with-underlying-type in ipdiscovery.hpp is ill-formed.
+target_compile_features(ipdiscovery_bounds_tests PRIVATE cxx_std_17)
 
 set(navi33_targets
     navi33_research navi33_research_tests navi33_driver_core_tests
