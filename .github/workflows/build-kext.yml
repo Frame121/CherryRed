@@ -76,7 +76,9 @@ jobs:
           git add kext-latest
           # An unchanged kext stages nothing; that is success, not a failure.
           git diff --cached --quiet || git commit -m "CI kext build from ${GITHUB_SHA}"
-          git push origin kext-builds
+          # kext-builds is a machine-generated artifact branch; its history
+          # restarts at every source commit, so updates are force pushes.
+          git push --force origin kext-builds
 
       - uses: actions/upload-artifact@v4
         with:
