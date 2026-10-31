@@ -67,6 +67,7 @@ constexpr uint32_t kGcAutoloadWaitMs = 2000;
 void RunNavi33GcLoadStage(IOPCIDevice *pci, IOService *publisher)
 {
     using cobalt64::navi33::psp::kC2pmsg81Dword;
+    using cobalt64::navi33::psp::kCmdLoadIpFw;
     using cobalt64::navi33::psp::kFbLocationBaseDword;
     using cobalt64::navi33::psp::kFbLocationTopDword;
     using cobalt64::navi33::psp::kPciCommandMemorySpace;
