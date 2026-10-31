@@ -550,7 +550,7 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, QUEUE_SIZE, qOrder - 1);
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, RPTR_BLOCK_SIZE, 9);         // order_base_2(4096 / 4) - 1
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, UNORD_DISPATCH, 1);
-    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 0);
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 1);   // Linux's compute MQD reads back with it set (allow_tunneling), docs/COMPAT.md
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, PRIV_STATE, 1);
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, KMD_QUEUE, 1);
     WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_CONTROL, tmp);
@@ -582,7 +582,7 @@ void rn_compute_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 r
         pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, QUEUE_SIZE, qOrder - 1);
         pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, RPTR_BLOCK_SIZE, 9);
         pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, UNORD_DISPATCH, 1);
-        pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 0);
+        pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 1);   // Linux's compute MQD reads back with it set (allow_tunneling), docs/COMPAT.md
         pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, PRIV_STATE, 1);
         pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, KMD_QUEUE, 1);
         u32 persist = regCP_HQD_PERSISTENT_STATE_DEFAULT;
@@ -1006,7 +1006,7 @@ static void writeComputeMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u32
     pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, QUEUE_SIZE, qOrder - 1);
     pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, RPTR_BLOCK_SIZE, mesQueue ? 0 : 9);   // mes_v11_0_mqd_init ends up with 0 here
     pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, UNORD_DISPATCH, 1);
-    pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 0);
+    pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, mesQueue ? 0 : 1);
     pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, PRIV_STATE, 1);
     pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, KMD_QUEUE, 1);
     if (mesQueue) pqCtl = REG_SET_FIELD(pqCtl, CP_HQD_PQ_CONTROL, NO_UPDATE_RPTR, 1);
@@ -1014,10 +1014,7 @@ static void writeComputeMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u32
     persist = REG_SET_FIELD(persist, CP_HQD_PERSISTENT_STATE, PRELOAD_SIZE, 0x55);
     u32 ibCtl = regCP_HQD_IB_CONTROL_DEFAULT;
     ibCtl = REG_SET_FIELD(ibCtl, CP_HQD_IB_CONTROL, MIN_IB_AVAIL_SIZE, 3);
-    u32 quantum = 0;
-    quantum = REG_SET_FIELD(quantum, CP_HQD_QUANTUM, QUANTUM_EN, 1);
-    quantum = REG_SET_FIELD(quantum, CP_HQD_QUANTUM, QUANTUM_SCALE, 1);
-    quantum = REG_SET_FIELD(quantum, CP_HQD_QUANTUM, QUANTUM_DURATION, 1);
+    const u32 quantum = regCP_HQD_QUANTUM_DEFAULT;                           // Linux's compute MQD has the quantum at 0, not enabled
     for (u32 o = 0; o < 512 * 4; o += 4) rn_vram_wr32(adev, mqdOff + o, 0);
     for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
     for (u32 o = 0; o < 2048; o += 4) rn_vram_wr32(adev, eopOff + o, 0);
@@ -1068,7 +1065,7 @@ static void programHqdFromMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, QUEUE_SIZE, qOrder - 1);
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, RPTR_BLOCK_SIZE, 9);
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, UNORD_DISPATCH, 1);
-    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 0);
+    tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, TUNNEL_DISPATCH, 1);   // Linux's compute MQD reads back with it set (allow_tunneling), docs/COMPAT.md
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, PRIV_STATE, 1);
     tmp = REG_SET_FIELD(tmp, CP_HQD_PQ_CONTROL, KMD_QUEUE, 1);
     WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_CONTROL, tmp);
