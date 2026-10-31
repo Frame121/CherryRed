@@ -1,5 +1,31 @@
 # Recovery Checkpoint
 
+- **CHECKPOINT: 2026-10-31 (session 2) — PSP/SMU MAILBOX SURVEY STAGE
+  IMPLEMENTED; CI KEXT BUILD WIRED UP.** The next bring-up stage
+  (`navi33psp=1`, cumulative with `navi33bringup=1`) is implemented and
+  host-tested: the kext maps the MMIO register window (BAR5, 1 MiB) and
+  READS the PSP/SMU mailbox registers (MP0/MP1 `base[0]` `0x16000` dwords
+  from the card's captured IP Discovery table, SHA `4b809b32…`; offsets from
+  the shared PSP/SMU 13 register file; decodes mirror RedNavi's verified
+  Navi 32 M1.5). Zero-write contract holds: the PCI command register is only
+  read (memory decode is refused rather than enabled), every read is
+  bounds-checked against the mapped BAR, the IFWI wait is bounded at 2 s,
+  and the live IP-Discovery read (which would need MM_INDEX writes) is
+  deliberately deferred. Files: `Navi33PspMailbox.hpp` (pure, host-tested),
+  `Navi33PspSurvey.{hpp,cpp}` (the only translation unit allowed to map a
+  BAR, under its own contract test), `Navi33Bringup` gains
+  `pspStageEnabled()`; `Makefile` builds the new TU. Host verification:
+  bring-up safety test + new PSP survey safety test + CTest **23/23** on
+  MSVC. CI (`.github/workflows/build-kext.yml`) now builds
+  `Navi33Bringup.kext` on a macOS runner from the pinned linux-firmware
+  commit, hash-verifying all 14 blobs (fetch script pins upgraded from
+  UNKNOWN to the recorded `FIRMWARE-PROVENANCE.md` values; mismatches are
+  hard errors). `config.plist` on the OpenCore USB already carries
+  `navi33psp=1`. Design notes: `src/navi33-bringup/PSP_MAILBOX_STAGE.md`.
+  The Navi 33 mailbox VALUES remain UNVERIFIED until one reboot into macOS
+  collects the readback; Stage 3 injection verification is still pending the
+  same reboot.
+
 - **CHECKPOINT: 2026-10-31 (Windows-side integration) — MAC-DAY BUNDLE MERGED;
   HOST SUITES RE-RUN ON MSVC; TWO COMMITTED DEFECTS FIXED.** The Mac-day git
   bundle (7 commits on `research/rx7600-linux-evidence-2026-10-23`, head

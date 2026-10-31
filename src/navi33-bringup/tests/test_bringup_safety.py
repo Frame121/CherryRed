@@ -81,6 +81,23 @@ def main():
           "Navi 33 / gfx1102 identification properties missing")
     check('"Navi33Bringup,FutureHardwareInitAllowed", false' in src,
           "unknown board must not be authorized for future hardware init")
+
+    # PSP/SMU mailbox stage: an independent opt-in on top of the bring-up
+    # opt-in. The mapping itself lives in Navi33PspSurvey.cpp under its own
+    # contract test (test_psp_survey_safety.py); this file must stay free of
+    # mapping/write tokens, and the PSP call must be gated on both tokens.
+    check('bootArgTokenPresent(args, "navi33psp=1")' in src,
+          "PSP stage boot-arg token check missing")
+    check('#include "Navi33PspSurvey.hpp"' in src,
+          "PSP survey include missing")
+    check('if (pspStageEnabled())' in src and 'SurveyPspMailbox(pci, this)' in src,
+          "PSP survey call must be gated by pspStageEnabled()")
+    psp_gate = src.index('bool Navi33Bringup::pspStageEnabled()')
+    check('bootArgTokenPresent(args, "navi33bringup=1")' in src[psp_gate:] and
+          'bootArgTokenPresent(args, "navi33psp=1")' in src[psp_gate:],
+          "PSP stage must require BOTH the bring-up and the PSP boot arguments")
+    check('"Navi33Bringup,PspStage"' in src,
+          "PSP stage status property missing (disabled marker)")
     check("<string>0x74801002</string>" in plist, "Info.plist must match 0x74801002")
     check("<string>IOPCIDevice</string>" in plist, "Info.plist provider must be IOPCIDevice")
 

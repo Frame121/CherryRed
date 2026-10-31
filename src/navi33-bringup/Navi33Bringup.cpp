@@ -4,6 +4,7 @@
 //
 #include "Navi33Bringup.hpp"
 #include "Navi33PciMatch.hpp"
+#include "Navi33PspSurvey.hpp"
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/IORegistryEntry.h>
@@ -55,7 +56,7 @@ static bool bootArgTokenPresent(const char *args, const char *token)
 	return false;
 }
 
-bool Navi33Bringup::optInEnabled()
+static bool readChosenBootArgs(char (&args)[256])
 {
 	// Read the effective boot-args from the device-tree "chosen" node instead of
 	// the pexpert boot-argument API: com.apple.kpi.pexpert no longer exists as a
@@ -91,13 +92,30 @@ bool Navi33Bringup::optInEnabled()
 	if (!bytes || len == 0)
 		return false;
 
-	char args[256];
 	if (len >= sizeof(args))
 		len = sizeof(args) - 1;
 	memcpy(args, bytes, len);
 	args[len] = '\0';
+	return true;
+}
 
+bool Navi33Bringup::optInEnabled()
+{
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return false;
 	return bootArgTokenPresent(args, "navi33bringup=1");
+}
+
+bool Navi33Bringup::pspStageEnabled()
+{
+	// The PSP/SMU mailbox survey maps the register BAR (reads only), so it
+	// needs its own explicit opt-in on top of the bring-up opt-in.
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return false;
+	return bootArgTokenPresent(args, "navi33bringup=1") &&
+	       bootArgTokenPresent(args, "navi33psp=1");
 }
 
 bool Navi33Bringup::identityMatchesGpu(IOPCIDevice *pci)
@@ -160,6 +178,15 @@ bool Navi33Bringup::start(IOService *provider)
 	surveyBars(pci);
 	surveyPcieLink(pci);
 	surveyResizableBar(pci);
+	if (pspStageEnabled()) {
+		// Second opt-in (navi33psp=1): maps the MMIO register BAR (BAR5) and
+		// reads PSP/SMU mailbox registers. Reads only — the zero-write
+		// contract still holds, and no firmware is loaded.
+		SurveyPspMailbox(pci, this);
+	} else {
+		setProperty("Navi33Bringup,PspStage",
+		            "disabled (boot-arg navi33psp=1 absent)");
+	}
 	refuseFirmwareAndWrites();
 	N33LOG("bring-up scaffold done (staged hardware bring-up is future, evidence-gated work)");
 
