@@ -1,5 +1,7 @@
 #include "Navi33ResourceSurvey.hpp"
 #include <cassert>
+// Tests must keep assert() effective in NDEBUG (Release) builds.
+#undef NDEBUG
 #include <cstdint>
 #include <limits>
 

@@ -1,5 +1,7 @@
 #include "Navi33LinuxResourceParser.hpp"
 #include <cassert>
+// Tests must keep assert() effective in NDEBUG (Release) builds.
+#undef NDEBUG
 #include <cstdint>
 using namespace cobalt64::research;
 int main() {
