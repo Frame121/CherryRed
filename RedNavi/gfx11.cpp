@@ -1442,7 +1442,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         m.header.dwsize = API_FRAME_SIZE_IN_DWORDS;
         m.opcode = MESAPI_MISC__SETUP_MES_DBGEXT;
         m.dbgext_init_data.dbg_ext_mc_addr = vaBase + dbgOff;
-        m.dbgext_init_data.u64_all = 2;                    // bit 1: enable logging, bit 0 clear: write the buffer only, no interrupt
+        m.dbgext_init_data.u64_all = 3;                    // as amdgpu_mes_dbgext_start_locked in polling mode: bit 1 enables logging, bit 0 is host_poll_msg (inverted sense: set = no interrupt per message)
         res->dbg_ok = sendFrame(&m, offsetof(union MESAPI__MISC, api_status) / 4);
         res->dbg_status = res->api_status;
     }
