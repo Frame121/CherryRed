@@ -13,6 +13,9 @@
 #include <libkern/c++/OSIterator.h>
 #include <string.h>
 
+// First write stage (PSP firmware chain); defined in Navi33PspLoad.cpp.
+void RunPspLoadStage(IOPCIDevice *pci, IOService *publisher, bool chainEnabled);
+
 #define N33LOG(fmt, ...) IOLog("Navi33Bringup: " fmt "\n", ##__VA_ARGS__)
 
 static constexpr uint32_t kPcieCapId     = 0x10;     // PCI Express capability (standard list)
@@ -118,6 +121,30 @@ bool Navi33Bringup::pspStageEnabled()
 	       bootArgTokenPresent(args, "navi33psp=1");
 }
 
+bool Navi33Bringup::pspLoadStageEnabled()
+{
+	// The PSP firmware load stage is the FIRST WRITE stage: it needs the
+	// survey opt-in too (its preconditions depend on the live mailbox state),
+	// plus an explicit load opt-in (KDB-only or the full chain).
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return false;
+	return bootArgTokenPresent(args, "navi33bringup=1") &&
+	       bootArgTokenPresent(args, "navi33psp=1") &&
+	       (bootArgTokenPresent(args, "navi33psp_load=1") ||
+	        bootArgTokenPresent(args, "navi33psp_chain=1"));
+}
+
+bool Navi33Bringup::pspChainStageEnabled()
+{
+	// Full chain (KDB -> SPL -> SYS_DRV -> SOS) on top of the load opt-in.
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return false;
+	return pspLoadStageEnabled() &&
+	       bootArgTokenPresent(args, "navi33psp_chain=1");
+}
+
 bool Navi33Bringup::identityMatchesGpu(IOPCIDevice *pci)
 {
 	if (!pci)
@@ -183,12 +210,25 @@ bool Navi33Bringup::start(IOService *provider)
 		// reads PSP/SMU mailbox registers. Reads only — the zero-write
 		// contract still holds, and no firmware is loaded.
 		SurveyPspMailbox(pci, this);
+		if (pspLoadStageEnabled()) {
+			// Third opt-in (navi33psp_load=1 / navi33psp_chain=1): the
+			// first WRITE stage — PSP 13.0.7 firmware through the
+			// bootloader mailbox. Runs after the read-only survey so the
+			// pre-load mailbox state is already recorded as evidence.
+			RunPspLoadStage(pci, this, pspChainStageEnabled());
+		} else {
+			setProperty("Navi33Bringup,PspLoadStage",
+			            "disabled (boot-args navi33psp_load=1 / navi33psp_chain=1 absent)");
+			refuseFirmwareAndWrites();
+		}
 	} else {
 		setProperty("Navi33Bringup,PspStage",
 		            "disabled (boot-arg navi33psp=1 absent)");
+		setProperty("Navi33Bringup,PspLoadStage",
+		            "disabled (requires navi33psp=1 first)");
+		refuseFirmwareAndWrites();
 	}
-	refuseFirmwareAndWrites();
-	N33LOG("bring-up scaffold done (staged hardware bring-up is future, evidence-gated work)");
+	N33LOG("bring-up done (staged hardware bring-up: PSP load stage is opt-in, see PSP_LOAD_STAGE.md)");
 
 	registerService();
 	return true;

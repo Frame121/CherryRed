@@ -52,6 +52,11 @@ On top of the existing read-only survey, `navi33psp=1` (cumulative with
 - Anything that writes: PSP commands, SMU messages, firmware loading. Those
   are Stage 5.3 proper and stay behind their own gates.
 
+**Implemented after this stage:** the first write stage exists — see
+`PSP_LOAD_STAGE.md` (`navi33psp_load=1` = KDB only, `navi33psp_chain=1` = the
+full KDB → SPL → SYS_DRV → SOS chain). It runs AFTER this survey on the same
+boot so the pre-load mailbox state is recorded first.
+
 ## Build and install
 
 - CI (`.github/workflows/build-kext.yml`) builds the kext on a macOS runner

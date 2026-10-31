@@ -46,6 +46,10 @@ add_executable(navi33_psp_mailbox_tests tests/test_Navi33PspMailbox.cpp)
 target_include_directories(navi33_psp_mailbox_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../navi33-bringup)
 target_compile_features(navi33_psp_mailbox_tests PRIVATE cxx_std_17)
 
+add_executable(navi33_psp_load_tests tests/test_Navi33PspLoad.cpp)
+target_include_directories(navi33_psp_load_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../navi33-bringup)
+target_compile_features(navi33_psp_load_tests PRIVATE cxx_std_17)
+
 add_executable(navi33_client_contracts_tests tests/test_Navi33ClientContracts.cpp)
 target_include_directories(navi33_client_contracts_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(navi33_client_contracts_tests PRIVATE cxx_std_17)
@@ -80,7 +84,8 @@ set(navi33_targets
     navi33_research navi33_research_tests navi33_driver_core_tests
     navi33_bringup_plan_tests navi33_resource_survey_tests
     navi33_linux_resource_parser_tests navi33_target_profile_tests
-    navi33_pci_identity_tests navi33_psp_mailbox_tests navi33_client_contracts_tests
+    navi33_pci_identity_tests navi33_psp_mailbox_tests navi33_psp_load_tests
+    navi33_client_contracts_tests
     navi33_ipdiscovery_tests
     navi33_bringup_model_tests navi33_integration_contract_tests
     navi33_display_contract_tests navi33_compute_contract_tests
@@ -113,6 +118,7 @@ add_test(NAME navi33_linux_resource_parser_tests COMMAND navi33_linux_resource_p
 add_test(NAME navi33_target_profile_tests COMMAND navi33_target_profile_tests)
 add_test(NAME navi33_pci_identity_tests COMMAND navi33_pci_identity_tests)
 add_test(NAME navi33_psp_mailbox_tests COMMAND navi33_psp_mailbox_tests)
+add_test(NAME navi33_psp_load_tests COMMAND navi33_psp_load_tests)
 add_test(NAME navi33_client_contracts_tests COMMAND navi33_client_contracts_tests)
 add_test(NAME navi33_ipdiscovery_capture_tests
     COMMAND navi33_ipdiscovery_tests
@@ -141,6 +147,8 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/../navi33-bringup/tests/test_bringup_safety.py)
     add_test(NAME navi33_psp_survey_safety
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/../navi33-bringup/tests/test_psp_survey_safety.py)
+    add_test(NAME navi33_psp_load_safety
+        COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/../navi33-bringup/tests/test_psp_load_safety.py)
     add_test(NAME navi33_accelerator_safety
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/../navi33-bringup/tests/test_accelerator_safety.py)
 endif()

@@ -33,6 +33,8 @@ public:
 private:
 	bool optInEnabled();
 	bool pspStageEnabled();
+	bool pspLoadStageEnabled();
+	bool pspChainStageEnabled();
 	bool identityMatchesGpu(IOPCIDevice *pci);
 	bool identityMatchesEvidenceBoard(IOPCIDevice *pci);
 	void publishPreflightState();
