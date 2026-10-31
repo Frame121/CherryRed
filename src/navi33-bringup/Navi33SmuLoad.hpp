@@ -29,31 +29,13 @@ namespace cobalt64::navi33::psp {
 inline constexpr uint32_t kGfxFwTypeSmu = 18u;  // GFX_FW_TYPE_SMU
 inline constexpr uint32_t kCmdLoadIpFw = 0x06u; // GFX_CMD_ID_LOAD_IP_FW
 
-// MP1 mailbox dwords, relative to the MP1 base (smu_v13_0.c).
-inline constexpr uint32_t kMp1C2pmsg66Dword = 0x282;  // SMU message
-inline constexpr uint32_t kMp1C2pmsg82Dword = 0x292;  // SMU argument / result
-inline constexpr uint32_t kMp1C2pmsg90Dword = 0x29a;  // SMU response
+// The MP1 mailbox dwords (kMp1C2pmsg66Dword/82Dword/90Dword) and the SMU
+// response decode (smuResponded/smuResponseStatus/smuResponseOk) live in
+// Navi33PspMailbox.hpp — one shared definition for every stage.
 
 inline constexpr uint32_t kPpsmcMsgTestMessage = 0x1u;
 inline constexpr uint32_t kPpsmcMsgGetSmuVersion = 0x2u;
 inline constexpr uint32_t kPpsmcMsgGetDriverIfVersion = 0x3u;
-
-// PPSMC_Result_* (smu_v13_0.h): 0 = still busy, 1 = OK, 0xFF = refused.
-inline constexpr bool smuResponseOk(uint32_t response) noexcept {
-    return (response & 0xFFFFu) == 1u;
-}
-inline constexpr bool smuResponseRefused(uint32_t response) noexcept {
-    return (response & 0xFFFFu) == 0xFFu;
-}
-inline const char *smuResponseName(uint32_t response) noexcept {
-    if (response == 0)
-        return "busy";
-    if (smuResponseOk(response))
-        return "ok";
-    if (smuResponseRefused(response))
-        return "refused";
-    return "nonzero";
-}
 
 struct SmuUcode {
     uint32_t version = 0;     // ucode_version

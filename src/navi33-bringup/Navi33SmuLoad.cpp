@@ -36,6 +36,9 @@ using cobalt64::navi33::psp::kFenceBufVramOffset;
 using cobalt64::navi33::psp::kGfxFwTypeSmu;
 using cobalt64::navi33::psp::kMp0BaseDwords;
 using cobalt64::navi33::psp::kMp1BaseDwords;
+using cobalt64::navi33::psp::kMp1C2pmsg66Dword;
+using cobalt64::navi33::psp::kMp1C2pmsg82Dword;
+using cobalt64::navi33::psp::kMp1C2pmsg90Dword;
 using cobalt64::navi33::psp::kStagingVramOffset;
 
 namespace {
