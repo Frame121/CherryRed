@@ -150,6 +150,10 @@ inline IntegrationReadiness readinessFromBringupEvidence(
 // stale handle can never address a recycled allocation.
 class ClientBudget {
 public:
+    // Default-constructed = no policy = every allocation rejected
+    // (fail-closed). Callers assign a real policy before use.
+    ClientBudget() noexcept = default;
+
     explicit ClientBudget(const ClientPolicy &policy) noexcept
         : policy_(policy) {}
 
