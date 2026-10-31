@@ -16,6 +16,12 @@
 
 namespace cobalt64::navi33::psp {
 
+// Byte offset of an MP1 mailbox register (dword units from the MP1 base).
+inline uint64_t mp1ByteOffset(uint32_t dword)
+{
+    return (static_cast<uint64_t>(kMp1BaseDwords) + dword) * 4ull;
+}
+
 // One SMU 13 message exchange over the MP1 mailbox (smu_v13_0_send_msg +
 // _wait_for_response), for the post-ring stages (the SMU stage has its own
 // copy from before this header existed). Every wait is bounded.
