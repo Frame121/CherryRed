@@ -197,7 +197,15 @@ uint32_t Navi33Bringup::pspTmrMode()
 	if (!readChosenBootArgs(args))
 		return 1;
 	const char *key = "navi33psp_tmr=";
-	const char *p = strstr(args, key);
+	// libkern's string.h has no strstr; scan with strncmp instead.
+	const size_t keyLen = strlen(key);
+	const char *p = nullptr;
+	for (const char *q = args; *q != '\0'; ++q) {
+		if (strncmp(q, key, keyLen) == 0) {
+			p = q;
+			break;
+		}
+	}
 	if (!p)
 		return 1;
 	uint32_t v = 0;
