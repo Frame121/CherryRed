@@ -1,5 +1,40 @@
 # Recovery Checkpoint
 
+- **CHECKPOINT: 2026-10-31 (session 4) — METAL-LAYER SKELETON WRITTEN AND
+  INSTALLED: CLIENT CONTRACTS (C4) + SELF-GATING ACCELERATOR (C6 DIRECTION).**
+  Per the operator's call to build the Metal layer ahead of the hardware
+  stages, the parts of C4/C6 that do not depend on hardware were implemented
+  as pure host-tested contracts plus a fail-closed kernel service, all in the
+  bring-up kext:
+  - `Navi33ClientContracts.hpp`: the versioned user-client ABI surface
+    (policy-driven buffer/alignment/budget/handle limits — synthetic in
+    tests until C2 derives real values), a fixed-capacity generation-tagged
+    handle table (stale handles cannot address recycled slots), and the
+    compute readiness gate, which deliberately requires only PCI transport +
+    firmware + memory + queue submission (headless compute; display,
+    IOAccelerator and Metal are C5/C6 milestones, not prerequisites).
+  - `Navi33Accelerator` (second class/personality in the same kext): attaches
+    to the Navi33Bringup node, evaluates the gate from published evidence
+    properties, publishes exactly why Metal dispatch is unavailable, and
+    performs zero hardware access in every state (source-level safety test
+    enforces this). Its evidence property names —
+    `Navi33Bringup,FirmwareVerified` / `MemoryVerified` / `QueueVerified` —
+    are the contract Stages 5.3–5.5 must publish for the gate to ever open.
+  - `Navi33IntegrationContracts.hpp` switched to `<stdint.h>` (freestanding-
+    safe for the -nostdinc kernel TU); host-only users add `<cstdint>`.
+  Host verification: client-contract unit tests + accelerator safety test +
+  CTest **25/25** (Release and Debug, MSVC). CI green; the kext with both
+  personalities (`Navi33Bringup`, `Navi33Accelerator`) was published to
+  `kext-builds` and installed to `E:\EFI\OC\Kexts\Navi33Bringup.kext`
+  (previous kext preserved as
+  `EFI_BACKUP_KEXT_BEFORE_PSPSTAGE_20261031/Kexts/Navi33Bringup.psp-stage.kext`).
+  **Honest boundary: Metal dispatch is still unavailable (0 devices) — the
+  gate is closed at the firmware layer by design until Stage 5.3 runs on the
+  card. On the next macOS boot the accelerator node will appear with
+  `State=blocked`, `BlockedReason=gate-closed-firmware` — that is the
+  correct, verified behavior.** The PSP mailbox readback (same reboot) is
+  what feeds Stage 5.3.
+
 - **CHECKPOINT: 2026-10-31 (session 3) — PSP-STAGE KEXT BUILT ON CI AND
   INSTALLED INTO THE LIVE OPENCORE EFI; ONE REBOOT RUNS STAGE 3 + PSP SURVEY
   TOGETHER.** The CI pipeline (`.github/workflows/build-kext.yml`) now builds
