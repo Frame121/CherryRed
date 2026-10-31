@@ -3,10 +3,14 @@ name: build-kext
 # Builds Navi33Bringup.kext (RX 7600 bring-up scaffold) on a macOS runner so a
 # Windows-side session can iterate without a booted macOS host. The firmware
 # blobs come from the pinned linux-firmware commit and are hash-verified
-# against the recorded FIRMWARE-PROVENANCE.md pins before the build. The kext
-# artifact uploads before the extra host suites, so a research-core failure
-# never blocks the kext delivery.
+# against the recorded FIRMWARE-PROVENANCE.md pins before the build. The built
+# kext is published to the "kext-builds" branch (kext-latest/) so it can be
+# pulled without authentication; the host CTest suites run after it and must
+# not block the delivery.
 on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: write
 
 jobs:
   kext:
@@ -57,19 +61,27 @@ jobs:
           set -o pipefail
           make -C src/navi33-bringup MKSDK="$GITHUB_WORKSPACE/MacKernelSDK" all 2>&1 | tee kext-build.log
 
+      - name: Publish the kext to the kext-builds branch
+        if: success()
+        run: |
+          set -e
+          git config user.name "kext-build-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B kext-builds "$GITHUB_SHA"
+          git rm -rq --cached . 2>/dev/null || true
+          rm -rf kext-latest
+          mkdir -p kext-latest
+          ditto -c -k --keepParent \
+            src/navi33-bringup/build/Navi33Bringup.kext kext-latest/Navi33Bringup.kext.zip
+          git add kext-latest
+          git commit -m "CI kext build from ${GITHUB_SHA}"
+          git push origin kext-builds
+
       - uses: actions/upload-artifact@v4
         with:
           name: Navi33Bringup-kext
           path: src/navi33-bringup/build/Navi33Bringup.kext
           if-no-files-found: error
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kext-build-log
-          path: kext-build.log
-          if-no-files-found: ignore
 
       - name: CTest host suites (portable research core)
         run: |
@@ -85,8 +97,13 @@ jobs:
         run: |
           for f in kext-build.log host-ctest.log; do
             if [ -f "$f" ]; then
-              tail -40 "$f" | while IFS= read -r line; do
-                [ -n "$line" ] && echo "::error title=$f::$line"
+              grep -E "error|Error|FAILED|Failed|undefined" "$f" | head -8 | while IFS= read -r line; do
+                echo "::error title=$f::$line"
               done
+              if ! grep -qE "error|Error|FAILED|Failed|undefined" "$f"; then
+                tail -8 "$f" | while IFS= read -r line; do
+                  [ -n "$line" ] && echo "::error title=$f-tail::$line"
+                done
+              fi
             fi
           done
