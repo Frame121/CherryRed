@@ -1,2 +1,0 @@
-#!/bin/bash
-D=${FAKE_DIR:?}; echo "sleep $*" >>"$D/sleeps.log"
