@@ -2204,6 +2204,7 @@ void RedNaviProbe::sdmaTest() {
             uint32_t mesClean = 0;    // rednavi_mes_clean=1: no hand-programmed queue at all, only the MEC running and the doorbells mapped; the MES maps the queue
             PE_parse_boot_argn("rednavi_mes_clean", &mesClean, sizeof(mesClean));
             { uint32_t dm = 0; gMesDmDump = PE_parse_boot_argn("rednavi_mes_dm", &dm, sizeof(dm)) && dm == 1; }
+            { uint32_t dx = 0; gMesDbgExt = PE_parse_boot_argn("rednavi_mes_dbgext", &dx, sizeof(dx)) && dx == 1; }
             if (mesClean == 1 || mesClean == 2) {
                 memset(&cr, 0, sizeof(cr));
                 rn_mec_enable(&gpu);
@@ -2308,13 +2309,14 @@ void RedNaviProbe::sdmaTest() {
                                  IOLog("RedNavi: MES step %u\n", step);
                                  IOSleep(100);
                              }, this, &mr);
-                const char *mn[27] = {"step", "cntl", "p0_pc", "p0_pc10", "p1_pc", "p1_pc10", "kiq_active", "kiq_doorbell_ctl", "kiq_rptr", "sched_active",
-                                      "ring_fence", "api_status", "hw_res_ok", "add_ok", "q_active", "q_doorbell_ctl", "fault_status", "sched_version", "kiq_version", "sched_rptr", "sched_wptr", "mepc", "mcause", "ring_fence_late", "p0_pc_end", "q_pipe", "q_queue"};
-                uint32_t mv[27] = {mr.step, mr.cntl, mr.p0_pc, mr.p0_pc10, mr.p1_pc, mr.p1_pc10, mr.kiq_active, mr.kiq_doorbell_ctl, mr.kiq_rptr,
+                const char *mn[29] = {"step", "cntl", "p0_pc", "p0_pc10", "p1_pc", "p1_pc10", "kiq_active", "kiq_doorbell_ctl", "kiq_rptr", "sched_active",
+                                      "ring_fence", "api_status", "hw_res_ok", "add_ok", "q_active", "q_doorbell_ctl", "fault_status", "sched_version", "kiq_version", "sched_rptr", "sched_wptr", "mepc", "mcause", "ring_fence_late", "p0_pc_end", "q_pipe", "q_queue", "dbg_ok", "dbg_status"};
+                uint32_t mv[29] = {mr.step, mr.cntl, mr.p0_pc, mr.p0_pc10, mr.p1_pc, mr.p1_pc10, mr.kiq_active, mr.kiq_doorbell_ctl, mr.kiq_rptr,
                                    mr.sched_active, mr.ring_fence, mr.api_status, static_cast<uint32_t>(mr.hw_res_ok), static_cast<uint32_t>(mr.add_ok),
                                    mr.q_active, mr.q_doorbell_ctl, mr.fault_status,
-                                   mr.sched_version, mr.kiq_version, mr.sched_rptr, mr.sched_wptr, mr.mepc, mr.mcause, mr.ring_fence_late, mr.p0_pc_end, mr.q_pipe, mr.q_queue};
-                rnPublish(this, "mes-start", mn, mv, 27);
+                                   mr.sched_version, mr.kiq_version, mr.sched_rptr, mr.sched_wptr, mr.mepc, mr.mcause, mr.ring_fence_late, mr.p0_pc_end, mr.q_pipe, mr.q_queue,
+                                   static_cast<uint32_t>(mr.dbg_ok), mr.dbg_status};
+                rnPublish(this, "mes-start", mn, mv, 29);
                 {
                     char ln[32][12];
                     const char *lp[32];
@@ -2330,6 +2332,14 @@ void RedNaviProbe::sdmaTest() {
                         for (int half = 0; half < 2; half++) {
                             for (int i = 0; i < 256; i++) { snprintf(dmn[half * 256 + i], 8, "%c%03x", half ? 'h' : 'l', i * 4); dp[i] = dmn[half * 256 + i]; }
                             rnPublish(this, half ? "mes-dm-hi" : "mes-dm-lo", dp, gMesDm[half], 256);
+                        }
+                        // The MES firmware's own log (rednavi_mes_dbgext=1), same key scheme: decode mes-dbg-lo/hi with
+                        // tools/decode_mes_dbgext.py. Reuses dp/dmn: the kernel stack of this frame is nearly full.
+                        if (gMesDbgExt) {
+                            for (int half = 0; half < 2; half++) {
+                                for (int i = 0; i < 256; i++) { snprintf(dmn[half * 256 + i], 8, "%c%03x", half ? 'h' : 'l', i * 4); dp[i] = dmn[half * 256 + i]; }
+                                rnPublish(this, half ? "mes-dbg-hi" : "mes-dbg-lo", dp, gMesDbg[half], 256);
+                            }
                         }
                     }
                     {

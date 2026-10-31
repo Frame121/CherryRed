@@ -1181,6 +1181,7 @@ void rn_mes_state(struct rn_device *adev, u32 out[15]) {
 // pipe 0, firmware mes_2). Both are halted after the PSP has loaded their images; the steps below follow mes_v11_0_kiq_hw_init and
 // mes_v11_0_hw_init, with a progress callback before each so that the last one that ran is known if the machine stops.
 static const u32 kMesRingBytes = 4096;
+static const u32 kMesDbgBytes = 0x4000;   // mes_dbgext buffer, at base + 0x50000
 static const u32 kMesDbStart = 1024;      // mes->db_start_dw_offset: the page after the kernel doorbells (amdgpu_doorbell_create_kernel_doorbells)
 static const u32 kMesKiqDoorbell = 0x0C << 1, kMesSchedDoorbell = 0x0B << 1;      // AMDGPU_NAVI10_DOORBELL_MES_RING1/0, in dwords
 
@@ -1277,6 +1278,8 @@ void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]) {
 
 bool gMesDmDump = false;
 u32 gMesDm[2][256];
+bool gMesDbgExt = false;
+u32 gMesDbg[2][256];
 
 void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_gmc *gmc, const u32 start[4], u32 maxStep, void (*progress)(void *, u32), void *ctx,
                   struct rn_mes_result *res) {
@@ -1291,7 +1294,8 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     res->rlc_sched = RREG32_SOC15(RN_GC, 0, regRLC_CP_SCHEDULERS);              // Linux: 0x000030e8
     if (!gDoorbellBase) return;                                // the rings are driven by doorbell writes
     // VRAM map (all below the GART page table at 0x0C100000): MES KIQ ring at base, MES scheduler ring at base + 0x10000, shared words at +0x20000,
-    // the legacy compute queue at +0x30000. In each: ring, rptr at +0x1000, wptr at +0x1008, MQD at +0x2000, EOP at +0x4000.
+    // the legacy compute queue at +0x30000. In each: ring, rptr at +0x1000, wptr at +0x1008, MQD at +0x2000, EOP at +0x4000. The firmware log
+    // (mes_dbgext, opt-in) is a 16 KB area at +0x50000, the last thing before the page table.
     const u64 kiqOff = base, schedOff = base + 0x10000, sharedOff = base + 0x20000, qOff = base + 0x30000;
     const u64 schCtxOff = sharedOff, queryFenceOff = sharedOff + 0x10, ringFenceOff = sharedOff + 0x20, apiStatusOff = sharedOff + 0x100;
     const u32 qPipe = 0, qQueue = 0;   // a kernel-owned queue (outside the MES hqd mask 0xc), as Linux maps its first compute ring
@@ -1410,6 +1414,32 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     rn_vram_wr32(adev, schCtxOff, 0); rn_vram_wr32(adev, schCtxOff + 4, 0);
     rn_vram_wr32(adev, queryFenceOff, 0); rn_vram_wr32(adev, queryFenceOff + 4, 0);
 
+    // 3b: arm the MES firmware's own log, before the queue frames, so their records are in it too. The v11 API has a MISC opcode that hands
+    // the scheduler a circular buffer and the firmware's debug extension writes text records into it, which is the only way to see what it
+    // does, or waits for, inside a frame. Linux arms the same thing at the end of mes_v11_0_hw_init (amdgpu_mes_dbgext_start, module
+    // parameter amdgpu_mes_dbgext_buffer_size) and expects nothing else from the driver: the buffer size goes in the first dword as that
+    // function seeds it, and options bit 0 clear means "write the buffer only, no interrupt". The header the firmware leaves behind is
+    // dumped with the text, so the layout is read out of the hardware rather than assumed.
+    const u64 dbgOff = base + 0x50000;
+    auto dumpMesDbg = [&]() {
+        if (!gMesDbgExt) return;
+        for (u32 i = 0; i < 512; i++) gMesDbg[i >> 8][i & 0xff] = rn_vram_rd32(adev, dbgOff + i * 4);
+    };
+    if (gMesDbgExt) {
+        for (u32 o = 0; o < kMesDbgBytes; o += 4) rn_vram_wr32(adev, dbgOff + o, 0);
+        rn_vram_wr32(adev, dbgOff, kMesDbgBytes);
+        union MESAPI__MISC m;
+        memset(&m, 0, sizeof(m));
+        m.header.type = MES_API_TYPE_SCHEDULER;
+        m.header.opcode = MES_SCH_API_MISC;
+        m.header.dwsize = API_FRAME_SIZE_IN_DWORDS;
+        m.opcode = MESAPI_MISC__SETUP_MES_DBGEXT;
+        m.dbgext_init_data.dbg_ext_mc_addr = vaBase + dbgOff;
+        m.dbgext_init_data.u64_all = 0;
+        res->dbg_ok = sendFrame(&m, offsetof(union MESAPI__MISC, api_status) / 4);
+        res->dbg_status = res->api_status;
+    }
+
     // step 4: SET_HW_RESOURCES
     if (progress) progress(ctx, 4);
     {
@@ -1459,6 +1489,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     }
     mesPcSample(adev, 0, &res->p0_pc, &res->p0_pc10);
     res->step = 4;
+    dumpMesDbg();                                          // the records of the setup, even when the run stops at this step
     if (maxStep < 5 || !res->hw_res_ok) return;
 
     // step 5: map a legacy kernel compute queue (ME 1) through the scheduler (mes_v11_0_map_legacy_queue)
@@ -1607,6 +1638,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     }
     grbmSelect(adev, 0, 0, 0, 0);
     }
+    dumpMesDbg();   // again after the queue frames: the records the ADD_QUEUE path wrote while it was stuck
     res->step = 5;
     if ((res->q_active & 1u) || res->add_ok) { gMapped = true; gMappedWptr = 0; gMappedPipe = foundPipe; gMappedQueue = foundQueue; }   // later rn_compute_submit_ib calls use this queue
 }

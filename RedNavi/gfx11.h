@@ -164,6 +164,8 @@ void rn_mes_state(struct rn_device *adev, u32 out[15]);
 void rn_gfx_constants_init(struct rn_device *adev);   // gfx_v11_0_hw_init steps between the memory hub and the CP resume (golden TCP_CNTL, read timeout, SH_MEM per VMID, doorbell ranges)
 extern u32 gMesDm[2][256];   // MES scheduler data memory (CP_MES_DM_INDEX_*): the first and the last 1 KB, read after the last frame; not in rn_mes_result, the kernel stack is 16 KB
 extern bool gMesDmDump;   // rednavi_mes_dm=1: read the MES data memory after the last frame (hung the machine once)
+extern u32 gMesDbg[2][256];   // MES firmware log (mes_dbgext): the first 2 KB of the buffer, dwords 0..3 are the header the firmware leaves
+extern bool gMesDbgExt;   // rednavi_mes_dbgext=1: hand the scheduler a log buffer before the queue frames and dump what it wrote
 void rn_mec_enable(struct rn_device *adev);   // MEC pipes out of reset and running, no queue
 void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]);   // CP_MES_DOORBELL_CONTROL1..6 per MES pipe
 void rn_scan_hqds(struct rn_device *adev, u32 out[33]);   // the active ME 1 queues: 8 x {pipe*8+queue, doorbell control, rptr, wptr}, count
@@ -176,6 +178,7 @@ struct rn_mes_result {
     u32 ring_fence, api_status;                    // QUERY_SCHEDULER_STATUS fence and the last frame's completion word
     int hw_res_ok, add_ok;
     u32 hw_res1_status;
+    int dbg_ok; u32 dbg_status;                    // SETUP_MES_DBGEXT frame and its completion word (opt-in, rednavi_mes_dbgext=1)
     u32 cp_me_cntl, mec_cntl, rlc_sched;           // CP_ME_CNTL, CP_MEC_RS64_CNTL, RLC_CP_SCHEDULERS before the MES start
     u32 bootload, rlc_srm, cp_stat0;               // RLC_RLCS_BOOTLOAD_STATUS, RLC_SRM_CNTL and CP_STAT before the MES start
     u32 fw_ver0, fw_ver1;                         // CP_MES_GP3_LO of each pipe right after the start: the version of the image that runs
@@ -187,7 +190,7 @@ struct rn_mes_result {
     u32 sched_version, kiq_version, sched_rptr, sched_wptr, mepc, mcause, ring_fence_late, p0_pc_end;   // diagnostics after the last stage
 };
 // Bring up the MES in stages (docs/COMPAT.md): start[] = {pipe0 start lo, hi, pipe1 start lo, hi} from the firmware headers. Needs the doorbell
-// aperture mapped (rn_doorbell_aperture_enable and rn_set_doorbell). base is a VRAM offset with 0x40000 bytes free.
+// aperture mapped (rn_doorbell_aperture_enable and rn_set_doorbell). base is a VRAM offset with 0x40000 bytes free (0x54000 when gMesDbgExt is set).
 void rn_mes_start(struct rn_device *adev, u64 va_base, u64 base, const struct rn_gmc *gmc, const u32 start[4], u32 max_step, void (*progress)(void *ctx, u32 step),
                   void *ctx, struct rn_mes_result *res);   // read-only: MES control and the state of its two pipes
 void rn_gc_safe_mode(struct rn_device *adev, int enter);
