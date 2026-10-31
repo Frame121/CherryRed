@@ -161,6 +161,7 @@ void rn_compute_diag(struct rn_device *adev, u32 out[11]);   // out[8..10]: SDMA
 // MEC doorbell range (lower, upper), NBIO DOORBELL_APER_EN, HQD PQ base, PQ control, MQD base.
 void rn_compute_diag2(struct rn_device *adev, u32 out[8]);
 void rn_mes_state(struct rn_device *adev, u32 out[15]);
+void rn_gfx_constants_init(struct rn_device *adev);   // gfx_v11_0_hw_init steps between the memory hub and the CP resume (golden TCP_CNTL, read timeout, SH_MEM per VMID, doorbell ranges)
 void rn_mec_enable(struct rn_device *adev);   // MEC pipes out of reset and running, no queue
 void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]);   // CP_MES_DOORBELL_CONTROL1..6 per MES pipe
 void rn_scan_hqds(struct rn_device *adev, u32 out[33]);   // the active ME 1 queues: 8 x {pipe*8+queue, doorbell control, rptr, wptr}, count
@@ -173,6 +174,7 @@ struct rn_mes_result {
     u32 ring_fence, api_status;                    // QUERY_SCHEDULER_STATUS fence and the last frame's completion word
     int hw_res_ok, add_ok;
     u32 hw_res1_status;
+    u32 bootload, rlc_srm, cp_stat0;               // RLC_RLCS_BOOTLOAD_STATUS, RLC_SRM_CNTL and CP_STAT before the MES start
     u32 fw_ver0, fw_ver1;                         // CP_MES_GP3_LO of each pipe right after the start: the version of the image that runs
     u32 mes_db[6];                                // CP_MES_DOORBELL_CONTROL1..6 after the queue was added
     int sched_cfg_ok;

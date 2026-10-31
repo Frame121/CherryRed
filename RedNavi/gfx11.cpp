@@ -476,6 +476,69 @@ static void computeSubmit(struct rn_device *adev, u64 wptrShadowOff, u32 wptr) {
     WREG32_SOC15(RN_GC, 0, regCP_HQD_PQ_WPTR_HI, 0);
 }
 
+// What gfx_v11_0_hw_init does between the memory hub and the CP resume and RedNavi had skipped (gfx_v11_0_init_golden_registers, gfx_v11_0_constants_init
+// with gfx_v11_0_init_compute_vmid and gfx_v11_0_init_gds_vmid, gfx_v11_0_cp_set_doorbell_range, gfx_v11_0_enable_gui_idle_interrupt(false)).
+// Values for GC 11.0.3 and the Navi 10 style doorbell map; DEFAULT_SH_MEM_CONFIG = ADDRESS_MODE_64 (0) | ALIGNMENT_MODE_UNALIGNED (3 << 2) | prefetch (3 << 14).
+void rn_gfx_constants_init(struct rn_device *adev) {
+    u32 tmp;
+    // gfx_v11_0_constants_init: the register read timeout, so that a read of a block that does not answer ends instead of hanging whoever polls it
+    tmp = RREG32_SOC15(RN_GC, 0, regGRBM_CNTL);
+    tmp = REG_SET_FIELD(tmp, GRBM_CNTL, READ_TIMEOUT, 0xff);
+    WREG32_SOC15(RN_GC, 0, regGRBM_CNTL, tmp);
+    // golden_settings_gc_11_0: TCP_CNTL bit 29
+    tmp = RREG32_SOC15(RN_GC, 0, regTCP_CNTL);
+    tmp = (tmp & ~0x20000000u) | 0x20000000u;
+    WREG32_SOC15(RN_GC, 0, regTCP_CNTL, tmp);
+    tmp = RREG32_SOC15(RN_GC, 0, regDB_RING_CONTROL);
+    tmp = REG_SET_FIELD(tmp, DB_RING_CONTROL, COUNTER_CONTROL, 0);           // two gfx pipes
+    WREG32_SOC15(RN_GC, 0, regDB_RING_CONTROL, tmp);
+    const u32 shMemConfig = (0u << 0) | (3u << 2) | (3u << 14);
+    for (u32 vmid = 0; vmid < 16; vmid++) {                                  // for_each_vmid_and_zero
+        grbmSelect(adev, 0, 0, vmid, 0);
+        WREG32_SOC15(RN_GC, 0, regSH_MEM_CONFIG, shMemConfig);
+        if (vmid != 0) {
+            tmp = REG_SET_FIELD(0, SH_MEM_BASES, PRIVATE_BASE, 0x1000u);     // private_aperture_start >> 48
+            tmp = REG_SET_FIELD(tmp, SH_MEM_BASES, SHARED_BASE, 0x2000u);    // shared_aperture_start >> 48
+            WREG32_SOC15(RN_GC, 0, regSH_MEM_BASES, tmp);
+        }
+    }
+    // gfx_v11_0_init_compute_vmid: the KFD VMIDs (8 to 15) with LDS at 0x1 and scratch at 0x2 and the trap on
+    for (u32 vmid = 8; vmid < 16; vmid++) {
+        grbmSelect(adev, 0, 0, vmid, 0);
+        WREG32_SOC15(RN_GC, 0, regSH_MEM_CONFIG, shMemConfig);
+        WREG32_SOC15(RN_GC, 0, regSH_MEM_BASES, (1u << 16) | 2u);
+        tmp = RREG32_SOC15(RN_GC, 0, regSPI_GDBG_PER_VMID_CNTL);
+        tmp = REG_SET_FIELD(tmp, SPI_GDBG_PER_VMID_CNTL, TRAP_EN, 1);
+        WREG32_SOC15(RN_GC, 0, regSPI_GDBG_PER_VMID_CNTL, tmp);
+    }
+    grbmSelect(adev, 0, 0, 0, 0);
+    for (u32 vmid = 8; vmid < 16; vmid++) {                                  // no GDS, GWS or OA for them
+        rn_wreg32(adev, adev->reg_offset[RN_GC_HWIP][0][regGDS_VMID0_BASE_BASE_IDX] + regGDS_VMID0_BASE + 2 * vmid, 0);
+        rn_wreg32(adev, adev->reg_offset[RN_GC_HWIP][0][regGDS_VMID0_SIZE_BASE_IDX] + regGDS_VMID0_SIZE + 2 * vmid, 0);
+        rn_wreg32(adev, adev->reg_offset[RN_GC_HWIP][0][regGDS_GWS_VMID0_BASE_IDX] + regGDS_GWS_VMID0 + vmid, 0);
+        rn_wreg32(adev, adev->reg_offset[RN_GC_HWIP][0][regGDS_OA_VMID0_BASE_IDX] + regGDS_OA_VMID0 + vmid, 0);
+    }
+    // gfx_v11_0_cp_set_doorbell_range: AMDGPU_NAVI10_DOORBELL_GFX_RING0 0x8b and GFX_USERQUEUE_END 0xff for the graphics queues, KIQ 0 to USERQUEUE_END 0x8a for compute
+    WREG32_SOC15(RN_GC, 0, regCP_RB_DOORBELL_RANGE_LOWER, (0x8bu * 2) << 2);
+    WREG32_SOC15(RN_GC, 0, regCP_RB_DOORBELL_RANGE_UPPER, (0xffu * 2) << 2);
+    WREG32_SOC15(RN_GC, 0, regCP_MEC_DOORBELL_RANGE_LOWER, 0);
+    WREG32_SOC15(RN_GC, 0, regCP_MEC_DOORBELL_RANGE_UPPER, (0x8au * 2) << 2);
+    // gfx_v11_0_rlc_resume, PSP load type: the RLC save/restore machine on (gfx_v11_0_rlc_enable_srm). The clear state buffer (gfx_v11_0_init_csb) is not done.
+    tmp = RREG32_SOC15(RN_GC, 0, regRLC_SRM_CNTL);
+    tmp |= RLC_SRM_CNTL__AUTO_INCR_ADDR_MASK;
+    tmp |= RLC_SRM_CNTL__SRM_ENABLE_MASK;
+    WREG32_SOC15(RN_GC, 0, regRLC_SRM_CNTL, tmp);
+    // gfx_v11_0_enable_gui_idle_interrupt(false) on the two graphics pipes
+    for (int ring = 0; ring < 2; ring++) {
+        tmp = ring == 0 ? RREG32_SOC15(RN_GC, 0, regCP_INT_CNTL_RING0) : RREG32_SOC15(RN_GC, 0, regCP_INT_CNTL_RING1);
+        tmp = ring == 0 ? REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, CNTX_BUSY_INT_ENABLE, 0) : REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, CNTX_BUSY_INT_ENABLE, 0);
+        tmp = ring == 0 ? REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, CNTX_EMPTY_INT_ENABLE, 0) : REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, CNTX_EMPTY_INT_ENABLE, 0);
+        tmp = ring == 0 ? REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, CMP_BUSY_INT_ENABLE, 0) : REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, CMP_BUSY_INT_ENABLE, 0);
+        tmp = ring == 0 ? REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, GFX_IDLE_INT_ENABLE, 0) : REG_SET_FIELD(tmp, CP_INT_CNTL_RING0, GFX_IDLE_INT_ENABLE, 0);
+        if (ring == 0) WREG32_SOC15(RN_GC, 0, regCP_INT_CNTL_RING0, tmp); else WREG32_SOC15(RN_GC, 0, regCP_INT_CNTL_RING1, tmp);
+    }
+}
+
 // gfx_v11_0_cp_compute_enable(true): the four MEC pipes out of reset and active, ucode cache valid, MEC running.
 void rn_mec_enable(struct rn_device *adev) {
     u32 tmp;
@@ -1209,6 +1272,9 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     static_assert(sizeof(union MESAPI_SET_HW_RESOURCES) == 256 && sizeof(union MESAPI__ADD_QUEUE) == 256 &&
                   sizeof(union MESAPI__QUERY_MES_STATUS) == 256, "MES API frames are 64 dwords");
     memset(res, 0, sizeof(*res));
+    res->bootload = RREG32_SOC15(RN_GC, 0, regRLC_RLCS_BOOTLOAD_STATUS);        // gfx_v11_0_wait_for_rlc_autoload_complete wants BOOTLOAD_COMPLETE (bit 31) and CP_STAT 0
+    res->rlc_srm = RREG32_SOC15(RN_GC, 0, regRLC_SRM_CNTL);
+    res->cp_stat0 = RREG32_SOC15(RN_GC, 0, regCP_STAT);
     if (!gDoorbellBase) return;                                // the rings are driven by doorbell writes
     // VRAM map (all below the GART page table at 0x0C100000): MES KIQ ring at base, MES scheduler ring at base + 0x10000, shared words at +0x20000,
     // the legacy compute queue at +0x30000. In each: ring, rptr at +0x1000, wptr at +0x1008, MQD at +0x2000, EOP at +0x4000.

@@ -2107,6 +2107,9 @@ void RedNaviProbe::sdmaTest() {
     }
 
 #ifdef RN_HAVE_GC_FW
+    // Opt-in (rednavi_gc_init=1, after the memory hub is on): the gfx_v11_0_hw_init steps RedNavi had left out, in Linux's order (rn_gfx_constants_init).
+    uint32_t gcInit = 0;
+    if (PE_parse_boot_argn("rednavi_gc_init", &gcInit, sizeof(gcInit)) && gcInit == 1) rn_gfx_constants_init(&gpu);
     // Opt-in (rednavi_gfx_test=1, on top of rednavi_sdma_test=1, which turns the memory hub on): a first command on the graphics
     // ring. Written from the Linux sources and not yet run on hardware.
     uint32_t gfx = 0;
@@ -2278,9 +2281,9 @@ void RedNaviProbe::sdmaTest() {
                     {
                         const char *dn[6] = {"c1", "c2", "c3", "c4", "c5", "c6"};
                         rnPublish(this, "mes-db", dn, mr.mes_db, 6);
-                        const char *vn[2] = {"sched", "kiq"};
-                        uint32_t vv[2] = {mr.fw_ver0, mr.fw_ver1};
-                        rnPublish(this, "mes-fw-version", vn, vv, 2);
+                        const char *vn[5] = {"sched", "kiq", "bootload", "rlc_srm", "cp_stat"};
+                        uint32_t vv[5] = {mr.fw_ver0, mr.fw_ver1, mr.bootload, mr.rlc_srm, mr.cp_stat0};
+                        rnPublish(this, "mes-fw-version", vn, vv, 5);
                     }
                 }
                 if ((mr.q_active & 1u) || mr.add_ok) computeRingOff = 0x0C0A0000 + 0x30000;   // the queue the MES mapped
