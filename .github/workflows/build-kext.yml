@@ -74,7 +74,8 @@ jobs:
           ditto -c -k --keepParent \
             src/navi33-bringup/build/Navi33Bringup.kext kext-latest/Navi33Bringup.kext.zip
           git add kext-latest
-          git commit -m "CI kext build from ${GITHUB_SHA}"
+          # An unchanged kext stages nothing; that is success, not a failure.
+          git diff --cached --quiet || git commit -m "CI kext build from ${GITHUB_SHA}"
           git push origin kext-builds
 
       - uses: actions/upload-artifact@v4

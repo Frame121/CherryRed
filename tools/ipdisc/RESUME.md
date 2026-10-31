@@ -1,5 +1,27 @@
 # Recovery Checkpoint
 
+- **CHECKPOINT: 2026-10-31 (session 3) — PSP-STAGE KEXT BUILT ON CI AND
+  INSTALLED INTO THE LIVE OPENCORE EFI; ONE REBOOT RUNS STAGE 3 + PSP SURVEY
+  TOGETHER.** The CI pipeline (`.github/workflows/build-kext.yml`) now builds
+  `Navi33Bringup.kext` end-to-end on a macOS runner: pinned linux-firmware
+  fetch + sha256 verification of all 14 blobs, host safety tests, the kext
+  build (the C++ kmod runtime ships in `Library/universal` of the fresh
+  acidanthera MacKernelSDK — the Makefile now accepts either layout), the
+  full research-core CTest suite on Apple clang (which required pinning
+  `cxx_std_17` on the SDK-less `ipdiscovery_bounds_tests` target), and a
+  publish step that commits the zip to the `kext-builds` branch
+  (`kext-latest/Navi33Bringup.kext.zip`) so the Windows side can pull it
+  without a token. The CI-built kext (with the `navi33psp=1` mailbox survey
+  compiled in — verified by its log strings) was installed to
+  `E:\EFI\OC\Kexts\Navi33Bringup.kext` (previous kext and config backed up in
+  `E:\EFI_BACKUP_KEXT_BEFORE_PSPSTAGE_20261031\`); the EFI config already
+  carries `navi33bringup=1 navi33psp=1`. **Next action: reboot into macOS
+  once and run
+  `sh ~/Developer/cherryred-macday-20261030/stage3/stage3_verify_after_reboot.sh`
+  — it proves Stage 3 injection AND captures the PSP/SMU mailbox readback in
+  the same boot.** The mailbox VALUES stay UNVERIFIED until then; no write
+  stage may be started from them. Metal/acceleration remain unimplemented.
+
 - **CHECKPOINT: 2026-10-31 (session 2) — PSP/SMU MAILBOX SURVEY STAGE
   IMPLEMENTED; CI KEXT BUILD WIRED UP.** The next bring-up stage
   (`navi33psp=1`, cumulative with `navi33bringup=1`) is implemented and
