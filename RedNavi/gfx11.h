@@ -163,6 +163,9 @@ void rn_compute_diag2(struct rn_device *adev, u32 out[8]);
 void rn_mes_state(struct rn_device *adev, u32 out[15]);
 void rn_gfx_constants_init(struct rn_device *adev);   // gfx_v11_0_hw_init steps between the memory hub and the CP resume (golden TCP_CNTL, read timeout, SH_MEM per VMID, doorbell ranges)
 extern u32 gMesDm[2][256];   // MES event log windows at +0x900 and +0x1300 (1 KB each), read after the last frame; not in rn_mes_result, the kernel stack is 16 KB
+extern u32 gMesMqd[512];   // the legacy queue's MQD read back after the last frame (rednavi_mes_dm=1)
+extern u64 gMesHostWbVa;            // rednavi_mes_hostwb=1: the legacy queue's rptr/wptr words in host memory (GART address) instead of VRAM
+extern volatile u32 *gMesHostWbMem;
 extern bool gMesDmDump;   // rednavi_mes_dm=1: read the two event log windows after the last frame
 extern u32 gMesDbg[2][256];   // MES firmware log (mes_dbgext): the first 2 KB of the buffer, dwords 0..3 are the header the firmware leaves
 extern bool gMesDbgExt;   // rednavi_mes_dbgext=1 (host buffer, as Linux) or 2 (the VRAM area): hand the scheduler a log buffer after the resource frames and dump what it wrote

@@ -2207,6 +2207,12 @@ void RedNaviProbe::sdmaTest() {
             // rednavi_mes_dbgext=1: the firmware log in host memory, a GART BO as Linux allocates it (its "mc address" is the GART window);
             // =2: the VRAM area at base + 0x50000, the two runs of 2026-10-31 that stayed empty.
             gMesDbgExt = false; gMesDbgHostVa = 0; gMesDbgHostMem = nullptr;
+            gMesHostWbVa = 0; gMesHostWbMem = nullptr;
+            { uint32_t hw = 0;
+              if (PE_parse_boot_argn("rednavi_mes_hostwb", &hw, sizeof(hw)) && hw == 1) {
+                  const int hb = createHostBo(0x1000);
+                  if (hb >= 0) { gMesHostWbVa = bos[hb].gpuVa; gMesHostWbMem = static_cast<volatile uint32_t *>(bos[hb].md->getBytesNoCopy()); }
+              } }
             { uint32_t dx = 0;
               if (PE_parse_boot_argn("rednavi_mes_dbgext", &dx, sizeof(dx)) && (dx == 1 || dx == 2)) {
                   gMesDbgExt = true;
@@ -2342,6 +2348,10 @@ void RedNaviProbe::sdmaTest() {
                         for (int half = 0; half < 2; half++) {
                             for (int i = 0; i < 256; i++) { snprintf(dmn[half * 256 + i], 8, "%c%03x", half ? 'h' : 'l', i * 4); dp[i] = dmn[half * 256 + i]; }
                             rnPublish(this, half ? "mes-evlog-b" : "mes-evlog-a", dp, gMesDm[half], 256);
+                        }
+                        for (int half = 0; half < 2; half++) {
+                            for (int i = 0; i < 256; i++) { snprintf(dmn[half * 256 + i], 8, "q%03x", half * 1024 + i * 4); dp[i] = dmn[half * 256 + i]; }
+                            rnPublish(this, half ? "mes-mqd-b" : "mes-mqd-a", dp, gMesMqd + half * 256, 256);
                         }
                         // The MES firmware's own log (rednavi_mes_dbgext=1), same key scheme: decode mes-dbg-lo/hi with
                         // tools/decode_mes_dbgext.py. Reuses dp/dmn: the kernel stack of this frame is nearly full.

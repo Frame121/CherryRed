@@ -1060,9 +1060,15 @@ void rn_compute_diag2(struct rn_device *adev, u32 out[8]) {
 }
 
 // MQD image for a compute queue (struct v11_compute_mqd, offsets in dwords), as gfx_v11_0_compute_mqd_init fills it.
+u64 gMesHostWbVa = 0;            // rednavi_mes_hostwb=1: GART address of a host page that holds the legacy queue's rptr (+0) and wptr (+8), as Linux's write-back slots do
+volatile u32 *gMesHostWbMem = nullptr;
+static bool gWbHostNow = false;  // set around the one writeComputeMqd call that builds that queue
+
 static void writeComputeMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, u64 mqdOff, u64 eopOff, u32 doorbellDword,
                             bool mesQueue = false) {
     const u64 ringVa = vaBase + ringOff, rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008;
+    const bool hostWb = gWbHostNow && gMesHostWbVa != 0 && gMesHostWbMem != nullptr;
+    const u64 rptrVa = hostWb ? gMesHostWbVa : vaBase + rptrOff, wptrVa = hostWb ? gMesHostWbVa + 8 : vaBase + wptrOff;
     const u64 eopBase = (vaBase + eopOff) >> 8;
     u32 qOrder = 0;
     while ((4u << qOrder) < ringBytes) qOrder++;
@@ -1091,13 +1097,14 @@ static void writeComputeMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u32
     for (u32 o = 0; o < 2048; o += 4) rn_vram_wr32(adev, eopOff + o, 0);
     rn_vram_wr32(adev, rptrOff, 0); rn_vram_wr32(adev, rptrOff + 4, 0);
     rn_vram_wr32(adev, wptrOff, 0); rn_vram_wr32(adev, wptrOff + 4, 0);
+    if (hostWb) for (u32 i = 0; i < 4; i++) gMesHostWbMem[i] = 0;
     struct { u32 dw; u32 v; } mqd[] = {
         {0, 0xC0310800u}, {11, 1}, {23, 0xffffffffu}, {24, 0xffffffffu}, {26, 0xffffffffu}, {27, 0xffffffffu}, {32, 7},
         {165, lower_32_bits(eopBase)}, {166, upper_32_bits(eopBase)}, {167, eopCtl}, {143, doorbellCtl},
         {128, lower_32_bits(vaBase + mqdOff) & 0xfffffffcu}, {129, upper_32_bits(vaBase + mqdOff)}, {162, mqdCtl},
         {136, lower_32_bits(ringVa >> 8)}, {137, upper_32_bits(ringVa >> 8)}, {145, pqCtl},
-        {139, lower_32_bits(vaBase + rptrOff) & 0xfffffffcu}, {140, upper_32_bits(vaBase + rptrOff) & 0xFFFFu},
-        {141, lower_32_bits(vaBase + wptrOff) & 0xfffffffcu}, {142, upper_32_bits(vaBase + wptrOff) & 0xFFFFu},
+        {139, lower_32_bits(rptrVa) & 0xfffffffcu}, {140, upper_32_bits(rptrVa) & 0xFFFFu},
+        {141, lower_32_bits(wptrVa) & 0xfffffffcu}, {142, upper_32_bits(wptrVa) & 0xFFFFu},
         {132, persist}, {149, ibCtl}, {135, quantum}, {130, 1},
     };
     for (u32 i = 0; i < sizeof(mqd) / sizeof(mqd[0]); i++) rn_vram_wr32(adev, mqdOff + mqd[i].dw * 4, mqd[i].v);
@@ -1278,6 +1285,7 @@ void rn_mes_doorbell_regs(struct rn_device *adev, u32 out[12]) {
 
 bool gMesDmDump = false;
 u32 gMesDm[2][256];
+u32 gMesMqd[512];
 bool gMesDbgExt = false;
 u64 gMesDbgHostVa = 0;
 void *gMesDbgHostMem = nullptr;
@@ -1528,7 +1536,9 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         }
     grbmSelect(adev, 0, 0, 0, 0);
     gMappedDoorbell = legDb;
+    gWbHostNow = true;
     writeComputeMqd(adev, vaBase, qOff, 4096, qOff + 0x2000, qOff + 0x4000, legDb);
+    gWbHostNow = false;
     {
         // amdgpu_gfx_mes_enable_kcq: SET_RESOURCES on the KIQ ring with every queue in the mask comes before the legacy queue is mapped
         u32 pk[8];
@@ -1603,7 +1613,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         p.queue_id = qQueue;
         p.doorbell_offset = legDb;
         p.mqd_addr = vaBase + qOff + 0x2000;
-        p.wptr_addr = vaBase + qOff + 0x1008;
+        p.wptr_addr = (gMesHostWbVa != 0 && gMesHostWbMem != nullptr) ? gMesHostWbVa + 8 : vaBase + qOff + 0x1008;
         p.queue_type = MES_QUEUE_TYPE_COMPUTE;
         p.map_legacy_kq = 1;
         rn_gc_safe_mode(adev, 1);
@@ -1662,6 +1672,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     // timeline at 0x1300 and up, 7 dwords each: opcode, start time (64 bit), end time (64 bit), 0, 1). The CP_MES_DM_INDEX registers read 0xffffffff, so this
     // is the way to see what the firmware wrote for our frames.
     if (gMesDmDump) {
+        for (u32 i = 0; i < 512; i++) gMesMqd[i] = rn_vram_rd32(adev, qOff + 0x2000 + i * 4);   // the legacy queue's MQD as the MES saw it, for the diff with Linux's
         for (u32 i = 0; i < 256; i++) {
             gMesDm[0][i] = rn_vram_rd32(adev, logOff + 0x900 + i * 4);
             gMesDm[1][i] = rn_vram_rd32(adev, logOff + 0x1300 + i * 4);
