@@ -1,6 +1,8 @@
 #include "Navi33BuildConfiguration.hpp"
 #include "Navi33IntegrationContracts.hpp"
 
+#include <cstdint>
+
 #include <cstdio>
 using namespace cobalt64::research;
 namespace {

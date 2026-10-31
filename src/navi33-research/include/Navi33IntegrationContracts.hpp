@@ -1,16 +1,16 @@
 #ifndef COBALT64_NAVI33_INTEGRATION_CONTRACTS_HPP
 #define COBALT64_NAVI33_INTEGRATION_CONTRACTS_HPP
 
-#include <cstdint>
+#include <stdint.h> // freestanding-safe: the kext includes this header with -nostdinc
 
 namespace cobalt64::research {
 
-enum class IntegrationLayer : std::uint8_t {
+enum class IntegrationLayer : uint8_t {
     PciTransport, Firmware, Memory, QueueSubmission,
     IoAccelerator, Metal, Display
 };
 
-enum class IntegrationState : std::uint8_t {
+enum class IntegrationState : uint8_t {
     Missing, Prototype, HostModelOnly, ImplementedUnverified, HardwareVerified
 };
 
@@ -24,7 +24,7 @@ struct IntegrationReadiness {
     IntegrationState display = IntegrationState::Missing;
 };
 
-enum class ReadinessError : std::uint8_t {
+enum class ReadinessError : uint8_t {
     None, MissingPciTransport, MissingFirmware, MissingMemory,
     MissingQueueSubmission, MissingIoAccelerator, MissingMetal,
     MissingDisplay, HardwareNotVerified
@@ -41,20 +41,20 @@ ReadinessResult validateFullGraphicsReadiness(
     const IntegrationReadiness& readiness) noexcept;
 
 struct DisplayMode {
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-    std::uint32_t refreshMilliHz = 0;
-    std::uint32_t bitsPerPixel = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t refreshMilliHz = 0;
+    uint32_t bitsPerPixel = 0;
 };
 
-enum class DisplayContractError : std::uint8_t {
+enum class DisplayContractError : uint8_t {
     None, ZeroDimension, DimensionTooLarge, InvalidRefresh,
     UnsupportedPixelFormat, ArithmeticOverflow, InvalidPitch
 };
 
 struct DisplayLayout {
-    std::uint64_t rowBytes = 0;
-    std::uint64_t frameBytes = 0;
+    uint64_t rowBytes = 0;
+    uint64_t frameBytes = 0;
 };
 
 struct DisplayLayoutResult {
@@ -64,16 +64,16 @@ struct DisplayLayoutResult {
 };
 
 DisplayLayoutResult calculateLinearDisplayLayout(
-    const DisplayMode& mode, std::uint32_t rowAlignment) noexcept;
+    const DisplayMode& mode, uint32_t rowAlignment) noexcept;
 
 class FenceTimelineModel {
 public:
-    bool signal(std::uint64_t value) noexcept;
-    bool isComplete(std::uint64_t value) const noexcept;
-    std::uint64_t completedValue() const noexcept;
+    bool signal(uint64_t value) noexcept;
+    bool isComplete(uint64_t value) const noexcept;
+    uint64_t completedValue() const noexcept;
 
 private:
-    std::uint64_t completed_ = 0;
+    uint64_t completed_ = 0;
 };
 
 }  // namespace cobalt64::research
