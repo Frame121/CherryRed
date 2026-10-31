@@ -17,6 +17,9 @@
 #define PPSMC_MSG_SetToolsDramAddrHigh 0x10
 #define PPSMC_MSG_SetToolsDramAddrLow 0x11
 #define PPSMC_MSG_RunDcBtc 0x36
+#define PPSMC_MSG_TransferTableSmu2Dram 0x12
+#define PPSMC_MSG_GetDpmFreqByIndex 0x1F
+#define PPSMC_MSG_NotifyPowerSource 0x35
 #define PPSMC_MSG_AllowGfxOff 0x28
 #define PPSMC_MSG_DisallowGfxOff 0x29
 #define PPSMC_MSG_GetRunningSmuFeaturesLow 0xC

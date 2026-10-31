@@ -874,6 +874,50 @@ void RedNaviProbe::smuProbe(const char *property, bool send) {
             snprintf(key, sizeof(key), "%s_sdma_version", st.name); rnPublishOne(out, key, rd(sdmaVersion));
             if (rc == -ETIMEDOUT) break;
         }
+        // Opt-in (rednavi_smu_setup=1): the rest of what Linux's smu_smc_hw_setup/smu_hw_init/smu_late_init send after the features
+        // are on and that we did not: the combo pptable transfer, the DPM tables (level count and frequency of every clock), the power
+        // source. With SCPM the allowed mask is rejected by the firmware, as above, so Linux does not send it either.
+        uint32_t setup = 0;
+        if (PE_parse_boot_argn("rednavi_smu_setup", &setup, sizeof(setup)) && setup == 1) {
+            struct { const char *name; uint32_t msg; uint32_t arg; } tail[] = {
+                {"combo_pptable", PPSMC_MSG_TransferTableSmu2Dram, 1},   // TABLE_COMBO_PPTABLE, argument 0 in the upper half
+            };
+            for (auto &st : tail) {
+                uint32_t result = 0, resp = 0;
+                int rc = rn_smu13_send(adev, st.msg, st.arg, &result, &resp, 3000000);
+                char key[40];
+                snprintf(key, sizeof(key), "setup_%s_rc", st.name); rnPublishOne(out, key, static_cast<uint64_t>(static_cast<uint32_t>(rc)));
+                snprintf(key, sizeof(key), "setup_%s_arg", st.name); rnPublishOne(out, key, result);
+                if (rc == -ETIMEDOUT) break;
+            }
+            // PPCLK_e: GFX 0, SOC 1, UCLK 2, FCLK 3, DCLK_0 4, VCLK_0 5, DCFCLK 11. GetDpmFreqByIndex with level 0xff is the level count.
+            static const struct { const char *name; uint32_t id; } clks[] = {
+                {"soc", 1}, {"gfx", 0}, {"uclk", 2}, {"fclk", 3}, {"vclk", 5}, {"dclk", 4}, {"dcef", 11},
+            };
+            bool dead = false;
+            for (const auto &c : clks) {
+                if (dead) break;
+                uint32_t count = 0, resp = 0;
+                int rc = rn_smu13_send(adev, PPSMC_MSG_GetDpmFreqByIndex, (c.id << 16) | 0xff, &count, &resp, 1000000);
+                char key[40];
+                snprintf(key, sizeof(key), "setup_%s_count_rc", c.name); rnPublishOne(out, key, static_cast<uint64_t>(static_cast<uint32_t>(rc)));
+                snprintf(key, sizeof(key), "setup_%s_count", c.name); rnPublishOne(out, key, count);
+                if (rc == -ETIMEDOUT) { dead = true; break; }
+                if (rc || (count & 0x7fffffff) > 16) continue;
+                for (uint32_t lvl = 0; lvl < (count & 0x7fffffff); lvl++) {
+                    uint32_t mhz = 0;
+                    rc = rn_smu13_send(adev, PPSMC_MSG_GetDpmFreqByIndex, (c.id << 16) | lvl, &mhz, &resp, 1000000);
+                    snprintf(key, sizeof(key), "setup_%s_%u", c.name, lvl); rnPublishOne(out, key, rc ? 0xdead0000u | (rc & 0xffff) : (mhz & 0x7fffffff));
+                    if (rc == -ETIMEDOUT) { dead = true; break; }
+                }
+            }
+            if (!dead) {
+                uint32_t result = 0, resp = 0;
+                int rc = rn_smu13_send(adev, PPSMC_MSG_NotifyPowerSource, 0, &result, &resp, 1000000);   // POWER_SOURCE_AC
+                rnPublishOne(out, "setup_power_source_rc", static_cast<uint64_t>(static_cast<uint32_t>(rc)));
+            }
+            rnPublishOne(out, "setup_sdma_version", rd(sdmaVersion));
+        }
         // When does the block go dark again? Only SDMA0_VERSION and the mailbox response are read, so nothing else can disturb it.
         const uint32_t waits[] = {0, 100, 400};   // the block was still alive 7 s later; the SMU stops answering some seconds after that
         for (uint32_t w : waits) {
