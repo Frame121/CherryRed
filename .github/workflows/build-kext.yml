@@ -3,7 +3,9 @@ name: build-kext
 # Builds Navi33Bringup.kext (RX 7600 bring-up scaffold) on a macOS runner so a
 # Windows-side session can iterate without a booted macOS host. The firmware
 # blobs come from the pinned linux-firmware commit and are hash-verified
-# against the recorded FIRMWARE-PROVENANCE.md pins before the build.
+# against the recorded FIRMWARE-PROVENANCE.md pins before the build. The kext
+# artifact uploads before the extra host suites, so a research-core failure
+# never blocks the kext delivery.
 on: [push, pull_request, workflow_dispatch]
 
 jobs:
@@ -55,6 +57,12 @@ jobs:
           set -o pipefail
           make -C src/navi33-bringup MKSDK="$GITHUB_WORKSPACE/MacKernelSDK" all 2>&1 | tee kext-build.log
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Navi33Bringup-kext
+          path: src/navi33-bringup/build/Navi33Bringup.kext
+          if-no-files-found: error
+
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -63,23 +71,22 @@ jobs:
           path: kext-build.log
           if-no-files-found: ignore
 
-      - name: Surface the build log as annotations
-        if: failure()
-        run: |
-          if [ -f kext-build.log ]; then
-            tail -40 kext-build.log | while IFS= read -r line; do
-              [ -n "$line" ] && echo "::error title=kext-build::$line"
-            done
-          fi
-
       - name: CTest host suites (portable research core)
         run: |
-          cmake -S src/navi33-research -B build/host-ctest -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/host-ctest --config Release -j 4
-          ctest --test-dir build/host-ctest -C Release --output-on-failure
+          set -o pipefail
+          {
+            cmake -S src/navi33-research -B build/host-ctest -DCMAKE_BUILD_TYPE=Release
+            cmake --build build/host-ctest --config Release -j 4
+            ctest --test-dir build/host-ctest -C Release --output-on-failure
+          } 2>&1 | tee host-ctest.log
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Navi33Bringup-kext
-          path: src/navi33-bringup/build/Navi33Bringup.kext
-          if-no-files-found: error
+      - name: Surface failing logs as annotations
+        if: failure()
+        run: |
+          for f in kext-build.log host-ctest.log; do
+            if [ -f "$f" ]; then
+              tail -40 "$f" | while IFS= read -r line; do
+                [ -n "$line" ] && echo "::error title=$f::$line"
+              done
+            fi
+          done
