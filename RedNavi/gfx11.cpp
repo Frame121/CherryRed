@@ -1418,8 +1418,15 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     // the scheduler a circular buffer and the firmware's debug extension writes text records into it, which is the only way to see what it
     // does, or waits for, inside a frame. Linux arms the same thing at the end of mes_v11_0_hw_init (amdgpu_mes_dbgext_start, module
     // parameter amdgpu_mes_dbgext_buffer_size) and expects nothing else from the driver: the buffer size goes in the first dword as that
-    // function seeds it, and options bit 0 clear means "write the buffer only, no interrupt". The header the firmware leaves behind is
-    // dumped with the text, so the layout is read out of the hardware rather than assumed.
+    // function seeds it. The header the firmware leaves behind is dumped with the text, so the layout is read out of the hardware rather
+    // than assumed.
+    //
+    // The options word is not what the v11 header suggests. MES_DBGEXT_INIT_DATA defines only bit 0 (one host interrupt per record), yet
+    // Linux never sends 0: amdgpu_mes_dbgext_start translates its own options into the layout the firmware actually reads, where bit 1
+    // enables logging, and passes ENABLE_MES_LOG | HOST_POLL, i.e. 0x2 in interrupt mode and 0x3 when polling. Bit 0 stays clear here
+    // because nothing in RedNavi services the MES host interrupt. Bit 1 set is what matters: the first version of this passed 0 and the
+    // scheduler completed the frame without writing anything at all, not even a header (run on the 7800 XT, 2026-10-31), which is what a
+    // setup handler does when logging is off.
     const u64 dbgOff = base + 0x50000;
     auto dumpMesDbg = [&]() {
         if (!gMesDbgExt) return;
@@ -1435,7 +1442,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
         m.header.dwsize = API_FRAME_SIZE_IN_DWORDS;
         m.opcode = MESAPI_MISC__SETUP_MES_DBGEXT;
         m.dbgext_init_data.dbg_ext_mc_addr = vaBase + dbgOff;
-        m.dbgext_init_data.u64_all = 0;
+        m.dbgext_init_data.u64_all = 2;                    // bit 1: enable logging, bit 0 clear: write the buffer only, no interrupt
         res->dbg_ok = sendFrame(&m, offsetof(union MESAPI__MISC, api_status) / 4);
         res->dbg_status = res->api_status;
     }
