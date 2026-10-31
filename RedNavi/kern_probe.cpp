@@ -2338,10 +2338,10 @@ void RedNaviProbe::sdmaTest() {
                     rnPublish(this, "mes-log", lp, lv, 32);
                     {
                         static char dmn[512][8];
-                        const char *dp[256];
+                        static const char *dp[256];   // static: sdmaTest's frame is already about 11 of the 16 KB kernel stack
                         for (int half = 0; half < 2; half++) {
                             for (int i = 0; i < 256; i++) { snprintf(dmn[half * 256 + i], 8, "%c%03x", half ? 'h' : 'l', i * 4); dp[i] = dmn[half * 256 + i]; }
-                            rnPublish(this, half ? "mes-dm-hi" : "mes-dm-lo", dp, gMesDm[half], 256);
+                            rnPublish(this, half ? "mes-evlog-b" : "mes-evlog-a", dp, gMesDm[half], 256);
                         }
                         // The MES firmware's own log (rednavi_mes_dbgext=1), same key scheme: decode mes-dbg-lo/hi with
                         // tools/decode_mes_dbgext.py. Reuses dp/dmn: the kernel stack of this frame is nearly full.
@@ -2360,9 +2360,9 @@ void RedNaviProbe::sdmaTest() {
                     {
                         const char *dn[6] = {"c1", "c2", "c3", "c4", "c5", "c6"};
                         rnPublish(this, "mes-db", dn, mr.mes_db, 6);
-                        const char *vn[8] = {"sched", "kiq", "bootload", "rlc_srm", "cp_stat", "cp_me_cntl", "mec_cntl", "rlc_sched"};
-                        uint32_t vv[8] = {mr.fw_ver0, mr.fw_ver1, mr.bootload, mr.rlc_srm, mr.cp_stat0, mr.cp_me_cntl, mr.mec_cntl, mr.rlc_sched};
-                        rnPublish(this, "mes-fw-version", vn, vv, 8);
+                        const char *vn[9] = {"sched", "kiq", "bootload", "rlc_srm", "cp_stat", "cp_me_cntl", "mec_cntl", "rlc_sched", "hqd_active"};
+                        uint32_t vv[9] = {mr.fw_ver0, mr.fw_ver1, mr.bootload, mr.rlc_srm, mr.cp_stat0, mr.cp_me_cntl, mr.mec_cntl, mr.rlc_sched, mr.hqd_active};
+                        rnPublish(this, "mes-fw-version", vn, vv, 9);
                         const char *bn[9] = {"gc0", "gc1", "gc2", "gc3", "mmhub0", "mmhub1", "mmhub2", "oss0", "oss1"};
                         uint32_t bv[9] = {gpu.reg_offset[RN_GC_HWIP][0][0], gpu.reg_offset[RN_GC_HWIP][0][1], gpu.reg_offset[RN_GC_HWIP][0][2], gpu.reg_offset[RN_GC_HWIP][0][3],
                                           gpu.reg_offset[RN_MMHUB_HWIP][0][0], gpu.reg_offset[RN_MMHUB_HWIP][0][1], gpu.reg_offset[RN_MMHUB_HWIP][0][2],

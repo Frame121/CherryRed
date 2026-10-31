@@ -1519,6 +1519,14 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
 
     // step 5: map a legacy kernel compute queue (ME 1) through the scheduler (mes_v11_0_map_legacy_queue)
     if (progress) progress(ctx, 5);
+    // Which MEC hardware queues are active right now (bit pipe * 8 + queue)? The map of a legacy queue starts with the HQD being free; a queue left
+    // active by an earlier hand-programmed test would make the scheduler wait for it to drain (the event log shows its map operation started and never ended).
+    for (u32 pipe = 0; pipe < 4; pipe++)
+        for (u32 q = 0; q < 8; q++) {
+            grbmSelect(adev, 1, pipe, 0, q);
+            if (RREG32_SOC15(RN_GC, 0, regCP_HQD_ACTIVE) & 1u) res->hqd_active |= 1u << (pipe * 8 + q);
+        }
+    grbmSelect(adev, 0, 0, 0, 0);
     gMappedDoorbell = legDb;
     writeComputeMqd(adev, vaBase, qOff, 4096, qOff + 0x2000, qOff + 0x4000, legDb);
     {
@@ -1650,18 +1658,14 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     res->log_hist[13] = rn_vram_rd32(adev, qOff + 0x1000);
     res->log_hist[14] = rn_vram_rd32(adev, apiStatusOff);
     res->log_hist[15] = rn_rreg32(adev, adev->reg_offset[RN_GC_HWIP][0][0] + 0xda4);   // GRBM_STATUS
-    // The scheduler's own data memory (0x80000 bytes, GFX_MES_DRAM_SIZE) through the index registers, ME 3 pipe 0: where the loop it spins in keeps its state.
-    if (gMesDmDump) {   // opt-in (rednavi_mes_dm=1). With the MES running every read of the index registers returned 0xffffffff, so the MES is halted first (diagnostic: it is stuck anyway).
-    WREG32_SOC15(RN_GC, 0, regCP_MES_CNTL, RREG32_SOC15(RN_GC, 0, regCP_MES_CNTL) | CP_MES_CNTL__MES_HALT_MASK);
-    udelay(100);
-    grbmSelect(adev, 3, 0, 0, 0);
-    for (u32 i = 0; i < 256; i++) {
-        WREG32_SOC15(RN_GC, 0, regCP_MES_DM_INDEX_ADDR, i * 4);
-        gMesDm[0][i] = RREG32_SOC15(RN_GC, 0, regCP_MES_DM_INDEX_DATA);
-        WREG32_SOC15(RN_GC, 0, regCP_MES_DM_INDEX_ADDR, 0x80000 - 1024 + i * 4);
-        gMesDm[1][i] = RREG32_SOC15(RN_GC, 0, regCP_MES_DM_INDEX_DATA);
-    }
-    grbmSelect(adev, 0, 0, 0, 0);
+    // Two windows of the MES event log (the same file Linux shows in debugfs amdgpu_mes_event_log, where the first records sit at 0x900 and the API
+    // timeline at 0x1300 and up, 7 dwords each: opcode, start time (64 bit), end time (64 bit), 0, 1). The CP_MES_DM_INDEX registers read 0xffffffff, so this
+    // is the way to see what the firmware wrote for our frames.
+    if (gMesDmDump) {
+        for (u32 i = 0; i < 256; i++) {
+            gMesDm[0][i] = rn_vram_rd32(adev, logOff + 0x900 + i * 4);
+            gMesDm[1][i] = rn_vram_rd32(adev, logOff + 0x1300 + i * 4);
+        }
     }
     dumpMesDbg();   // again after the queue frames: the records the ADD_QUEUE path wrote while it was stuck
     res->step = 5;

@@ -162,8 +162,8 @@ void rn_compute_diag(struct rn_device *adev, u32 out[11]);   // out[8..10]: SDMA
 void rn_compute_diag2(struct rn_device *adev, u32 out[8]);
 void rn_mes_state(struct rn_device *adev, u32 out[15]);
 void rn_gfx_constants_init(struct rn_device *adev);   // gfx_v11_0_hw_init steps between the memory hub and the CP resume (golden TCP_CNTL, read timeout, SH_MEM per VMID, doorbell ranges)
-extern u32 gMesDm[2][256];   // MES scheduler data memory (CP_MES_DM_INDEX_*): the first and the last 1 KB, read after the last frame; not in rn_mes_result, the kernel stack is 16 KB
-extern bool gMesDmDump;   // rednavi_mes_dm=1: read the MES data memory after the last frame (hung the machine once)
+extern u32 gMesDm[2][256];   // MES event log windows at +0x900 and +0x1300 (1 KB each), read after the last frame; not in rn_mes_result, the kernel stack is 16 KB
+extern bool gMesDmDump;   // rednavi_mes_dm=1: read the two event log windows after the last frame
 extern u32 gMesDbg[2][256];   // MES firmware log (mes_dbgext): the first 2 KB of the buffer, dwords 0..3 are the header the firmware leaves
 extern bool gMesDbgExt;   // rednavi_mes_dbgext=1 (host buffer, as Linux) or 2 (the VRAM area): hand the scheduler a log buffer after the resource frames and dump what it wrote
 extern u64 gMesDbgHostVa;     // the log buffer's GART address when it lives in host memory; 0 means the VRAM area at base + 0x50000
@@ -181,6 +181,7 @@ struct rn_mes_result {
     int hw_res_ok, add_ok;
     u32 hw_res1_status;
     int dbg_ok; u32 dbg_status;                    // SETUP_MES_DBGEXT frame and its completion word (opt-in, rednavi_mes_dbgext=1)
+    u32 hqd_active;                                // MEC queues with CP_HQD_ACTIVE set before the legacy map, bit pipe * 8 + queue
     u32 cp_me_cntl, mec_cntl, rlc_sched;           // CP_ME_CNTL, CP_MEC_RS64_CNTL, RLC_CP_SCHEDULERS before the MES start
     u32 bootload, rlc_srm, cp_stat0;               // RLC_RLCS_BOOTLOAD_STATUS, RLC_SRM_CNTL and CP_STAT before the MES start
     u32 fw_ver0, fw_ver1;                         // CP_MES_GP3_LO of each pipe right after the start: the version of the image that runs
