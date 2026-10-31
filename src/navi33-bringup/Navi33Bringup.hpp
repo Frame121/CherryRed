@@ -36,6 +36,8 @@ private:
 	bool pspLoadStageEnabled();
 	bool pspChainStageEnabled();
 	bool pspRingStageEnabled();
+	bool smuStageEnabled();
+	bool gcStageEnabled();
 	uint32_t pspTmrMode();
 	bool identityMatchesGpu(IOPCIDevice *pci);
 	bool identityMatchesEvidenceBoard(IOPCIDevice *pci);

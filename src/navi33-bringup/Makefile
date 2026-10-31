@@ -30,7 +30,7 @@ CC  := clang
 
 EMBED := ../navi48-bringup/tools/embed-firmware.py
 
-CXX_SRCS := Navi33Bringup.cpp Navi33PspSurvey.cpp Navi33PspLoad.cpp Navi33PspRing.cpp Navi33Accelerator.cpp
+CXX_SRCS := Navi33Bringup.cpp Navi33PspSurvey.cpp Navi33PspLoad.cpp Navi33PspRing.cpp Navi33SmuLoad.cpp Navi33GcLoad.cpp Navi33Accelerator.cpp
 
 # Firmware blobs (firmware/*.bin, gitignored) are embedded as C arrays generated at
 # build time into src/fw/ (gitignored) by the shared embed tool: symbol fw_<blob>[] +

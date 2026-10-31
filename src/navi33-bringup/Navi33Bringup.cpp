@@ -17,6 +17,12 @@
 void RunPspLoadStage(IOPCIDevice *pci, IOService *publisher, bool chainEnabled);
 // Ring + LOAD_TOC + SETUP_TMR stage; defined in Navi33PspRing.cpp.
 void RunPspRingStage(IOPCIDevice *pci, IOService *publisher, uint32_t tmrMode);
+// SMU stage (M2b): LOAD_IP_FW GFX_FW_TYPE_SMU + smu_v13 messages; defined in
+// Navi33SmuLoad.cpp.
+void RunNavi33SmuStage(IOPCIDevice *pci, IOService *publisher);
+// GC firmware stage: LOAD_IP_FW image set + RLC autoload; defined in
+// Navi33GcLoad.cpp.
+void RunNavi33GcLoadStage(IOPCIDevice *pci, IOService *publisher);
 
 #define N33LOG(fmt, ...) IOLog("Navi33Bringup: " fmt "\n", ##__VA_ARGS__)
 
@@ -160,6 +166,29 @@ bool Navi33Bringup::pspRingStageEnabled()
 	       bootArgTokenPresent(args, "navi33psp_ring=1");
 }
 
+bool Navi33Bringup::smuStageEnabled()
+{
+	// SMU firmware + messages (M2b) on top of the ring opt-in: the ring must
+	// exist in the same boot for the LOAD_IP_FW submission. On success the
+	// stage publishes Navi33Bringup,FirmwareVerified=true.
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return false;
+	return pspRingStageEnabled() &&
+	       bootArgTokenPresent(args, "navi33psp_smu=1");
+}
+
+bool Navi33Bringup::gcStageEnabled()
+{
+	// GC/SDMA image set + RLC autoload: Linux loads SMU before the other
+	// firmware, so this requires the SMU opt-in in the same boot.
+	char args[256];
+	if (!readChosenBootArgs(args))
+		return false;
+	return smuStageEnabled() &&
+	       bootArgTokenPresent(args, "navi33gc_load=1");
+}
+
 uint32_t Navi33Bringup::pspTmrMode()
 {
 	// Optional value boot-arg navi33psp_tmr=N: 1 = VRAM top - 512 MiB
@@ -266,6 +295,27 @@ bool Navi33Bringup::start(IOService *provider)
 		} else {
 			setProperty("Navi33Bringup,PspRingStage",
 			            "disabled (boot-arg navi33psp_ring=1 absent)");
+		}
+		if (smuStageEnabled()) {
+			// Fifth opt-in (navi33psp_smu=1): SMU firmware via LOAD_IP_FW +
+			// the smu_v13 message protocol. On a correct SMU answer this
+			// publishes Navi33Bringup,FirmwareVerified=true — the property
+			// the Navi33Accelerator compute gate waits for. Requires the
+			// ring from navi33psp_ring=1 in the same boot.
+			RunNavi33SmuStage(pci, this);
+		} else {
+			setProperty("Navi33Bringup,SmuStage",
+			            "disabled (boot-arg navi33psp_smu=1 absent)");
+		}
+		if (gcStageEnabled()) {
+			// Sixth opt-in (navi33gc_load=1): the GC 11.0.2 / SDMA 6.0.2
+			// image set through LOAD_IP_FW, RLC autoload, then read-only
+			// autoload-completion status. Linux loads SMU before the other
+			// firmware, so this requires navi33psp_smu=1 in the same boot.
+			RunNavi33GcLoadStage(pci, this);
+		} else {
+			setProperty("Navi33Bringup,GcLoadStage",
+			            "disabled (boot-arg navi33gc_load=1 absent)");
 		}
 	} else {
 		setProperty("Navi33Bringup,PspStage",
