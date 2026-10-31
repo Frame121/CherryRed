@@ -1062,11 +1062,14 @@ void rn_compute_diag2(struct rn_device *adev, u32 out[8]) {
 // MQD image for a compute queue (struct v11_compute_mqd, offsets in dwords), as gfx_v11_0_compute_mqd_init fills it.
 u64 gMesHostWbVa = 0;            // rednavi_mes_hostwb=1: GART address of a host page that holds the legacy queue's rptr (+0) and wptr (+8), as Linux's write-back slots do
 volatile u32 *gMesHostWbMem = nullptr;
+u64 gMesHostRingVa = 0;          // rednavi_mes_hostring=1: the legacy queue's 8 KB ring in host memory too (GART address), as Linux allocates it
+volatile u32 *gMesHostRingMem = nullptr;
 static bool gWbHostNow = false;  // set around the one writeComputeMqd call that builds that queue
 
 static void writeComputeMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringBytes, u64 mqdOff, u64 eopOff, u32 doorbellDword,
                             bool mesQueue = false) {
-    const u64 ringVa = vaBase + ringOff, rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008;
+    const bool hostRing = gWbHostNow && gMesHostRingVa != 0 && gMesHostRingMem != nullptr;
+    const u64 ringVa = hostRing ? gMesHostRingVa : vaBase + ringOff, rptrOff = ringOff + 0x1000, wptrOff = ringOff + 0x1008;
     const bool hostWb = gWbHostNow && gMesHostWbVa != 0 && gMesHostWbMem != nullptr;
     const u64 rptrVa = hostWb ? gMesHostWbVa : vaBase + rptrOff, wptrVa = hostWb ? gMesHostWbVa + 8 : vaBase + wptrOff;
     const u64 eopBase = (vaBase + eopOff) >> 8;
@@ -1093,7 +1096,8 @@ static void writeComputeMqd(struct rn_device *adev, u64 vaBase, u64 ringOff, u32
     ibCtl = REG_SET_FIELD(ibCtl, CP_HQD_IB_CONTROL, MIN_IB_AVAIL_SIZE, 3);
     const u32 quantum = regCP_HQD_QUANTUM_DEFAULT;                           // Linux's compute MQD has the quantum at 0, not enabled
     for (u32 o = 0; o < 512 * 4; o += 4) rn_vram_wr32(adev, mqdOff + o, 0);
-    for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
+    if (hostRing) for (u32 o = 0; o < ringBytes; o += 4) gMesHostRingMem[o / 4] = 0;
+    else for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
     for (u32 o = 0; o < 2048; o += 4) rn_vram_wr32(adev, eopOff + o, 0);
     rn_vram_wr32(adev, rptrOff, 0); rn_vram_wr32(adev, rptrOff + 4, 0);
     rn_vram_wr32(adev, wptrOff, 0); rn_vram_wr32(adev, wptrOff + 4, 0);
@@ -1537,7 +1541,7 @@ void rn_mes_start(struct rn_device *adev, u64 vaBase, u64 base, const struct rn_
     grbmSelect(adev, 0, 0, 0, 0);
     gMappedDoorbell = legDb;
     gWbHostNow = true;
-    writeComputeMqd(adev, vaBase, qOff, 4096, qOff + 0x2000, qOff + 0x4000, legDb);
+    writeComputeMqd(adev, vaBase, qOff, gMesHostRingVa != 0 ? 8192 : 4096, qOff + 0x2000, qOff + 0x4000, legDb);
     gWbHostNow = false;
     {
         // amdgpu_gfx_mes_enable_kcq: SET_RESOURCES on the KIQ ring with every queue in the mask comes before the legacy queue is mapped

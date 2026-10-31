@@ -166,6 +166,8 @@ extern u32 gMesDm[2][256];   // MES event log windows at +0x900 and +0x1300 (1 K
 extern u32 gMesMqd[512];   // the legacy queue's MQD read back after the last frame (rednavi_mes_dm=1)
 extern u64 gMesHostWbVa;            // rednavi_mes_hostwb=1: the legacy queue's rptr/wptr words in host memory (GART address) instead of VRAM
 extern volatile u32 *gMesHostWbMem;
+extern u64 gMesHostRingVa;          // rednavi_mes_hostring=1: the legacy queue's ring (8 KB) in host memory, with the write-back words
+extern volatile u32 *gMesHostRingMem;
 extern bool gMesDmDump;   // rednavi_mes_dm=1: read the two event log windows after the last frame
 extern u32 gMesDbg[2][256];   // MES firmware log (mes_dbgext): the first 2 KB of the buffer, dwords 0..3 are the header the firmware leaves
 extern bool gMesDbgExt;   // rednavi_mes_dbgext=1 (host buffer, as Linux) or 2 (the VRAM area): hand the scheduler a log buffer after the resource frames and dump what it wrote

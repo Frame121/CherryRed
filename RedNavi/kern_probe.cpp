@@ -2208,10 +2208,19 @@ void RedNaviProbe::sdmaTest() {
             // =2: the VRAM area at base + 0x50000, the two runs of 2026-10-31 that stayed empty.
             gMesDbgExt = false; gMesDbgHostVa = 0; gMesDbgHostMem = nullptr;
             gMesHostWbVa = 0; gMesHostWbMem = nullptr;
+            gMesHostRingVa = 0; gMesHostRingMem = nullptr;
             { uint32_t hw = 0;
               if (PE_parse_boot_argn("rednavi_mes_hostwb", &hw, sizeof(hw)) && hw == 1) {
                   const int hb = createHostBo(0x1000);
                   if (hb >= 0) { gMesHostWbVa = bos[hb].gpuVa; gMesHostWbMem = static_cast<volatile uint32_t *>(bos[hb].md->getBytesNoCopy()); }
+              }
+              if (PE_parse_boot_argn("rednavi_mes_hostring", &hw, sizeof(hw)) && hw == 1) {   // implies the write-back words in host memory
+                  if (!gMesHostWbVa) {
+                      const int wb = createHostBo(0x1000);
+                      if (wb >= 0) { gMesHostWbVa = bos[wb].gpuVa; gMesHostWbMem = static_cast<volatile uint32_t *>(bos[wb].md->getBytesNoCopy()); }
+                  }
+                  const int rb = createHostBo(0x2000);
+                  if (rb >= 0) { gMesHostRingVa = bos[rb].gpuVa; gMesHostRingMem = static_cast<volatile uint32_t *>(bos[rb].md->getBytesNoCopy()); }
               } }
             { uint32_t dx = 0;
               if (PE_parse_boot_argn("rednavi_mes_dbgext", &dx, sizeof(dx)) && (dx == 1 || dx == 2)) {
