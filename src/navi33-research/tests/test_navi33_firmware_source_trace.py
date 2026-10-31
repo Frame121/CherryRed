@@ -17,6 +17,18 @@ SOURCE_ROOT = (
 
 
 def main() -> int:
+    # The retained Arch kernel snapshot tree is deliberately gitignored
+    # (bulk upstream source is not committed); hosts that keep it get the
+    # full correlation check, hosts without it record an explicit SKIP
+    # instead of a vacuous or failing result.
+    if not SOURCE_ROOT.is_dir():
+        print(
+            "NAVI33 FIRMWARE SOURCE TRACE: SKIP "
+            "(arch-linux-v7.2.11 snapshot not retained on this host; "
+            "static source correlation not checked)"
+        )
+        return 0
+
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     failures = []
     checked = 0
