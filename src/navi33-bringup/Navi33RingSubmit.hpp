@@ -11,9 +11,49 @@
 #include <IOKit/IOLib.h>
 
 #include "Navi33MmWindow.hpp"
+#include "Navi33PspMailbox.hpp"
 #include "Navi33PspRing.hpp"
 
 namespace cobalt64::navi33::psp {
+
+// One SMU 13 message exchange over the MP1 mailbox (smu_v13_0_send_msg +
+// _wait_for_response), for the post-ring stages (the SMU stage has its own
+// copy from before this header existed). Every wait is bounded.
+inline bool smu13Send(const RegBar &bar, uint32_t msg, uint32_t arg,
+                      uint32_t *result, uint32_t *responseOut = nullptr)
+{
+    const uint64_t r66 = mp1ByteOffset(kMp1C2pmsg66Dword);
+    const uint64_t r82 = mp1ByteOffset(kMp1C2pmsg82Dword);
+    const uint64_t r90 = mp1ByteOffset(kMp1C2pmsg90Dword);
+
+    uint32_t response = 0;
+    for (uint32_t ms = 0; ms <= 2000; ++ms) {
+        if (bar.rd(r90, &response) && response != 0)
+            break;
+        IOSleep(1);
+    }
+    if (response == 0)
+        return false;
+    if (!bar.wr(r90, 0) || !bar.wr(r82, arg) || !bar.wr(r66, msg))
+        return false;
+    for (uint32_t ms = 0; ms <= 2000; ++ms) {
+        if (bar.rd(r90, &response) && response != 0)
+            break;
+        IOSleep(1);
+    }
+    if (responseOut)
+        *responseOut = response;
+    if (response == 0)
+        return false;
+    if (result && !bar.rd(r82, result))
+        return false;
+    return smuResponseOk(response);
+}
+
+inline uint64_t mp1ByteOffset(uint32_t dword)
+{
+    return (static_cast<uint64_t>(kMp1BaseDwords) + dword) * 4ull;
+}
 
 // Zero a VRAM region through the window, paced.
 inline bool ringVramZero(const RegBar &bar, uint64_t vramByte, uint32_t bytes)
