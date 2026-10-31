@@ -50,10 +50,9 @@ constexpr uint64_t kSdmaWptrShadowOffset = 0x0C001008ull;
 constexpr uint64_t kSdmaTargetVramOffset = 0x0C002000ull;
 constexpr uint32_t kSdmaRingBytes        = 4096u;
 
-// GFX Ring geometry in VRAM:
+// GFX Ring geometry in VRAM (the pointer shadows come in with the GFX ring
+// bring-up; unused constants are left out until then).
 constexpr uint64_t kGfxRingVramOffset    = 0x0C010000ull;
-constexpr uint64_t kGfxRptrShadowOffset  = 0x0C011000ull;
-constexpr uint64_t kGfxWptrShadowOffset  = 0x0C011008ull;
 constexpr uint32_t kGfxRingBytes         = 4096u;
 
 // RS64 Program Counter start constants (from gc_11_0_2 firmware binaries)
