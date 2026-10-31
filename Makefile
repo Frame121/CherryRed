@@ -102,5 +102,7 @@ test:
 	./build/edid_test
 	clang++ -std=c++17 -Wall tests/host/mode_regs_test.cpp RedNavi/mode_regs.cpp RedNavi/edid.cpp -o build/mode_regs_test
 	./build/mode_regs_test
+	clang++ -std=c++17 -Wall -IRedNavi tests/host/gpu_target_test.cpp -o build/gpu_target_test
+	./build/gpu_target_test
 
 .PHONY: all clean test

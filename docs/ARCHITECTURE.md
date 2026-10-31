@@ -90,6 +90,23 @@ The register bases are the same as on Navi 32: GC `0x1260 0xa000 0x1c000 0x2402c
 
 What does not carry over: the firmware (every file above), and the connector. The reporter's monitor is on HDMI-A-2 (the two DisplayPort connectors read `disconnected`), and `SYMCLKB_CLOCK_ENABLE` is the one enabled (`0x101`, front end 1), so the lit path is DIG1, not DIG4, and it is HDMI. The DisplayPort bring-up in this repository does not cover HDMI (TMDS/HDMI output, DDC over I2C instead of AUX). The Linux dump script has the groups `hpd_aux1 dig1_hdmi` for that path.
 
+### PCI identity and register-path policy
+
+The probe maps the device through an explicit PCI identity profile in RedNavi/gpu_target.h:
+
+| PCI ID | ASIC | Metadata | Probe policy |
+|---|---|---|---|
+| 1002:747E | Navi 32 | RX 7800 XT, 16 GB | Existing Navi 32 register/firmware path |
+| 1002:7480 | Navi 33 | RX 7600, 8 GB | IP discovery and VBIOS only; publishes model/VRAM metadata |
+| 1002:744C | Navi 31 | ASIC identity only | IP discovery and VBIOS only |
+| Anything else | Unknown | None | Never enters the Navi 32 path |
+
+The model and VRAM properties are descriptive PCI-node metadata, not evidence of
+an accelerator, display engine, or Metal driver. In particular, recognizing
+1002:7480 does **not** authorize Navi 32 register offsets, firmware, PSP/SMU
+sequences, DMCUB initialization, or display replay on Navi 33. Navi 33 needs its
+own hardware validation before any write path is considered.
+
 ## Navi 31 (RX 7900 XTX, `1002:744C`) compared with Navi 32
 
 From a community capture on Linux (issue #1; `docs/logs/navi31/`). 24 GB of VRAM (`0x8000000000` to `0x85feffffff`), 32 GB BAR0, six memory channels (UMC x6).

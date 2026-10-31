@@ -15,7 +15,7 @@ What this is **not**: there is no acceleration and no Metal. WindowServer render
 | Milestone | What | State |
 |---|---|---|
 | M0 | Repo, CI (macOS runner), build scripts | Done, CI green (Debug and Release) |
-| M1 | Probe kext: matches `1002:747E`, maps the register BAR, reads the IP discovery table | Done: ran on a real RX 7800 XT, versions recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| M1 | Probe kext: recognizes Navi 32 `1002:747E` plus read-only Navi 31/33 identities; maps the register BAR and reads the IP discovery table | Done: ran on a real RX 7800 XT, versions recorded in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | M1.5 | Probe stage 2: read-only PSP and SMU mailbox registers | Done: PSP bootloader ready, sOS not running, SMU alive |
 | M2a | PSP bring-up and DMCUB load, as opt-in probe stages (PSP firmware chain, secure OS, command ring, `LOAD_TOC`, `SETUP_TMR`, DMCUB via the PSP) | Done on a real RX 7800 XT: the secure OS answers commands, and our DMCUB firmware runs and answers mailbox commands (see [docs/PSP_BRINGUP.md](docs/PSP_BRINGUP.md), [docs/DMUB_BRINGUP.md](docs/DMUB_BRINGUP.md)) |
 | M2b | SMU 13 bring-up, and the LinuxKPI-style compatibility layer that replaces the probe's hand-written register code | Started: the compat layer exists with host tests ([docs/COMPAT.md](docs/COMPAT.md)); the SMU answers messages after its firmware is loaded through the PSP. Clock and power management on top of that is not written yet |
@@ -37,6 +37,12 @@ For AMD that means: **amdgpu in a kext, RADV (ACO) in userspace, Metal -> SPIR-V
 ASUS ROG STRIX Z490-G GAMING, i7-10700K, **Intel UHD 630 as the primary display**, Sapphire RX 7800 XT as the development target (PCIe 4.0 x16). See [docs/TEST_MACHINES.md](docs/TEST_MACHINES.md).
 
 Navi 32 boards (RX 7700 XT / 7800 XT) are in scope; reports from other 7000-series owners are welcome now that the probe works.
+
+The probe also recognizes the Navi 33 RX 7600 (PCI 1002:7480) as a separate
+read-only target. It publishes the PCI node's model and 8 GB VRAM metadata,
+then stops after IP-discovery and VBIOS collection. This does not enable the
+Navi 32 register/firmware path, native display output, acceleration, or Metal
+on Navi 33; those require separate hardware validation.
 
 ## Building
 

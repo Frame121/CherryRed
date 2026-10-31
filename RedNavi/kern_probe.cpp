@@ -1,5 +1,6 @@
-// RedNavi probe (milestone M1): read-only. Matches the RX 7800 XT (Navi 32, 1002:747E),
-// maps the register BAR, and logs what the GPU tells us about itself: PCI config, BAR sizes
+// RedNavi probe (milestone M1): recognizes Navi 31/32/33 PCI identities. Only Navi 32
+// (1002:747E) enters the existing register/firmware path; other targets remain read-only.
+// It maps the register BAR and logs what the GPU tells us about itself: PCI config, BAR sizes
 // and the IP discovery table (the authoritative list of IP block versions).
 //
 // Second stage: reads the PSP (MP0) and SMU (MP1) mailbox registers, using the base addresses
@@ -88,6 +89,7 @@
 #include "mode_regs.h"
 #include "smu13.h"
 #include "gfx11.h"
+#include "gpu_target.h"
 #include "gc_regs.h"
 
 #ifdef RN_HAVE_PSP_FW
@@ -1908,24 +1910,27 @@ bool RedNaviProbe::start(IOService *provider) {
     for (uint32_t i = 0; i < 4; i++) ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i);
     ipBase(kRNHwIdMp1, &gpu.reg_offset[RN_MP1_HWIP][0][0]);
 
-    // Anything but the RX 7800 XT (1002:747E, e.g. the RX 7600, 1002:7480) only gets the table and the VBIOS: every register number
-    // and firmware below is Navi 32's, and nothing here has been checked on another die.
-    if (pci->configRead16(kIOPCIConfigDeviceID) != 0x747E) {
-        IOLog("RedNavi: device 0x%04x is not a Navi 32, read-only: IP discovery and VBIOS only\n", pci->configRead16(kIOPCIConfigDeviceID));
+    // Identify the ASIC from the PCI vendor/device pair. Model metadata is safe to
+    // publish for known identities, but only Navi 32 may enter the existing
+    // Navi 32-specific register and firmware sequence below.
+    const uint16_t vendorId = pci->configRead16(kIOPCIConfigVendorID);
+    const uint16_t deviceId = pci->configRead16(kIOPCIConfigDeviceID);
+    const rednavi::GpuTargetProfile target = rednavi::identifyGpu(vendorId, deviceId);
+
+    if (target.model && target.modelBytes) {
+        OSData *m = OSData::withBytes(target.model, target.modelBytes);
+        OSData *v = OSData::withBytes(&target.vramMegabytes, sizeof(target.vramMegabytes));
+        if (m) { pci->setProperty("model", m); m->release(); }
+        if (v) { pci->setProperty("VRAM,totalMB", v); v->release(); }
+    }
+
+    if (!target.useNavi32RegisterPath) {
+        IOLog("RedNavi: %s (PCI %04x:%04x) is read-only: IP discovery and VBIOS only; Navi 32 init is blocked\n",
+              target.asicName, vendorId, deviceId);
         dumpDiscovery();
         dumpVbios();
         registerService();
         return true;
-    }
-
-    // System Information reads the GPU name and VRAM size from these properties of the PCI node.
-    {
-        static const char kName[] = "AMD Radeon RX 7800 XT";
-        uint32_t vramMb = 16384;
-        OSData *m = OSData::withBytes(kName, sizeof(kName));
-        OSData *v = OSData::withBytes(&vramMb, sizeof(vramMb));
-        if (m) { pci->setProperty("model", m); m->release(); }
-        if (v) { pci->setProperty("VRAM,totalMB", v); v->release(); }
     }
 
     dumpDiscovery();
