@@ -23,6 +23,12 @@ def main() -> None:
 
     require(re.search(r'\{"SOS",\s*0x20000,\s*0x330024,', psp) is not None,
             "PSP SOS version must match RX7600 runtime 0x00330024")
+    required_psp = ["KDB", "SPL", "SYS_DRV", "SOS"]
+    positions = [psp.find(f'"{name}"') for name in required_psp]
+    require(all(pos >= 0 for pos in positions), "PSP chain must include KDB, SPL, SYS_DRV and SOS")
+    require(positions == sorted(positions), "PSP chain order must be KDB -> SPL -> SYS_DRV -> SOS")
+    require(re.search(r'\{"SPL",\s*0x10000000,', psp) is not None,
+            "PSP SPL must use PSP_BL__LOAD_TOS_SPL_TABLE (0x10000000)")
     require(re.search(r"#define\s+kRNSmuFwVersion\s+0x526100u", smu) is not None,
             "SMU firmware version must match RX7600 runtime 82.97.0 / 0x00526100")
     require(re.search(r"#define\s+kRNDmubFwVersion\s+0x7003600u", dmub) is not None,
@@ -37,6 +43,7 @@ def main() -> None:
 
     print("Navi33 firmware wrapper verification: PASS")
     print("  PSP SOS 0x00330024; SMU 0x00526100; DMCUB 0x07003600")
+    print("  PSP chain: KDB -> SPL -> SYS_DRV -> SOS")
     print("  GC 11.0.2 + SDMA 6.0.2 manifest: 26 images")
     print("  This is local header verification, not a hardware firmware-init test.")
 

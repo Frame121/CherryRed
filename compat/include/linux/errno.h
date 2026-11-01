@@ -1,7 +1,11 @@
 #ifndef _LINUX_ERRNO_H
 #define _LINUX_ERRNO_H
 
+#if defined(RN_HOST_TEST) && defined(__linux__)
+#include_next <linux/errno.h>
+#else
 #include <sys/errno.h>
+#endif
 
 #ifndef ENOTSUPP
 #define ENOTSUPP 524

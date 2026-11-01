@@ -41,8 +41,9 @@ Navi 32 boards (RX 7700 XT / 7800 XT) are in scope; reports from other 7000-seri
 The RX 7600 / Navi 33 (PCI `1002:7480`) now has a separate experimental build
 path (`make NAVI33=1`) with its own GC 11.0.2 register map, GFX11 object, board
 memory/TMR profile and matching local PSP 13.0.7, SMU 13.0.7, GC 11.0.2,
-SDMA 6.0.2 and DCN 3.2.1 firmware wrappers. The firmware wrappers are generated
-locally from `linux-firmware` and are intentionally git-ignored; see
+SDMA 6.0.2 and DCN 3.2.1 firmware wrappers. The PSP chain now includes the
+TOS SPL table in Linux's KDB → SPL → SYS_DRV → SOS order. Firmware wrappers are
+generated locally from `linux-firmware` and are intentionally git-ignored; see
 [research/rx7600-linux-2026-11-01/NAVI33-PORTING.md](research/rx7600-linux-2026-11-01/NAVI33-PORTING.md).
 
 This is **bring-up scaffolding, not working RX 7600 macOS support**. The default
@@ -71,7 +72,7 @@ make NAVI33=1 DEBUG=1
 make test-navi33-profile
 ```
 
-The Navi 33 build emits only `RedNavi.kext` (not the separate framebuffer kext), and verifies the wrapper versions before linking. It is a bring-up build only; GPU-write stages remain locked by boot arguments.
+The Navi 33 build emits only `RedNavi.kext` (not the separate framebuffer kext), uses a Navi 33-only KMOD/CFBundle identifier and PCI match, and verifies the local wrapper versions before linking. Pushing this branch also runs a native `macos-14` GitHub Actions job that checks the actual Apple `MH_KEXT_BUNDLE` output; that job is compile/link-only and intentionally has no proprietary firmware blobs. To reproduce that no-firmware CI build locally, use `make NAVI33=1 NAVI33_REQUIRE_FIRMWARE=0 DEBUG=1`; it builds to `build/Debug-Navi33-CI` with no firmware wrappers even when local wrappers exist. It does not provide PSP/SMU/GC/DMUB firmware initialization. All GPU-write stages remain locked by boot arguments.
 
 ## Trying it
 

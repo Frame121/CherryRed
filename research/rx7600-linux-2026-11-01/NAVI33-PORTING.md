@@ -69,12 +69,12 @@ The local generator `tools/build_navi33_firmware_headers.sh` decompresses tempor
 
 | Wrapper | Firmware input family | Header/runtime value verified |
 |---|---|---|
-| `psp_fw_navi33.h` | `psp_13_0_7_sos.bin` | SOS `0x00330024` |
+| `psp_fw_navi33.h` | `psp_13_0_7_sos.bin` | KDB `0x04003300`, SPL `0x010033c0`, SYS_DRV/SOS `0x00330024`; Linux load order KDB → SPL → SYS_DRV → SOS |
 | `smu_fw_navi33.h` | `smu_13_0_7.bin` | SMU `0x00526100` (82.97.0) |
 | `gc_fw_navi33.h` | `gc_11_0_2_*` + `sdma_6_0_2.bin` | GC CP/RLC/IMU/MES and SDMA 6.0.2; 26 manifest entries |
 | `dmub_fw_navi33.h` | `dcn_3_2_1_dmcub.bin` | DMCUB `0x07003600`; VBIOS window length 57,856 bytes |
 
-`tools/verify_navi33_firmware_headers.py` checks the generated wrapper metadata and required manifest entries. It passed on the installed RX 7600 firmware set. **This verifies the local generated headers only.** It does not load firmware into the PSP, boot SMU/GC/SDMA, or prove that any macOS firmware sequence works.
+`tools/verify_navi33_firmware_headers.py` checks the generated wrapper metadata, the PSP KDB → SPL → SYS_DRV → SOS component order, and required manifest entries. It passed on the installed RX 7600 firmware set. **This verifies the local generated headers only.** It does not load firmware into the PSP, boot SMU/GC/SDMA, or prove that any macOS firmware sequence works.
 
 The PSP 13.0.7 `ta.bin` package is not currently wrapped or loaded; RAS/HDCP and other Trusted Application services are outside this first GPU-core bring-up path. The secure OS, firmware TOC/TMR, SMU, GC/SDMA, and DMUB payloads are the current scope.
 
@@ -84,7 +84,9 @@ The generated `*_navi33.h` headers embed AMD firmware payloads. They are ignored
 
 ### Isolated build and safety gates
 
-- `make NAVI33=1` selects `build/<Config>-Navi33`, defines `RN_BUILD_NAVI33`, compiles the Navi 33 `gfx11.cpp` object against `gc_regs_navi33.h`, and selects only the Navi33-specific generated firmware wrapper names.
+- `make NAVI33=1` selects `build/<Config>-Navi33`, defines `RN_BUILD_NAVI33`, compiles the Navi 33 `gfx11.cpp` object against `gc_regs_navi33.h`, selects only the Navi33-specific generated firmware wrapper names, and produces an Info.plist/KMOD identity with PCI match `0x74801002` only.
+- The local build defaults to `NAVI33_REQUIRE_FIRMWARE=1` and refuses to compile a hardware-capable Navi 33 variant if any of the four local wrappers are absent. `NAVI33_REQUIRE_FIRMWARE=0` explicitly permits a compile/link-only build whose PSP/SMU/GC/DMUB load routines compile as unavailable; do not treat that artifact as a firmware-capable driver.
+- The Makefile tracks the selected firmware-wrapper set in a per-configuration stamp so adding or removing ignored local wrapper headers forces `kern_probe.cpp` to be rebuilt with the corresponding preprocessor flags.
 - The default `NAVI33=0` build remains the original Navi 32 path. A build-target/PCI identity mismatch returns to the read-only path.
 - The Navi 33 experimental build does not execute GPU write stages unless the master boot argument `rednavi_navi33_enable=1` is present. Existing per-stage arguments remain required. GFX/SDMA additionally requires `rednavi_navi33_gfx=1`; DP setup/training additionally requires `rednavi_navi33_display=1` and the existing DP stage arguments.
 - Navi 32 `dcn_replay` and unsafe full DCN dump are skipped in the Navi 33 build. Navi 33 framebuffer publication is disabled pending a Navi 33-specific DCN pipe capture and validated scanout path.
@@ -99,4 +101,4 @@ The generated `*_navi33.h` headers embed AMD firmware payloads. They are ignored
 | Display initialization | `SOURCE_MAPPED` (IP version, DMUB family and Linux display path recorded) | Not validated; no Navi 33 macOS DP link or scanout test |
 | Graphics submission | `HOST_TESTED` (GFX11 ring packet encoding and source compile) | Not validated; no N33 SDMA/GFX packet was submitted on macOS |
 
-Cross-target syntax checks using the cloned MacKernelSDK and `x86_64-apple-macosx12` target passed for `kern_probe.cpp` with Navi 33 firmware headers, Navi 33 and Navi 32 `gfx11.cpp`, `smu13.cpp`, and all six compatibility source units. `kern_probe.cpp`, Navi 33 `gfx11.cpp`, `smu13.cpp` and all six compatibility units also emitted Mach-O kernel-target objects with `-mkernel`. This is not a full kext link or a hardware test. The MacKernelSDK directory and the generated firmware wrappers remain local/ignored.
+Cross-target compilation using the cloned MacKernelSDK and `x86_64-apple-macosx12` target passed for the Navi 33 and default probe/GFX paths, SMU, display helpers, and all compatibility source units. With the Linux `ld64.lld` cross-linker, the complete Navi 33 object set linked into an x86_64 `MH_BUNDLE` with no unresolved internal CherryRed symbols, and both N33/default KEXT package layouts passed the local Info.plist/KMOD identity checks. **Linux LLD does not implement Apple's `-kext` output type**: this local artifact is an `MH_BUNDLE` (`0x8`), not an installable `MH_KEXT_BUNDLE` (`0xB`). The added `.github/workflows/build.yml` job runs on `macos-14`, uses the native Apple linker with `make NAVI33=1 NAVI33_REQUIRE_FIRMWARE=0`, and verifies the real `MH_KEXT_BUNDLE` output. That CI job is compile/link-only and contains no local AMD firmware payloads. The machine used for this research is Linux and no macOS device was online for a native build/load or RX 7600 hardware test. The MacKernelSDK directory and generated firmware wrappers remain local/ignored.

@@ -23,3 +23,23 @@ jobs:
           path: |
             build/${{ matrix.config }}/RedNavi.kext
             build/${{ matrix.config }}/RedNaviFB.kext
+
+
+  navi33-kext:
+    # Native Apple linker job: validates a real MH_KEXT_BUNDLE. Proprietary
+    # firmware wrappers are not checked in, so this is compile/link-only CI.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap SDK
+        run: sh scripts/bootstrap.sh
+      - name: Build Navi 33 KEXT (without local firmware payloads)
+        run: make NAVI33=1 NAVI33_REQUIRE_FIRMWARE=0 DEBUG=1
+      - name: Host tests
+        run: make test
+      - name: Verify Navi 33 bundle target
+        run: python3 tools/verify_kext_binary.py build/Debug-Navi33-CI/RedNavi.kext/Contents/MacOS/RedNavi 0x0b
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RedNavi-Navi33-Debug
+          path: build/Debug-Navi33-CI/RedNavi.kext

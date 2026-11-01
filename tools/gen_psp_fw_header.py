@@ -5,16 +5,17 @@ The header is git-ignored: firmware is not redistributed from this repository.
 
     python3 tools/gen_psp_fw_header.py psp_13_0_7_sos.bin RedNavi/psp_fw_navi33.h
 
-Components are emitted in the order amdgpu loads them (psp_hw_start): KDB, SYS_DRV, SOC_DRV,
-INTF_DRV, DBG_DRV, RAS_DRV, SOS. Command values are PSP_BL__* from amdgpu_psp.h.
+Components are emitted in the Linux PSP 13.0 bootloader order: KDB, TOS SPL table, SYS_DRV,
+SOC_DRV, INTF_DRV, DBG_DRV, RAS_DRV, optional SPDM_DRV, SOS. Command values are PSP_BL__* from amdgpu_psp.h.
 """
 import struct
 import sys
 
 NAMES = ["UNKNOWN", "SOS", "SYS_DRV", "KDB", "TOC", "SPL", "RL", "SOC_DRV", "INTF_DRV",
          "DBG_DRV", "RAS_DRV", "IPKEYMGR_DRV", "SPDM_DRV"]
-ORDER = [("KDB", 0x80000), ("SYS_DRV", 0x10000), ("SOC_DRV", 0xB0000), ("INTF_DRV", 0xD0000),
-         ("DBG_DRV", 0xC0000), ("RAS_DRV", 0xE0000), ("SOS", 0x20000)]
+ORDER = [("KDB", 0x80000), ("SPL", 0x10000000), ("SYS_DRV", 0x10000), ("SOC_DRV", 0xB0000),
+         ("INTF_DRV", 0xD0000), ("DBG_DRV", 0xC0000), ("RAS_DRV", 0xE0000),
+         ("SPDM_DRV", 0x20000000), ("SOS", 0x20000)]
 
 
 def main():
