@@ -9,3 +9,4 @@ RedNavi/smu_*.h
 !RedNavi/smu13.h
 RedNavi/gc_*.h
 !RedNavi/gc_regs.h
+!RedNavi/gc_regs_navi33.h

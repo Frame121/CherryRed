@@ -97,15 +97,19 @@ The probe maps the device through an explicit PCI identity profile in RedNavi/gp
 | PCI ID | ASIC | Metadata | Probe policy |
 |---|---|---|---|
 | 1002:747E | Navi 32 | RX 7800 XT, 16 GB | Existing Navi 32 register/firmware path |
-| 1002:7480 | Navi 33 | RX 7600, 8 GB | IP discovery and VBIOS only; publishes model/VRAM metadata |
+| 1002:7480 | Navi 33 | RX 7600, 8 GB | Default build is read-only; `NAVI33=1` selects a separate GC 11.0.2 / version-matched firmware path with explicit write gates |
 | 1002:744C | Navi 31 | ASIC identity only | IP discovery and VBIOS only |
-| Anything else | Unknown | None | Never enters the Navi 32 path |
+| Anything else | Unknown | None | Never enters either supported bring-up path |
 
 The model and VRAM properties are descriptive PCI-node metadata, not evidence of
-an accelerator, display engine, or Metal driver. In particular, recognizing
-1002:7480 does **not** authorize Navi 32 register offsets, firmware, PSP/SMU
-sequences, DMCUB initialization, or display replay on Navi 33. Navi 33 needs its
-own hardware validation before any write path is considered.
+an accelerator, display engine, or Metal driver. The experimental Navi 33 path
+uses a separate generated GC 11.0.2 register map, a board-specific RX 7600 memory
+and PSP TMR profile, and locally generated firmware wrappers for the observed
+IP/firmware versions. These files make the source buildable for further testing;
+they do **not** prove PSP/SMU firmware initialization, GC/SDMA execution, display
+scanout, Vulkan or Metal on macOS. All Navi 33 GPU-write stages remain behind a
+master opt-in and individual boot-argument gates. The Navi 32 DCN replay and
+framebuffer publication are not used for Navi 33.
 
 ## Navi 31 (RX 7900 XTX, `1002:744C`) compared with Navi 32
 

@@ -9,33 +9,72 @@ OPT := -Os
 endif
 
 SDK := MacKernelSDK
-OUT := build/$(CONFIG)
+NAVI33 ?= 0
+ifeq ($(NAVI33),1)
+TARGET_SUFFIX := -Navi33
+TARGET_FLAGS := -DRN_BUILD_NAVI33=1
+GFX_OBJ = $(OUT)/gfx11_navi33.o
+PSP_FW_HEADER := RedNavi/psp_fw_navi33.h
+SMU_FW_HEADER := RedNavi/smu_fw_navi33.h
+GC_FW_HEADER := RedNavi/gc_fw_navi33.h
+DMUB_FW_HEADER := RedNavi/dmub_fw_navi33.h
+else ifeq ($(NAVI33),0)
+TARGET_SUFFIX :=
+TARGET_FLAGS :=
+GFX_OBJ = $(OUT)/gfx11.o
+PSP_FW_HEADER := RedNavi/psp_fw.h
+SMU_FW_HEADER := RedNavi/smu_fw.h
+GC_FW_HEADER := RedNavi/gc_fw.h
+DMUB_FW_HEADER := RedNavi/dmub_fw.h
+else
+$(error NAVI33 must be 0 or 1)
+endif
+FIRMWARE_DEPS := $(wildcard $(PSP_FW_HEADER) $(SMU_FW_HEADER) $(GC_FW_HEADER) $(DMUB_FW_HEADER))
+ifeq ($(NAVI33),1)
+NAVI33_VERIFY_TARGET := navi33-verify-firmware
+navi33-verify-firmware:
+	python3 tools/verify_navi33_firmware_headers.py RedNavi
+.PHONY: navi33-verify-firmware
+NAVI33_REQUIRED_HEADERS := $(PSP_FW_HEADER) $(SMU_FW_HEADER) $(GC_FW_HEADER) $(DMUB_FW_HEADER)
+NAVI33_MISSING_HEADERS := $(filter-out $(FIRMWARE_DEPS),$(NAVI33_REQUIRED_HEADERS))
+ifneq ($(strip $(NAVI33_MISSING_HEADERS)),)
+$(error Missing Navi33 firmware headers: $(NAVI33_MISSING_HEADERS). Run tools/build_navi33_firmware_headers.sh on the Linux system with linux-firmware-amdgpu installed, then transfer the ignored headers to the macOS build machine.)
+endif
+else
+NAVI33_VERIFY_TARGET :=
+endif
+OUT := build/$(CONFIG)$(TARGET_SUFFIX)
 KEXT := $(OUT)/RedNavi.kext
 FBKEXT := $(OUT)/RedNaviFB.kext
 CXX := clang++
 ARCH := -arch x86_64
 CXXFLAGS := $(ARCH) $(OPT) -std=c++17 -fno-rtti -fno-exceptions -fno-builtin -fno-common -mkernel \
 	-nostdinc -isystem $(SDK)/Headers -DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE \
-	-DAPPLE -DNeXT -mmacosx-version-min=12.0 -Wall -Icompat/include
-# Optional local firmware component (python3 tools/gen_psp_fw_header.py ... RedNavi/psp_fw.h).
-ifneq ($(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h),)
+	-DAPPLE -DNeXT -mmacosx-version-min=12.0 -Wall -Icompat/include $(TARGET_FLAGS)
+# Firmware wrappers are generated locally from matching linux-firmware files; no vendor payload is checked in.
+ifneq ($(wildcard $(PSP_FW_HEADER)),)
 CXXFLAGS += -DRN_HAVE_PSP_FW
 endif
-ifneq ($(wildcard RedNavi/smu_fw.h),)
+ifneq ($(wildcard $(SMU_FW_HEADER)),)
 CXXFLAGS += -DRN_HAVE_SMU_FW
 endif
-ifneq ($(wildcard RedNavi/gc_fw.h),)
+ifneq ($(wildcard $(GC_FW_HEADER)),)
 CXXFLAGS += -DRN_HAVE_GC_FW
 endif
-ifneq ($(wildcard RedNavi/dmub_fw.h),)
+ifneq ($(wildcard $(DMUB_FW_HEADER)),)
 CXXFLAGS += -DRN_HAVE_DMUB_FW
 endif
 LDFLAGS := $(ARCH) -Xlinker -kext -nostdlib -lkmod -L$(SDK)/Library -lkmodc++ -lcc_kext \
 	-Xlinker -object_path_lto -Xlinker /dev/null -mmacosx-version-min=12.0
 
+ifeq ($(NAVI33),1)
+# The RX7600 experimental target has no validated Navi33 scanout/framebuffer yet.
+all: $(KEXT)
+else
 all: $(KEXT) $(FBKEXT)
+endif
 
-$(OUT)/kern_probe.o: RedNavi/kern_probe.cpp RedNavi/gpu_target.h RedNavi/gpu_ip_profile.h $(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h RedNavi/smu_fw.h RedNavi/gc_fw.h RedNavi/smu13.h compat/include/*/*.h)
+$(OUT)/kern_probe.o: RedNavi/kern_probe.cpp RedNavi/gpu_target.h RedNavi/gpu_ip_profile.h RedNavi/navi33_board.h RedNavi/gc_regs.h RedNavi/gc_regs_navi33.h $(FIRMWARE_DEPS) RedNavi/smu13.h compat/include/*/*.h
 	@mkdir -p $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -47,9 +86,13 @@ $(OUT)/mode_regs.o: RedNavi/mode_regs.cpp RedNavi/mode_regs.h RedNavi/edid.h
 	@mkdir -p $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(OUT)/gfx11.o: RedNavi/gfx11.cpp RedNavi/gfx11.h RedNavi/gc_regs.h $(wildcard compat/include/*/*.h)
+$(OUT)/gfx11.o: RedNavi/gfx11.cpp RedNavi/gfx11.h RedNavi/gc_regs.h RedNavi/gfx11_packets.h $(wildcard compat/include/*/*.h)
 	@mkdir -p $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(OUT)/gfx11_navi33.o: RedNavi/gfx11.cpp RedNavi/gfx11.h RedNavi/gc_regs_navi33.h RedNavi/gfx11_packets.h $(wildcard compat/include/*/*.h)
+	@mkdir -p $(OUT)
+	$(CXX) $(CXXFLAGS) -DRN_GFX11_NAVI33=1 -c $< -o $@
 
 $(OUT)/smu13.o: RedNavi/smu13.cpp RedNavi/smu13.h $(wildcard compat/include/*/*.h)
 	@mkdir -p $(OUT)
@@ -67,9 +110,9 @@ $(OUT)/kern_info.o: RedNavi/kern_info.c
 	@mkdir -p $(OUT)
 	clang $(ARCH) $(OPT) -mkernel -nostdinc -isystem $(SDK)/Headers -DKERNEL -mmacosx-version-min=12.0 -c $< -o $@
 
-$(KEXT): $(OUT)/kern_probe.o $(OUT)/smu13.o $(OUT)/gfx11.o $(OUT)/edid.o $(OUT)/mode_regs.o $(COMPAT_OBJ) $(OUT)/kern_info.o RedNavi/Info.plist.in
+$(KEXT): $(OUT)/kern_probe.o $(OUT)/smu13.o $(GFX_OBJ) $(OUT)/edid.o $(OUT)/mode_regs.o $(COMPAT_OBJ) $(OUT)/kern_info.o RedNavi/Info.plist.in $(NAVI33_VERIFY_TARGET)
 	@mkdir -p $(KEXT)/Contents/MacOS
-	$(CXX) $(LDFLAGS) $(OUT)/kern_probe.o $(OUT)/smu13.o $(OUT)/gfx11.o $(OUT)/edid.o $(OUT)/mode_regs.o $(COMPAT_OBJ) $(OUT)/kern_info.o -o $(KEXT)/Contents/MacOS/RedNavi
+	$(CXX) $(LDFLAGS) $(OUT)/kern_probe.o $(OUT)/smu13.o $(GFX_OBJ) $(OUT)/edid.o $(OUT)/mode_regs.o $(COMPAT_OBJ) $(OUT)/kern_info.o -o $(KEXT)/Contents/MacOS/RedNavi
 	@if nm -u $(KEXT)/Contents/MacOS/RedNavi | grep -E "RedNavi|rn_|kRN"; then echo "unresolved RedNavi symbols in the kext"; exit 1; fi
 	cp RedNavi/Info.plist.in $(KEXT)/Contents/Info.plist
 	@echo "built $(KEXT)"
@@ -112,7 +155,24 @@ test-navi33-profile:
 	@mkdir -p build
 	clang++ -std=c++17 -Wall -IRedNavi tests/host/gpu_ip_profile_test.cpp -o build/gpu_ip_profile_test
 	./build/gpu_ip_profile_test
+	clang++ -std=c++17 -Wall -IRedNavi tests/host/gc_regs_navi33_test.cpp -o build/gc_regs_navi33_test
+	./build/gc_regs_navi33_test
+	clang++ -std=c++17 -Wall -IRedNavi tests/host/gfx11_packet_test.cpp -o build/gfx11_packet_test
+	./build/gfx11_packet_test
+	clang++ -std=c++17 -Wall -IRedNavi tests/host/gpu_target_test.cpp -o build/gpu_target_test
+	./build/gpu_target_test
+	@if [ -f RedNavi/psp_fw_navi33.h ] && [ -f RedNavi/smu_fw_navi33.h ] && [ -f RedNavi/gc_fw_navi33.h ] && [ -f RedNavi/dmub_fw_navi33.h ]; then python3 tools/verify_navi33_firmware_headers.py RedNavi; else echo "SKIP: local Navi33 firmware wrappers not present"; fi
 
 .PHONY: test-navi33-profile
 
 test: test-navi33-profile
+
+# Generate ignored, RX7600-matched firmware wrappers from locally installed linux-firmware blobs.
+firmware-navi33:
+	bash tools/build_navi33_firmware_headers.sh
+
+# Build the RX7600-specific kext variant; hardware write stages remain opt-in by boot-args.
+navi33:
+	$(MAKE) NAVI33=1 all
+
+.PHONY: firmware-navi33 navi33

@@ -1,9 +1,19 @@
 #include "gfx11.h"
+#include "gfx11_packets.h"
 
 #include <string.h>
 
 #include <linux/delay.h>
+#if defined(RN_GFX11_NAVI33)
+#include "gc_regs_navi33.h"
+#define rn_gfxhub_enable rn_navi33_gfxhub_enable
+#define rn_sdma0_test rn_navi33_sdma0_test
+#define rn_gfx_ring_test rn_navi33_gfx_ring_test
+#define RN_GCVM_L2_CNTL3_INIT 0x80120007u // gc_11_0_0_default.h / gfxhub_v3_0.c
+#else
 #include "gc_regs.h"
+#define RN_GCVM_L2_CNTL3_INIT 0x80100007u // gfxhub_v3_0_3.c special case for GC 11.0.3
+#endif
 
 namespace {
 
@@ -82,7 +92,7 @@ void rn_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc) {
     tmp = REG_SET_FIELD(tmp, GCVM_L2_CNTL2, INVALIDATE_ALL_L1_TLBS, 1);
     tmp = REG_SET_FIELD(tmp, GCVM_L2_CNTL2, INVALIDATE_L2_CACHE, 1);
     WREG32_SOC15(RN_GC, 0, regGCVM_L2_CNTL2, tmp);
-    tmp = 0x80100007u;                                                       // gfxhub_v3_0_3.c redefines the default (gc_11_0_0 has 0x80120007)
+    tmp = RN_GCVM_L2_CNTL3_INIT;
     tmp = REG_SET_FIELD(tmp, GCVM_L2_CNTL3, BANK_SELECT, 9);
     tmp = REG_SET_FIELD(tmp, GCVM_L2_CNTL3, L2_CACHE_BIGK_FRAGMENT_SIZE, 6);
     WREG32_SOC15(RN_GC, 0, regGCVM_L2_CNTL3, tmp);
@@ -280,11 +290,11 @@ void rn_gfx_ring_test(struct rn_device *adev, u64 vaBase, u64 ringOff, u32 ringB
     res->step = 1;
 
     // the packet of ring_test_ring: SET_UCONFIG_REG SCRATCH_REG0 = 0xDEADBEEF, padded with a NOP packet to 8 dwords
-    const u32 scratchDw = 0xc000u + 0x40u;                                   // regSCRATCH_REG0 is at GC base 1 (0xa000) + 0x2040
-    const u32 pkt[8] = {RN_PACKET3(RN_PACKET3_SET_UCONFIG_REG, 1), scratchDw - RN_PACKET3_SET_UCONFIG_REG_START, 0xDEADBEEFu,
-                        RN_PACKET3(RN_PACKET3_NOP, 3), 0, 0, 0, 0};
+    const u32 scratchDw = adev->reg_offset[RN_GC_HWIP][0][regSCRATCH_REG0_BASE_IDX] + regSCRATCH_REG0;
+    const rednavi::gfx11::ScratchWritePacket pkt =
+        rednavi::gfx11::makeScratchWritePacket(scratchDw, rednavi::gfx11::kRingTestMagic);
     for (u32 o = 0; o < ringBytes; o += 4) rn_vram_wr32(adev, ringOff + o, 0);
-    for (u32 i = 0; i < 8; i++) rn_vram_wr32(adev, ringOff + i * 4, pkt[i]);
+    for (u32 i = 0; i < 8; i++) rn_vram_wr32(adev, ringOff + i * 4, pkt.dwords[i]);
     rn_vram_wr32(adev, rptrOff, 0); rn_vram_wr32(adev, rptrOff + 4, 0);
     rn_vram_wr32(adev, wptrOff, 0); rn_vram_wr32(adev, wptrOff + 4, 0);
     WREG32_SOC15(RN_GC, 0, regSCRATCH_REG0, 0xCAFEDEADu);

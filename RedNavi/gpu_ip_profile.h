@@ -11,6 +11,22 @@ struct IpVersion {
     uint8_t revision;
 };
 
+enum class BringupReadiness : uint8_t {
+    NotAvailable = 0,
+    SourceMapped,
+    HostTested,
+    HardwareValidated
+};
+
+constexpr const char *readinessName(BringupReadiness value) noexcept {
+    switch (value) {
+        case BringupReadiness::SourceMapped: return "SOURCE_MAPPED";
+        case BringupReadiness::HostTested: return "HOST_TESTED";
+        case BringupReadiness::HardwareValidated: return "HARDWARE_VALIDATED";
+        default: return "NOT_AVAILABLE";
+    }
+}
+
 // Hardware-generation facts are kept separate from permission to touch hardware.
 // A version match is not proof that register sequences or firmware are compatible.
 struct GpuIpProfile {
@@ -30,6 +46,10 @@ struct GpuIpProfile {
     bool firmwareSequenceValidatedOnTarget;
     bool displayInitValidatedOnTarget;
     bool graphicsSubmissionValidatedOnTarget;
+    BringupReadiness gcRegisterReadiness;
+    BringupReadiness firmwareReadiness;
+    BringupReadiness displayReadiness;
+    BringupReadiness graphicsSubmissionReadiness;
 
     constexpr bool mayUseNavi32Bringup() const noexcept {
         return family == GpuFamily::Navi32 &&
@@ -44,19 +64,35 @@ constexpr GpuIpProfile ipProfileFor(GpuFamily family) noexcept {
             // RX 7800 XT reference target; see docs/ARCHITECTURE.md.
             return {family, {11,0,3}, {6,0,3}, {13,0,10}, {13,0,10},
                     {3,2,0}, {4,3,0}, {3,0,0}, {6,0,0}, {6,0,0}, {4,0,0},
-                    true, true, true, true, false};
+                    true, true, true, true, false,
+                    BringupReadiness::HardwareValidated,
+                    BringupReadiness::HardwareValidated,
+                    BringupReadiness::HardwareValidated,
+                    BringupReadiness::SourceMapped};
         case GpuFamily::Navi33:
             // RX 7600 measured Linux capture, 2026-11-01. No macOS write path validated.
             return {family, {11,0,2}, {6,0,2}, {13,0,7}, {13,0,7},
                     {3,2,1}, {4,3,1}, {3,0,2}, {6,0,2}, {6,0,1}, {4,0,0},
-                    true, false, false, false, false};
+                    true, false, false, false, false,
+                    BringupReadiness::HostTested,
+                    BringupReadiness::HostTested,
+                    BringupReadiness::SourceMapped,
+                    BringupReadiness::HostTested};
         case GpuFamily::Navi31:
             return {family, {11,0,0}, {6,0,0}, {13,0,0}, {13,0,0},
                     {3,2,0}, {4,3,0}, {3,0,0}, {6,0,0}, {6,0,0}, {4,0,0},
-                    false, false, false, false, false};
+                    false, false, false, false, false,
+                    BringupReadiness::NotAvailable,
+                    BringupReadiness::NotAvailable,
+                    BringupReadiness::NotAvailable,
+                    BringupReadiness::NotAvailable};
         default:
             return {GpuFamily::Unknown, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
-                    false, false, false, false, false};
+                    false, false, false, false, false,
+                    BringupReadiness::NotAvailable,
+                    BringupReadiness::NotAvailable,
+                    BringupReadiness::NotAvailable,
+                    BringupReadiness::NotAvailable};
     }
 }
 

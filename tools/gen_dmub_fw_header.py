@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn the DMCUB firmware into a C header for local builds (git-ignored, firmware is not redistributed).
 
-    python3 tools/gen_dmub_fw_header.py dcn_3_2_0_dmcub.bin 57856 RedNavi/dmub_fw.h
+    python3 tools/gen_dmub_fw_header.py dcn_3_2_1_dmcub.bin 57856 RedNavi/dmub_fw_navi33.h
 
 The second argument is the VBIOS size in bytes; the probe refuses to run if the card reports another size.
 """

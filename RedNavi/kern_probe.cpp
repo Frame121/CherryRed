@@ -91,19 +91,43 @@
 #include "gfx11.h"
 #include "gpu_target.h"
 #include "gpu_ip_profile.h"
+#include "navi33_board.h"
+#ifdef RN_BUILD_NAVI33
+#include "gc_regs_navi33.h"
+#define rn_gfxhub_enable rn_navi33_gfxhub_enable
+#define rn_sdma0_test rn_navi33_sdma0_test
+#define rn_gfx_ring_test rn_navi33_gfx_ring_test
+#else
 #include "gc_regs.h"
+#endif
 
 #ifdef RN_HAVE_PSP_FW
+#ifdef RN_BUILD_NAVI33
+#include "psp_fw_navi33.h"
+#else
 #include "psp_fw.h"
 #endif
+#endif
 #ifdef RN_HAVE_SMU_FW
+#ifdef RN_BUILD_NAVI33
+#include "smu_fw_navi33.h"
+#else
 #include "smu_fw.h"
 #endif
+#endif
 #ifdef RN_HAVE_GC_FW
+#ifdef RN_BUILD_NAVI33
+#include "gc_fw_navi33.h"
+#else
 #include "gc_fw.h"
 #endif
+#endif
 #ifdef RN_HAVE_DMUB_FW
+#ifdef RN_BUILD_NAVI33
+#include "dmub_fw_navi33.h"
+#else
 #include "dmub_fw.h"
+#endif
 #endif
 
 // Log a step and give the console time to print it, so a hang shows the last step reached on screen.
@@ -126,7 +150,6 @@
 #define kRNDiscoveryTmrOffset (64 * 1024)
 #define kRNDiscoveryTmrSize   (10 * 1024)
 #define kRNBinarySignature    0x28211407u
-#define kRNFallbackVramMB     (16u * 1024)  // RX 7800 XT, used if the memsize register reads 0 or all ones
 
 // Hardware IDs in the discovery table (soc15_hw_ip.h).
 #define kRNMp0C2pmsg35        0x063       // dword offsets from the MP0 base
@@ -135,7 +158,11 @@
 #define kRNPspBlLoadSos       0x20000u    // PSP_BL__LOAD_SOSDRV
 #define kRNMp0C2pmsg81        0x091
 #define kRNPspBlReady         0x80000000u
-#define kRNVramMcBase         0x8000000000ull  // MMHUB FB_LOCATION_BASE 0x8000 << 24, read by probe stage 3
+#ifdef RN_BUILD_NAVI33
+#define kRNVramMcBase         rednavi::kNavi33Board.vramMcBase
+#else
+#define kRNVramMcBase         0x8000000000ull  // MMHUB FB_LOCATION_BASE 0x8000 << 24, RX 7800 XT evidence
+#endif
 #define kRNPspBufVramOffset   0x40000000ull    // 1 GB into VRAM, 1 MB aligned, well clear of the table at the end
 #define kRNPspRingVramOffset  0x40200000ull    // 4 KB ring, 2 MB into the staging area
 #define kRNPspCmdVramOffset   0x40210000ull    // 4 KB command/response buffer, 4 KB aligned
@@ -286,7 +313,7 @@ class RedNaviProbe : public IOService {
     void loadDmcub();
     void loadSmuFw();
     void loadGcFw();
-    void sdmaTest();
+    void sdmaTest(uint64_t vramBytes);
     struct rn_device gpu;          // register access in the amdgpu style, filled in start()
     void gcStatus(OSDictionary *out, const char *prefix, uint32_t timeoutMs);
     void probeAux();
@@ -363,8 +390,14 @@ void RedNaviProbe::dumpDiscovery() {
     uint32_t vramMB = rd(kRNRccConfigMemsize);
     IOLog("RedNavi: RCC_CONFIG_MEMSIZE = 0x%08x\n", vramMB);
     if (vramMB == 0 || vramMB == 0xFFFFFFFFu) {
-        vramMB = kRNFallbackVramMB;
-        IOLog("RedNavi: memsize register unusable, assuming %u MB\n", vramMB);
+        const rednavi::GpuTargetProfile fallback = rednavi::identifyGpu(
+            pci->configRead16(kIOPCIConfigVendorID), pci->configRead16(kIOPCIConfigDeviceID));
+        if (!fallback.vramMegabytes) {
+            IOLog("RedNavi: memsize register unusable and PCI identity has no safe VRAM fallback; aborting discovery read\n");
+            return;
+        }
+        vramMB = fallback.vramMegabytes;
+        IOLog("RedNavi: memsize register unusable, using PCI-profile fallback %u MB\n", vramMB);
     }
 
     uint64_t base = ((uint64_t)vramMB << 20) - kRNDiscoveryTmrOffset;
@@ -1382,14 +1415,35 @@ void RedNaviProbe::sendPspBootCfgGet() {
 
 void RedNaviProbe::sendPspSetupTmr() {
     uint32_t arg = 0;
+#ifdef RN_BUILD_NAVI33
+    if (!PE_parse_boot_argn("rednavi_psp_tmr", &arg, sizeof(arg)) || arg != 1) {
+        IOLog("RedNavi: PSP SETUP_TMR not requested (boot-arg rednavi_psp_tmr=1; uses measured RX7600 TMR placement)\n");
+        return;
+    }
+#else
     if (!PE_parse_boot_argn("rednavi_psp_tmr", &arg, sizeof(arg)) || (arg != 1 && arg != 2)) {
         IOLog("RedNavi: PSP SETUP_TMR not requested (boot-arg rednavi_psp_tmr=1, or 2 for the top of VRAM as Linux does)\n");
         return;
     }
+#endif
     if (!pspTmrSize) { IOLog("RedNavi: PSP SETUP_TMR: no TMR size from LOAD_TOC\n"); return; }
     IODeviceMemory *bar0 = pci->getDeviceMemoryWithRegister(kIOPCIConfigBaseAddress0 + kRNVramBar * 4);
     if (!bar0) { IOLog("RedNavi: PSP SETUP_TMR: no BAR0\n"); return; }
-    uint64_t tmrOff = arg == 2 ? 0x3e0000000ull : kRNPspTmrVramOffset;       // 2: where the Linux reference run put it
+#ifdef RN_BUILD_NAVI33
+    const uint64_t tmrOff = rednavi::kNavi33Board.pspTmrVramOffset;
+    if (pspTmrSize != rednavi::kNavi33Board.pspTmrBytes) {
+        IOLog("RedNavi: Navi33 TMR size 0x%x does not match the measured 0x%x; refusing setup\n",
+              pspTmrSize, rednavi::kNavi33Board.pspTmrBytes);
+        return;
+    }
+#else
+    const uint64_t tmrOff = arg == 2 ? 0x3e0000000ull : kRNPspTmrVramOffset;
+#endif
+    if (tmrOff > bar0->getLength() || pspTmrSize > bar0->getLength() - tmrOff) {
+        IOLog("RedNavi: PSP SETUP_TMR: BAR0 length 0x%llx cannot cover TMR offset 0x%llx size 0x%x\n",
+              (uint64_t)bar0->getLength(), tmrOff, pspTmrSize);
+        return;
+    }
     uint64_t mc = kRNVramMcBase + tmrOff;                                      // GPU address
     uint64_t pa = static_cast<uint64_t>(bar0->getPhysicalAddress()) + tmrOff;  // CPU physical address of the same bytes (amdgpu_gmc_vram_pa)
     // cmd.cmd_setup_tmr: buf_phy_addr_lo/hi, buf_size, flags (bit 1 = virt_phy_addr), system_phy_addr_lo/hi
@@ -1499,12 +1553,17 @@ void RedNaviProbe::loadSmuFw() {
 // rednavi_gc_load=1, needs RedNavi/gc_fw.h (tools/gen_gc_fw_header.py).
 // gfx_v11_0_wait_for_rlc_autoload_complete: CP_STAT == 0 and RLC_RLCS_BOOTLOAD_STATUS.BOOTLOAD_COMPLETE. Publishes the values with `prefix`.
 void RedNaviProbe::gcStatus(OSDictionary *out, const char *prefix, uint32_t timeoutMs) {
-    uint32_t gc0 = 0, gc1 = 0;
-    if (!ipBase(kRNHwIdGc, &gc0, 0) || !ipBase(kRNHwIdGc, &gc1, 1)) return;
+    struct rn_device *adev = &gpu;
+    for (uint32_t i = 0; i < 4; i++) {
+        if (!ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i)) {
+            IOLog("RedNavi: GC status: missing GC register base segment %u\n", i);
+            return;
+        }
+    }
     uint32_t cpStat = 0xFFFFFFFFu, boot = 0, ms = 0;
     for (; ms < timeoutMs; ms++) {
-        cpStat = rd((gc0 + 0xf40) * 4);                             // regCP_STAT
-        boot = rd((gc1 + 0x4e82) * 4);                              // regRLC_RLCS_BOOTLOAD_STATUS
+        cpStat = RREG32_SOC15(RN_GC, 0, regCP_STAT);
+        boot = RREG32_SOC15(RN_GC, 0, regRLC_RLCS_BOOTLOAD_STATUS);
         if (cpStat == 0 && (boot & 0x80000000u)) break;
         IOSleep(1);
     }
@@ -1512,11 +1571,13 @@ void RedNaviProbe::gcStatus(OSDictionary *out, const char *prefix, uint32_t time
     auto alive = [&](const char *name) {
         char key[48];
         snprintf(key, sizeof(key), "%safter_%s_sdma", prefix, name);
-        rnPublishOne(out, key, rd(0x1295 * 4));
+        rnPublishOne(out, key, RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION));
     };
     struct { const char *name; uint32_t reg; } regs[] = {
-        {"grbm_status", (gc0 + 0xda4) * 4}, {"rlc_gpm_stat", (gc1 + 0x4e6b) * 4}, {"rlc_cntl", (gc1 + 0x4c00) * 4},
-        {"imu_scratch0", (gc1 + 0x4068) * 4},
+        {"grbm_status", (gpu.reg_offset[RN_GC_HWIP][0][regGRBM_STATUS_BASE_IDX] + regGRBM_STATUS) * 4},
+        {"rlc_gpm_stat", (gpu.reg_offset[RN_GC_HWIP][0][regRLC_GPM_STAT_BASE_IDX] + regRLC_GPM_STAT) * 4},
+        {"rlc_cntl", (gpu.reg_offset[RN_GC_HWIP][0][regRLC_CNTL_BASE_IDX] + regRLC_CNTL) * 4},
+        {"imu_scratch0", (gpu.reg_offset[RN_GC_HWIP][0][1] + 0x4068) * 4}, // IMU scratch window from imu_v11_0 register map
     };
     char key[40];
     snprintf(key, sizeof(key), "%swait_ms", prefix); rnPublishOne(out, key, ms);
@@ -1579,36 +1640,48 @@ void RedNaviProbe::loadGcFw() {
 
 // First command on the graphics engines (boot-arg rednavi_sdma_test=1, needs the GC firmware and the SMU features enabled so the RLC has
 // booted): enable the GC memory hub on VRAM, start SDMA0 on a ring in VRAM and have it write a magic value that the CPU then reads.
-void RedNaviProbe::sdmaTest() {
+void RedNaviProbe::sdmaTest(uint64_t vramBytes) {
+    struct rn_device *adev = &gpu;                                         // the RREG32 macros expect this name
+#ifdef RN_BUILD_NAVI33
+    uint32_t navi33Gfx = 0;
+    if (!PE_parse_boot_argn("rednavi_navi33_gfx", &navi33Gfx, sizeof(navi33Gfx)) || navi33Gfx != 1) {
+        IOLog("RedNavi: Navi33 GFX/SDMA commands are locked; require rednavi_navi33_gfx=1\n");
+        return;
+    }
+#endif
     uint32_t arg = 0;
     if (!PE_parse_boot_argn("rednavi_sdma_test", &arg, sizeof(arg)) || arg != 1) return;
-    uint32_t gc1 = 0;
-    if (!ipBase(kRNHwIdGc, &gc1, 1)) return;
-    uint32_t boot = rd((gc1 + 0x4e82) * 4);
+    // `start()` has parsed IP discovery and populated the per-IP offsets before any write stage.
+    for (uint32_t i = 0; i < 4; i++) {
+        if (!gpu.reg_offset[RN_GC_HWIP][0][i]) {
+            IOLog("RedNavi: SDMA test: GC IP base segment %u is unavailable\n", i);
+            return;
+        }
+    }
+    if (!gpu.reg_offset[RN_MP1_HWIP][0][0]) {
+        IOLog("RedNavi: SDMA test: MP1 IP base is unavailable\n");
+        return;
+    }
+    uint32_t boot = RREG32_SOC15(RN_GC, 0, regRLC_RLCS_BOOTLOAD_STATUS);
     if (!(boot & 0x80000000u)) { IOLog("RedNavi: SDMA test: the RLC has not booted (BOOTLOAD_STATUS 0x%08x), skipping\n", boot); return; }
-    // With the SMU features on, GFXOFF powers the graphics block down when it is idle and its registers read back as zero (the SDMA
-    // status did). Linux brackets register access with amdgpu_gfx_off_ctrl; here GFXOFF is simply disallowed for the test.
-    struct rn_device *adev = &gpu;                                         // the RREG32 macros expect this name
-    // The IP bases are only known once the discovery table is parsed, which is after rn_device_init in start(): fill them in here.
-    // (They were all 0 until now, so every macro access in this test hit the wrong register.)
-    for (uint32_t i = 0; i < 4; i++) ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i);
-    ipBase(kRNHwIdMp1, &gpu.reg_offset[RN_MP1_HWIP][0][0]);
+    // With the SMU features on, GFXOFF powers the graphics block down when it is idle (same as Linux amdgpu_gfx_off_ctrl).
+
     // After the features are enabled the SMU may be busy for a while with C2PMSG_90 at 0: wait for it (up to 10 s) and record how long.
     {
         const char *sn[2] = {"c2pmsg_90", "sdma_version"};
-        uint32_t sv[2] = {RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90), rd(0x1295 * 4)};
+        uint32_t sv[2] = {RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90), RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION)};
         rnPublish(this, "sdma-start", sn, sv, 2);
     }
     uint32_t waitedMs = 0;
     // Not while the SDMA is up (SDMA0_VERSION nonzero): the mailbox reads 0 from here on, and the block went dark during this wait.
-    while (rd(0x1295 * 4) == 0 && waitedMs < 10000 && RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90) == 0) { IOSleep(1); waitedMs++; }
+    while (RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION) == 0 && waitedMs < 10000 && RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90) == 0) { IOSleep(1); waitedMs++; }
     {
         const char *wn[1] = {"smu_idle_wait_ms"};
         uint32_t wv[1] = {waitedMs};
         rnPublish(this, "sdma-wait", wn, wv, 1);
     }
     uint32_t goResult = 0, goResp = 0, c66 = RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_66), c82 = RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_82), c90 = RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90);
-    uint32_t trace[6] = {rd(0x1295 * 4), 0, 0, 0, 0, 0};   // SDMA0_VERSION after: start, GetSmuVersion, DisallowGfxOff, vram writes, gfxhub, test
+    uint32_t trace[6] = {RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION), 0, 0, 0, 0, 0};   // SDMA0_VERSION after: start, GetSmuVersion, DisallowGfxOff, vram writes, gfxhub, test
     uint32_t verResult = 0, verResp = 0;
     int ver = rn_smu13_send(&gpu, PPSMC_MSG_GetSmuVersion, 0, &verResult, &verResp, 500000);   // is the SMU still answering at all?
     {
@@ -1616,21 +1689,27 @@ void RedNaviProbe::sdmaTest() {
         uint32_t sv[6] = {c66, c82, c90, static_cast<uint32_t>(ver), verResp, verResult};
         rnPublish(this, "sdma-smu", sn, sv, 6);
     }
-    trace[1] = rd(0x1295 * 4);
+    trace[1] = RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION);
     int go = rn_smu13_send(&gpu, PPSMC_MSG_DisallowGfxOff, 0, &goResult, &goResp, 500000);
     IOLog("RedNavi: SDMA test: DisallowGfxOff rc %d response 0x%x\n", go, goResp);
     IOSleep(20);
-    trace[2] = rd(0x1295 * 4);
+    trace[2] = RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION);
     {
-        uint32_t gc0 = 0;
-        ipBase(kRNHwIdGc, &gc0, 0);
-        uint32_t dn[6] = {static_cast<uint32_t>(go), goResp, rd((gc0 + 0xda4) * 4), rd((gc1 + 0x4e6b) * 4), rd((gc0 + 0xf40) * 4), rd((gc1 + 0x4c00) * 4)};
+        uint32_t dn[6] = {static_cast<uint32_t>(go), goResp,
+                          RREG32_SOC15(RN_GC, 0, regGRBM_STATUS),
+                          RREG32_SOC15(RN_GC, 0, regRLC_GPM_STAT),
+                          RREG32_SOC15(RN_GC, 0, regCP_STAT),
+                          RREG32_SOC15(RN_GC, 0, regRLC_CNTL)};
         const char *dnn[6] = {"gfxoff_rc", "gfxoff_resp", "grbm_status", "rlc_gpm_stat", "cp_stat", "rlc_cntl"};
         rnPublish(this, "sdma-pre", dnn, dn, 6);
     }
     // VRAM offsets: the first ~8 MB hold the firmware boot framebuffer that macOS draws into, the scanout is at 0x08000000, so the
     // engines work at 192 MB: page table 0x0C100000, default and fault pages 0x0C200000/0x0C201000, SDMA ring 0x0C000000, target 0x0C002000.
-    struct rn_gmc gmc = {kRNVramMcBase, kRNVramMcBase + 0x3FFFFFFFFull, 0x0C000000, 0x0C3FFFFF, 0x0C100000, 0x0C200000, 0x0C201000};   // GART window over VRAM 0x0C000000..0x0C3FFFFF
+    if (vramBytes == 0 || vramBytes > 0x400000000ull) {
+        IOLog("RedNavi: SDMA test: VRAM size %llu is outside supported 0..16 GiB profile range, refusing GMC setup\n", vramBytes);
+        return;
+    }
+    struct rn_gmc gmc = {kRNVramMcBase, kRNVramMcBase + vramBytes - 1, 0x0C000000, 0x0C3FFFFF, 0x0C100000, 0x0C200000, 0x0C201000};   // GART window over VRAM 0x0C000000..0x0C3FFFFF
     
     // Does CPU access to VRAM through MM_INDEX/MM_DATA survive the memory hub being switched on? Two probe locations, read right
     // after writing and again 50 ms later, before and after rn_gfxhub_enable.
@@ -1639,11 +1718,11 @@ void RedNaviProbe::sdmaTest() {
     pt[0] = rn_vram_rd32(&gpu, 0x0C000000); pt[1] = rn_vram_rd32(&gpu, 0x0C002000);
     IOSleep(50);
     pt[2] = rn_vram_rd32(&gpu, 0x0C000000); pt[3] = rn_vram_rd32(&gpu, 0x0C002000);
-    trace[3] = rd(0x1295 * 4);
-    // Proof that the 11.0.3 hub offsets are right: before we write anything, FB_LOCATION_BASE/TOP should hold what the VBIOS left (0x8000/0x83ff).
+    trace[3] = RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION);
+    // Check the ASIC-selected GFX hub map: the VBIOS must leave a coherent framebuffer window before the test reprograms it.
     const uint32_t fbBefore = RREG32_SOC15(RN_GC, 0, regGCMC_VM_FB_LOCATION_BASE), fbTopBefore = RREG32_SOC15(RN_GC, 0, regGCMC_VM_FB_LOCATION_TOP);
     rn_gfxhub_enable(&gpu, &gmc);
-    trace[4] = rd(0x1295 * 4);
+    trace[4] = RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION);
     {   // do the GCVM writes stick? (they read 0 on a healthy Linux system too, so this may tell nothing)
         const char *gn[10] = {"l2_cntl", "ctx0_cntl", "aperture_low", "aperture_high", "l1_tlb", "pt_base_lo", "pt_end_lo", "fb_base", "fb_base_before", "fb_top_before"};
         uint32_t gv[10] = {RREG32_SOC15(RN_GC, 0, regGCVM_L2_CNTL), RREG32_SOC15(RN_GC, 0, regGCVM_CONTEXT0_CNTL),
@@ -1663,7 +1742,7 @@ void RedNaviProbe::sdmaTest() {
     IOLog("RedNavi: SDMA test: GFXHUB enabled, starting SDMA0\n");
     struct rn_sdma_result res;
     rn_sdma0_test(&gpu, kRNVramMcBase, 0x0C000000, 4096, 0x0C002000, &res);   // MC addresses, through the system aperture
-    trace[5] = rd(0x1295 * 4);
+    trace[5] = RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION);
     {   // Did the write land somewhere else (fault default pages, an offset by the FB base)? Look for it in the whole work area.
         uint32_t hits[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu}, n = 0;
         for (uint64_t o = 0x0C000000ull; o < 0x0C300000ull && n < 4; o += 4)
@@ -1677,7 +1756,7 @@ void RedNaviProbe::sdmaTest() {
                               "gc_base0", "gc_base1", "gc_base2", "macro_version"};
         uint32_t tv[10] = {trace[0], trace[1], trace[2], trace[3], trace[4], trace[5], gpu.reg_offset[RN_GC_HWIP][0][0],
                            gpu.reg_offset[RN_GC_HWIP][0][1], gpu.reg_offset[RN_GC_HWIP][0][2],
-                           rn_rreg32(&gpu, gpu.reg_offset[RN_GC_HWIP][0][0] + 0x35)};
+                           RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION)};
         rnPublish(this, "sdma-trace", tn, tv, 10);
     }
     IOLog("RedNavi: SDMA test: step %u, value 0x%08x, RPTR 0x%x WPTR 0x%x F32_CNTL 0x%08x RB_CNTL 0x%08x -> %s\n", res.step, res.value, res.rptr, res.wptr, res.f32_cntl, res.rb_cntl, res.ok ? "OK" : "FAILED");
@@ -1908,28 +1987,64 @@ bool RedNaviProbe::start(IOService *provider) {
     }
     IOLog("RedNavi: registers mapped, %llu KB\n", (uint64_t)regs->getLength() >> 10);
     rn_device_init(&gpu, "RedNavi", reinterpret_cast<volatile void *>(regs->getVirtualAddress()), regs->getLength());
-    for (uint32_t i = 0; i < 4; i++) ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i);
-    ipBase(kRNHwIdMp1, &gpu.reg_offset[RN_MP1_HWIP][0][0]);
 
-    // Identify the ASIC from the PCI vendor/device pair. Model metadata is safe to
-    // publish for known identities, but only Navi 32 may enter the existing
-    // Navi 32-specific register and firmware sequence below.
+    // Identify the ASIC from PCI and keep each target's register and firmware path isolated.
     const uint16_t vendorId = pci->configRead16(kIOPCIConfigVendorID);
     const uint16_t deviceId = pci->configRead16(kIOPCIConfigDeviceID);
     const rednavi::GpuTargetProfile target = rednavi::identifyGpu(vendorId, deviceId);
     const rednavi::GpuIpProfile ipProfile = rednavi::ipProfileForPci(vendorId, deviceId);
-    IOLog("RedNavi: IP profile GC %u.%u.%u SDMA %u.%u.%u PSP %u.%u.%u SMU %u.%u.%u DCN %u.%u.%u\n",
+    IOLog("RedNavi: IP profile GC %u.%u.%u SDMA %u.%u.%u PSP %u.%u.%u SMU %u.%u.%u DCN %u.%u.%u NBIO %u.%u.%u MMHUB %u.%u.%u OSSSYS %u.%u.%u HDP %u.%u.%u VCN %u.%u.%u\n",
           ipProfile.gc.major, ipProfile.gc.minor, ipProfile.gc.revision,
           ipProfile.sdma.major, ipProfile.sdma.minor, ipProfile.sdma.revision,
           ipProfile.psp.major, ipProfile.psp.minor, ipProfile.psp.revision,
           ipProfile.smu.major, ipProfile.smu.minor, ipProfile.smu.revision,
-          ipProfile.dcn.major, ipProfile.dcn.minor, ipProfile.dcn.revision);
-    IOLog("RedNavi: validation discovery=%u gc-offsets=%u firmware=%u display=%u gfx-submit=%u\n",
+          ipProfile.dcn.major, ipProfile.dcn.minor, ipProfile.dcn.revision,
+          ipProfile.nbio.major, ipProfile.nbio.minor, ipProfile.nbio.revision,
+          ipProfile.mmhub.major, ipProfile.mmhub.minor, ipProfile.mmhub.revision,
+          ipProfile.osssys.major, ipProfile.osssys.minor, ipProfile.osssys.revision,
+          ipProfile.hdp.major, ipProfile.hdp.minor, ipProfile.hdp.revision,
+          ipProfile.vcn.major, ipProfile.vcn.minor, ipProfile.vcn.revision);
+    IOLog("RedNavi: preparation GC-register-map=%s firmware-payloads=%s display-path=%s graphics-packet=%s\n",
+          rednavi::readinessName(ipProfile.gcRegisterReadiness),
+          rednavi::readinessName(ipProfile.firmwareReadiness),
+          rednavi::readinessName(ipProfile.displayReadiness),
+          rednavi::readinessName(ipProfile.graphicsSubmissionReadiness));
+    IOLog("RedNavi: RX7600 evidence linux-ip-discovery=%u; macOS hardware validation gc-offsets=%u firmware=%u display=%u gfx-submit=%u\n",
           ipProfile.ipDiscoveryObservedOnTarget,
           ipProfile.gcRegisterOffsetsValidatedOnTarget,
           ipProfile.firmwareSequenceValidatedOnTarget,
           ipProfile.displayInitValidatedOnTarget,
           ipProfile.graphicsSubmissionValidatedOnTarget);
+    OSDictionary *profileOut = OSDictionary::withCapacity(24);
+    if (profileOut) {
+        rnPublishOne(profileOut, "vendor-id", vendorId);
+        rnPublishOne(profileOut, "device-id", deviceId);
+        rnPublishOne(profileOut, "gc-ip-version", (ipProfile.gc.major << 16) | (ipProfile.gc.minor << 8) | ipProfile.gc.revision);
+        rnPublishOne(profileOut, "sdma-ip-version", (ipProfile.sdma.major << 16) | (ipProfile.sdma.minor << 8) | ipProfile.sdma.revision);
+        rnPublishOne(profileOut, "psp-ip-version", (ipProfile.psp.major << 16) | (ipProfile.psp.minor << 8) | ipProfile.psp.revision);
+        rnPublishOne(profileOut, "smu-ip-version", (ipProfile.smu.major << 16) | (ipProfile.smu.minor << 8) | ipProfile.smu.revision);
+        rnPublishOne(profileOut, "dcn-ip-version", (ipProfile.dcn.major << 16) | (ipProfile.dcn.minor << 8) | ipProfile.dcn.revision);
+        rnPublishOne(profileOut, "nbio-ip-version", (ipProfile.nbio.major << 16) | (ipProfile.nbio.minor << 8) | ipProfile.nbio.revision);
+        rnPublishOne(profileOut, "mmhub-ip-version", (ipProfile.mmhub.major << 16) | (ipProfile.mmhub.minor << 8) | ipProfile.mmhub.revision);
+        rnPublishOne(profileOut, "osssys-ip-version", (ipProfile.osssys.major << 16) | (ipProfile.osssys.minor << 8) | ipProfile.osssys.revision);
+        rnPublishOne(profileOut, "hdp-ip-version", (ipProfile.hdp.major << 16) | (ipProfile.hdp.minor << 8) | ipProfile.hdp.revision);
+        rnPublishOne(profileOut, "vcn-ip-version", (ipProfile.vcn.major << 16) | (ipProfile.vcn.minor << 8) | ipProfile.vcn.revision);
+        rnPublishOne(profileOut, "linux-ip-discovery-evidence", ipProfile.ipDiscoveryObservedOnTarget);
+        rnPublishOne(profileOut, "macos-gc-registers-hardware-validated", ipProfile.gcRegisterOffsetsValidatedOnTarget);
+        rnPublishOne(profileOut, "macos-firmware-hardware-validated", ipProfile.firmwareSequenceValidatedOnTarget);
+        rnPublishOne(profileOut, "macos-display-hardware-validated", ipProfile.displayInitValidatedOnTarget);
+        rnPublishOne(profileOut, "macos-graphics-submit-hardware-validated", ipProfile.graphicsSubmissionValidatedOnTarget);
+        OSString *gcReady = OSString::withCString(rednavi::readinessName(ipProfile.gcRegisterReadiness));
+        OSString *fwReady = OSString::withCString(rednavi::readinessName(ipProfile.firmwareReadiness));
+        OSString *displayReady = OSString::withCString(rednavi::readinessName(ipProfile.displayReadiness));
+        OSString *gfxReady = OSString::withCString(rednavi::readinessName(ipProfile.graphicsSubmissionReadiness));
+        if (gcReady) { profileOut->setObject("gc-register-readiness", gcReady); gcReady->release(); }
+        if (fwReady) { profileOut->setObject("firmware-preparation-readiness", fwReady); fwReady->release(); }
+        if (displayReady) { profileOut->setObject("display-readiness", displayReady); displayReady->release(); }
+        if (gfxReady) { profileOut->setObject("graphics-packet-readiness", gfxReady); gfxReady->release(); }
+        setProperty("ip-profile", profileOut);
+        profileOut->release();
+    }
 
     if (target.model && target.modelBytes) {
         OSData *m = OSData::withBytes(target.model, target.modelBytes);
@@ -1938,8 +2053,13 @@ bool RedNaviProbe::start(IOService *provider) {
         if (v) { pci->setProperty("VRAM,totalMB", v); v->release(); }
     }
 
-    if (!target.useNavi32RegisterPath) {
-        IOLog("RedNavi: %s (PCI %04x:%04x) is read-only: IP discovery and VBIOS only; Navi 32 init is blocked\n",
+#ifdef RN_BUILD_NAVI33
+    const bool nativeTargetAllowed = target.family == rednavi::GpuFamily::Navi33;
+#else
+    const bool nativeTargetAllowed = target.useNavi32RegisterPath;
+#endif
+    if (!nativeTargetAllowed) {
+        IOLog("RedNavi: %s (PCI %04x:%04x) is read-only: selected build target does not match this ASIC\n",
               target.asicName, vendorId, deviceId);
         dumpDiscovery();
         dumpVbios();
@@ -1948,6 +2068,24 @@ bool RedNaviProbe::start(IOService *provider) {
     }
 
     dumpDiscovery();
+    bool regBasesReady = true;
+    for (uint32_t i = 0; i < 4; i++) {
+        if (!ipBase(kRNHwIdGc, &gpu.reg_offset[RN_GC_HWIP][0][i], i)) {
+            IOLog("RedNavi: missing GC IP-discovery register base segment %u\n", i);
+            regBasesReady = false;
+            break;
+        }
+    }
+    if (regBasesReady && !ipBase(kRNHwIdMp1, &gpu.reg_offset[RN_MP1_HWIP][0][0])) {
+        IOLog("RedNavi: missing MP1 IP-discovery register base\n");
+        regBasesReady = false;
+    }
+    if (!regBasesReady) {
+        IOLog("RedNavi: no safe IP register map; keeping this device read-only\n");
+        dumpVbios();
+        registerService();
+        return true;
+    }
     dumpVbios();
     dumpRegs(kRNMailboxRegs, sizeof(kRNMailboxRegs) / sizeof(kRNMailboxRegs[0]), "mailbox-regs");
     dumpRegs(kRNMmhubRegs, sizeof(kRNMmhubRegs) / sizeof(kRNMmhubRegs[0]), "mmhub-regs");
@@ -1955,6 +2093,14 @@ bool RedNaviProbe::start(IOService *provider) {
     dumpRegs(kRNHpdRegs, sizeof(kRNHpdRegs) / sizeof(kRNHpdRegs[0]), "hpd-regs");
     smuProbe("smu-info-early", false);   // registers only, before any stage that writes to the card
     dmcubSnapshot("dmcub-snap-boot");
+#ifdef RN_BUILD_NAVI33
+    uint32_t navi33Enable = 0;
+    if (!PE_parse_boot_argn("rednavi_navi33_enable", &navi33Enable, sizeof(navi33Enable)) || navi33Enable != 1) {
+        IOLog("RedNavi: Navi33 write stages are locked; use rednavi_navi33_enable=1 only on a recovery-ready test setup\n");
+        registerService();
+        return true;
+    }
+#endif
     loadPspChain();
     if (createPspRing()) {
         sendPspBootCfgGet();
@@ -1964,21 +2110,39 @@ bool RedNaviProbe::start(IOService *provider) {
         loadGcFw();
     }
     loadDmcub();
+#ifdef RN_BUILD_NAVI33
+    uint32_t navi33Display = 0;
+    if (PE_parse_boot_argn("rednavi_navi33_display", &navi33Display, sizeof(navi33Display)) && navi33Display == 1) {
+        dpInit();
+        probeAux();
+        selectMode();
+        dpTrain();
+        // The DP replay header is still a Navi32 capture; do not replay it on Navi33.
+        IOLog("RedNavi: Navi33 DP link stages requested; Navi32 dcn_replay/dcn_dump are intentionally disabled\n");
+    } else {
+        IOLog("RedNavi: Navi33 display stages are locked; require rednavi_navi33_display=1 after connector-route review\n");
+    }
+#else
     dpInit();
     probeAux();
     selectMode();
     dpTrain();
     dcnReplay();
     dcnDump();
+#endif
     smuProbe("smu-info", true);          // messages, once the PSP and the display are up
     {
         struct rn_device *adev = &gpu;
         const char *hn[3] = {"c2pmsg_90", "sdma_version", "ms_uptime"};
-        uint32_t hv[3] = {RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90), rd(0x1295 * 4), 0};
+        uint32_t hv[3] = {RREG32_SOC15(RN_MP1, 0, mmMP1_SMN_C2PMSG_90), RREG32_SOC15(RN_GC, 0, regSDMA0_VERSION), 0};
         rnPublish(this, "after-smu-probe", hn, hv, 3);
     }
-    sdmaTest();
+    sdmaTest(static_cast<uint64_t>(target.vramMegabytes) * 1024ull * 1024ull);
+#ifdef RN_BUILD_NAVI33
+    IOLog("RedNavi: Navi33 framebuffer publication remains disabled until a Navi33-specific DCN pipe capture/replay is validated\n");
+#else
     publishFramebuffer();
+#endif
     registerService();
     return true;
 }

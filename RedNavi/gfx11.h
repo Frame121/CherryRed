@@ -58,6 +58,13 @@ void rn_sdma0_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u3
 void rn_gfx_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, const struct rn_cp_start *pc,
                       struct rn_gfx_result *res);
 
+// Same sequence compiled against GC 11.0.0 register offsets for Navi 33 GC 11.0.2.
+// Compiled into the kext but deliberately not invoked until hardware validation.
+void rn_navi33_gfxhub_enable(struct rn_device *adev, const struct rn_gmc *gmc);
+void rn_navi33_sdma0_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, u64 target_vram_offset, struct rn_sdma_result *res);
+void rn_navi33_gfx_ring_test(struct rn_device *adev, u64 va_base, u64 ring_vram_offset, u32 ring_bytes, const struct rn_cp_start *pc,
+                             struct rn_gfx_result *res);
+
 #ifdef __cplusplus
 }
 #endif

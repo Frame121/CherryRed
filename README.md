@@ -38,13 +38,20 @@ ASUS ROG STRIX Z490-G GAMING, i7-10700K, **Intel UHD 630 as the primary display*
 
 Navi 32 boards (RX 7700 XT / 7800 XT) are in scope; reports from other 7000-series owners are welcome now that the probe works.
 
-The probe also recognizes the Navi 33 RX 7600 (PCI 1002:7480) as a separate
-read-only target. It publishes the PCI node's model and 8 GB VRAM metadata,
-then stops after IP-discovery and VBIOS collection. The measured Navi 33 IP
-versions and Linux-to-macOS bring-up map are documented in
+The RX 7600 / Navi 33 (PCI `1002:7480`) now has a separate experimental build
+path (`make NAVI33=1`) with its own GC 11.0.2 register map, GFX11 object, board
+memory/TMR profile and matching local PSP 13.0.7, SMU 13.0.7, GC 11.0.2,
+SDMA 6.0.2 and DCN 3.2.1 firmware wrappers. The firmware wrappers are generated
+locally from `linux-firmware` and are intentionally git-ignored; see
 [research/rx7600-linux-2026-11-01/NAVI33-PORTING.md](research/rx7600-linux-2026-11-01/NAVI33-PORTING.md).
-This does not enable the Navi 32 register/firmware path, native display output,
-acceleration, or Metal on Navi 33; those require separate hardware validation.
+
+This is **bring-up scaffolding, not working RX 7600 macOS support**. The default
+build keeps Navi 33 read-only. In the experimental build, all GPU write stages
+remain locked unless `rednavi_navi33_enable=1` is supplied, and individual
+firmware, GFX and display stages still need their own opt-in boot arguments.
+The Navi 32 display replay and framebuffer publication are deliberately not
+used on Navi 33. No RX 7600 macOS firmware initialization, graphics submission,
+display scanout, Vulkan or Metal acceleration has been hardware-validated.
 
 ## Building
 
@@ -54,6 +61,17 @@ Needs macOS with the Xcode command-line tools, or just push to GitHub: `.github/
 sh scripts/bootstrap.sh
 make DEBUG=1
 ```
+
+For the experimental RX 7600 / Navi 33 path, generate the local, ignored firmware wrappers on a Linux machine with matching `linux-firmware-amdgpu` files, then transfer those four generated headers to the macOS build machine:
+
+```sh
+bash tools/build_navi33_gc_regs.sh
+bash tools/build_navi33_firmware_headers.sh
+make NAVI33=1 DEBUG=1
+make test-navi33-profile
+```
+
+The Navi 33 build emits only `RedNavi.kext` (not the separate framebuffer kext), and verifies the wrapper versions before linking. It is a bring-up build only; GPU-write stages remain locked by boot arguments.
 
 ## Trying it
 

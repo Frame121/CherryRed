@@ -3,7 +3,7 @@
 
 The header is git-ignored: firmware is not redistributed from this repository.
 
-    python3 tools/gen_psp_fw_header.py psp_13_0_10_sos.bin RedNavi/psp_fw.h
+    python3 tools/gen_psp_fw_header.py psp_13_0_7_sos.bin RedNavi/psp_fw_navi33.h
 
 Components are emitted in the order amdgpu loads them (psp_hw_start): KDB, SYS_DRV, SOC_DRV,
 INTF_DRV, DBG_DRV, RAS_DRV, SOS. Command values are PSP_BL__* from amdgpu_psp.h.

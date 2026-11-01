@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn the SMU firmware into a C header for local builds (git-ignored, firmware is not redistributed).
 
-    python3 tools/gen_smu_fw_header.py smu_13_0_10.bin RedNavi/smu_fw.h
+    python3 tools/gen_smu_fw_header.py smu_13_0_7.bin RedNavi/smu_fw_navi33.h
 
 What Linux hands to the PSP for AMDGPU_UCODE_ID_SMC (GFX_FW_TYPE_SMU, amdgpu_ucode_init_single_fw): the ucode array of the
 common firmware header, i.e. ucode_size_bytes bytes starting at ucode_array_offset_bytes.
