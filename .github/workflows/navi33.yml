@@ -1,0 +1,71 @@
+name: Navi33 host and macOS build
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/navi33-driver/**'
+      - 'src/navi33-probe/**'
+      - 'src/navi33-survey/**'
+      - 'tools/ipdisc/**'
+      - '.github/workflows/navi33.yml'
+  pull_request:
+    paths:
+      - 'src/navi33-driver/**'
+      - 'src/navi33-probe/**'
+      - 'src/navi33-survey/**'
+      - 'tools/ipdisc/**'
+      - '.github/workflows/navi33.yml'
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Host tests
+        run: |
+          cmake -S src/navi33-driver -B build/navi33-driver -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build/navi33-driver --parallel
+          ctest --test-dir build/navi33-driver --output-on-failure
+          cmake -S src/navi33-probe -B build/navi33-probe
+          cmake --build build/navi33-probe --parallel
+          ctest --test-dir build/navi33-probe --output-on-failure
+          cmake -S src/navi33-survey -B build/navi33-survey
+          cmake --build build/navi33-survey --parallel
+          ctest --test-dir build/navi33-survey --output-on-failure
+      - name: Fetch pinned MacKernelSDK
+        run: |
+          git clone https://github.com/acidanthera/MacKernelSDK.git build/MacKernelSDK
+          git -C build/MacKernelSDK checkout --detach 3f750085caa17ec3a7880f11c11bf4f48cd6a164
+      - name: Compile driver core against kernel headers
+        run: bash src/navi33-driver/tools/check_kernel_compile.sh build/MacKernelSDK build/kernel-objects
+      - name: Build and verify diagnostic kext
+        run: |
+          make -C src/navi33-probe MKSDK="$GITHUB_WORKSPACE/build/MacKernelSDK"
+          file src/navi33-probe/build/Navi33Probe.kext/Contents/MacOS/Navi33Probe
+          nm -u src/navi33-probe/build/Navi33Probe.kext/Contents/MacOS/Navi33Probe
+      - name: Package and verify archive
+        run: |
+          ditto -c -k --keepParent src/navi33-probe/build/Navi33Probe.kext build/Navi33Probe-experimental.zip
+          ditto -x -k build/Navi33Probe-experimental.zip build/archive-check
+          test -x build/archive-check/Navi33Probe.kext/Contents/MacOS/Navi33Probe
+          codesign --verify build/archive-check/Navi33Probe.kext
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Navi33Probe-experimental
+          path: build/Navi33Probe-experimental.zip
+          if-no-files-found: error
+      - name: Build and package PCI survey
+        run: |
+          make -C src/navi33-survey MKSDK="$GITHUB_WORKSPACE/build/MacKernelSDK"
+          ditto -c -k --keepParent src/navi33-survey/build/Navi33Survey.kext build/Navi33Survey-experimental.zip
+          ditto -x -k build/Navi33Survey-experimental.zip build/survey-archive-check
+          test -x build/survey-archive-check/Navi33Survey.kext/Contents/MacOS/Navi33Survey
+          codesign --verify build/survey-archive-check/Navi33Survey.kext
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Navi33Survey-experimental
+          path: build/Navi33Survey-experimental.zip
+          if-no-files-found: error

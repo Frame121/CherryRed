@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <initializer_list>
+#include <random>
 #include <vector>
 
 namespace {
@@ -185,10 +186,46 @@ int main() {
                            "table extending beyond declared binary is rejected");
     }
 
+    {
+        auto bytes = makeFixture(96, 1, 1);
+        writeU16(bytes, kIpDiscoveryOffset + 6, 95);
+        refreshChecksum(bytes);
+        IpDiscovery parser;
+        failures += !check(!parser.init(bytes.data(), bytes.size()),
+                           "IPDS header size mismatch with table_info is rejected");
+    }
+
+    {
+        std::mt19937 rng(0x1D015Cu);
+        std::uniform_int_distribution<std::size_t> sizeDistribution(512, 2048);
+        std::uniform_int_distribution<unsigned> byteDistribution(0, 255);
+        IpDiscovery parser;
+        bool allRejected = true;
+        for (std::size_t index = 0; index < 512; ++index) {
+            std::vector<std::uint8_t> bytes(sizeDistribution(rng));
+            for (auto& byte : bytes) {
+                byte = static_cast<std::uint8_t>(byteDistribution(rng));
+            }
+            if ((index % 2) == 0) {
+                const std::size_t maxOffset = ((bytes.size() - 512) / 4) * 4;
+                std::uniform_int_distribution<std::size_t> offsetDistribution(
+                    0, maxOffset / 4);
+                writeU32(bytes, offsetDistribution(rng) * 4, 0x28211407u);
+            }
+            if (parser.init(bytes.data(), bytes.size()) || parser.isValid() ||
+                parser.ipCount() != 0) {
+                allRejected = false;
+                break;
+            }
+        }
+        failures += !check(allRejected,
+                           "512 deterministic malformed buffers are rejected and leave no parser state");
+    }
+
     if (failures != 0) {
         std::fprintf(stderr, "IP Discovery bounds tests: %d failed\n", failures);
         return 1;
     }
-    std::puts("IP Discovery bounds checks: passed (7 fixture cases)");
+    std::puts("IP Discovery bounds checks: passed (8 fixture cases + 512 malformed inputs)");
     return 0;
 }
