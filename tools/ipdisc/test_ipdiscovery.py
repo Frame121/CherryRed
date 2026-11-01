@@ -618,6 +618,21 @@ class TestIPDiscovery(unittest.TestCase):
         self.assertEqual(IPVersion(12, 0, 1), IPVersion(12, 0, 1))
         self.assertNotEqual(IPVersion(12, 0, 1), IPVersion(11, 0, 2))
 
+    def test_linux_source_correlated_hwid_names_and_unresolved_ids(self):
+        expected = {
+            3: "THM", 4: "SMUIO", 5: "FUSE", 6: "CLKA",
+            10: "PWR", 12: "UVD", 35: "ATHUB", 36: "DBGU_NBIO",
+            37: "DFX", 43: "SDMA1", 46: "DF", 47: "CLKB",
+            49: "DFX_DAP", 70: "PCIE", 91: "LSDMA",
+            128: "SYSTEMHUB", 272: "DIO", 274: "DAZ",
+        }
+        for numeric_id, name in expected.items():
+            with self.subTest(numeric_id=numeric_id):
+                self.assertEqual(HwId(numeric_id).name, name)
+        self.assertNotIn(282, HwId._value2member_map_)
+        self.assertNotIn(286, HwId._value2member_map_)
+        # 282 and 286 deliberately remain unknown until authoritative mapping exists.
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

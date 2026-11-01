@@ -34,7 +34,7 @@ The codebase includes an experimental RDNA 4 / Navi 48 bring-up path and a separ
 | GPU family | Example GPU | Current status |
 |---|---|---|
 | RDNA 4 / Navi 48 | Radeon RX 9070 XT | Experimental bring-up path inherited from Cobalt64. Reported results are limited to the documented test configuration; this is not a general-purpose release. |
-| RDNA 3 / Navi 33 | Radeon RX 7600 | **Research only. Not supported for working macOS graphics acceleration.** Real-card IP Discovery evidence and hardware validation are still missing. |
+| RDNA 3 / Navi 33 | Radeon RX 7600 | **Research + bring-up prep. Not supported for working macOS graphics acceleration.** Real-card IP Discovery evidence, a fail-closed bring-up kext scaffold, firmware tooling, a DCN 3.2.1 register generator **plus the real `dcn321_regs.h` generated from the real headers**, and a Mac-day runbook now exist; hardware validation is still missing (no macOS host yet). |
 | Other GPUs | Varies | Not claimed as supported unless documented with reproducible evidence. |
 
 **Important:** CherryRed is not currently a plug-and-play driver. No installer or stable public release is provided here. Do not assume that a successful build, parser test, or OpenCore boot proves that a GPU is initialized or accelerated.
@@ -55,16 +55,20 @@ Current research includes:
   that reads identity and declines driver attachment; macOS CI build/signing
   passed, hardware validation is pending, and it provides no display or Metal acceleration.
 - A read-only scanner for inspecting the installed Windows AMD driver file.
+- A real RX 7600 IP Discovery artifact, Linux PCI resource survey, and Linux firmware/source correlation under `RX7600-Linux-Evidence/`.
 - Evidence, provenance, and source-verification notes under [`tools/ipdisc/`](tools/ipdisc/).
-- A documented Windows-only workflow while a trusted Linux environment is unavailable.
+- Documented Windows inspection tools plus captured Linux-side RX 7600 evidence; package-to-binary source parity remains open.
 - An explicit separation between Navi 48 routing and unverified Navi 33 support.
+
+Done (prep, host-verified): the RX 7600 firmware + IP manifest (`RX7600-Linux-Evidence/navi33-firmware-manifest.json`), the DCN 3.2.1 dependency map, a fail-closed bring-up kext scaffold (`src/navi33-bringup/`), firmware fetch tooling (`tools/fetch-firmware-navi33.sh`), a DCN 3.2.1 register generator + host test **and the real `src/dcn321/dcn321_regs.h` generated from the real DCN 3.2.1 headers** (`tools/dcn321/`, `src/dcn321/`), the Navi 48→33 port map, and the Mac-day runbook (`src/navi33-research/MACOS_BRINGUP_RUNBOOK.md`).
 
 Still required before claiming RX 7600 support:
 
-1. A real-card IP Discovery artifact with reproducible provenance.
-2. Verified Navi 33 IP and firmware mapping from authoritative sources.
-3. A macOS build and review with the appropriate SDK/toolchain.
-4. Hardware validation of initialization, display output, memory handling, and Metal workloads.
+1. A macOS host + RX 7600 (the current blocker — no validation host yet).
+2. Build the scaffold kext with MacKernelSDK and load the read-only survey; compare PCI/BAR/ReBAR/IP-Discovery against the Linux evidence.
+3. Validate the generated `src/dcn321/dcn321_regs.h` against the live card (confirm `seg[BASE_IDX] + offset` is inside the BAR5 window before any register access).
+4. Staged hardware bring-up (firmware → memory → interrupts → command → DCN 3.2.1 display → Metal), each stage evidence-gated.
+5. The two still-unnamed IP Discovery HWIDs (282 and 286) remain unresolved in the checked source; the installed Arch kernel binary-to-source provenance gap is still open.
 
 See the [Navi 33 research notes](tools/ipdisc/RX7600_NAVI33_EVIDENCE.md), [evidence acquisition plan](tools/ipdisc/RX7600_EVIDENCE_ACQUISITION_PLAN.md), and [Windows-only plan](tools/ipdisc/WINDOWS_ONLY_PLAN.md).
 
@@ -74,15 +78,20 @@ See the [Navi 33 research notes](tools/ipdisc/RX7600_NAVI33_EVIDENCE.md), [evide
 |---|---|
 | `src/navi48-bringup/` | Experimental Navi 48 IOKit bring-up code and host-side tests inherited from Cobalt64. |
 | `src/dcn41/` | Display Core 4.1 helpers and register-related tooling. |
+| `src/dcn321/` | DCN 3.2.1 display register layer: generator + host test + **real `dcn321_regs.h` generated from the real headers** (not yet validated on hardware). |
 | `src/navi33-research/` | Isolated research code and tests for the Navi 33 investigation. |
 | `src/navi33-probe/` | Read-only macOS PCI diagnostic source for `1002:7480`; no initialization or acceleration. |
 | `src/navi33-driver/` | Freestanding firmware/resource preparation library, host tool and tests; no hardware backend. |
-| `src/navi33-survey/` | Survey and research material for Navi 33. |
+| `src/navi33-survey/` | Read-only RX 7600 PCI survey kext scaffold (opt-in, no writes). |
+| `src/navi33-bringup/` | Fail-closed Navi 33 bring-up kext scaffold (opt-in, read-only, no firmware load). |
 | `src/xlat12/` | Command-stream translation components and supporting tables. |
 | `src/g2capture/` | Small shader-compiler record capture utility. |
 | `tools/ipdisc/` | IP Discovery parsing, evidence intake, provenance notes, and Windows inspection tools. |
 | `tools/native/` | Native helper tools and experimental Metal-related components. |
 | `tools/dcn41/`, `tools/pc/`, `tools/conductor/` | Build helpers, host tools, hardware test scripts, and test harnesses. |
+| `tools/dcn321/` | DCN 3.2.1 register generator + spec (mirrors `tools/dcn41/`). |
+| `tools/fetch-firmware-navi33.sh` | Copy the RX 7600 firmware blobs from a local linux-firmware checkout (`--dry-run` lists the set). |
+| `RX7600-Linux-Evidence/` | Real RX 7600 evidence: IP Discovery, PCI survey, firmware manifest, DCN 3.2.1 map, port map. |
 | `mesa-patches/` | Experimental RADV/Mesa Darwin-port patches and their notes. |
 | `docs/assets/` | Project logo and visual assets. |
 

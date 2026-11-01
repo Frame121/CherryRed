@@ -1,0 +1,24 @@
+RX 7600 firmware/dependency inventory
+Captured: 2026-10-23
+GPU: 0000:03:00.0 / 1002:7480 / subsystem 148c:2421
+Kernel: 7.2.11-arch1-1 (Arch package linux 7.2.11.arch1-1)
+Firmware: linux-firmware-amdgpu 20260916-1; linux-firmware 20260916-1
+
+Package ownership checks (all PASS):
+- gc_11_0_2_me.bin.zst -> linux-firmware-amdgpu 20260916-1
+- sdma_6_0_2.bin.zst -> linux-firmware-amdgpu 20260916-1
+- vcn_4_0_4.bin.zst -> linux-firmware-amdgpu 20260916-1
+- dcn_3_2_1_dmcub.bin.zst -> linux-firmware-amdgpu 20260916-1
+- psp_13_0_7_sos.bin.zst -> linux-firmware-amdgpu 20260916-1
+- smu_13_0_7.bin.zst -> linux-firmware-amdgpu 20260916-1
+
+Runtime log evidence:
+- SMU initialized successfully.
+- Display Core initialized on DCN 3.2.1.
+- DMUB firmware loaded via PSP; version 0x07003300.
+- VCN firmware found; ENC 1.24 / DEC 9 / VEP 0 / revision 34.
+- GPU rings registered for GFX, compute, SDMA, VCN, JPEG and MES.
+- Only firmware-related messages returned by targeted journal grep were DMUB loading and VCN version; no failure message was returned by that query.
+- RAP TA and SECUREDISPLAY TA are reported unavailable but explicitly optional.
+
+Interpretation: package ownership + runtime initialization support a healthy Linux bring-up. A filtered journal query cannot prove every firmware request or every function is error-free. No Linux firmware files were changed.

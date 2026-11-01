@@ -24,7 +24,10 @@ int main() {
  check(!survey.start(&pci) && survey.starts==0);
  pci.values[0xb]=3; pci.values[2]=0x7550;
  check(!survey.start(&pci) && survey.starts==0);
- pci.values[2]=0x7480;
+ pci.values[2]=0x7480; pci.values[0x2c]=0x148c; pci.values[0x2e]=0x2421;
+ pci.values[0x2e]=0x9999;
+ check(!survey.start(&pci) && survey.starts==0);
+ pci.values[0x2e]=0x2421;
  check(!survey.start(nullptr));
  // Two distinct BAR entries at extended offsets; second entry must be read.
  pci.values[0x204]=1u<<12; pci.values[0x208]=(2u<<5)|(8u<<8);

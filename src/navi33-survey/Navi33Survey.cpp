@@ -10,6 +10,8 @@
 
 static constexpr uint16_t kAmdVendorId   = 0x1002;
 static constexpr uint16_t kNavi33Device  = 0x7480;   // Radeon RX 7600
+static constexpr uint16_t kBoardVendorId = 0x148c;   // captured board subsystem vendor
+static constexpr uint16_t kBoardDeviceId = 0x2421;   // captured board subsystem device
 static constexpr uint32_t kPcieCapId     = 0x10;     // PCI Express capability (standard list)
 static constexpr uint32_t kReBarExtCapId = 0x0015;   // Resizable BAR (extended list)
 
@@ -27,6 +29,8 @@ static IOPCIDevice *eligible(IOService *provider)
 
 	if (pci->configRead16(kIOPCIConfigVendorID) != kAmdVendorId ||
 	    pci->configRead16(kIOPCIConfigDeviceID) != kNavi33Device ||
+	    pci->configRead16(kIOPCIConfigSubSystemVendorID) != kBoardVendorId ||
+	    pci->configRead16(kIOPCIConfigSubSystemID) != kBoardDeviceId ||
 	    pci->configRead8(0x0b) != 0x03)
 		return nullptr;                                  // never touch another device
 

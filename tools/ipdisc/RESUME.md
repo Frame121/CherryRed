@@ -1,5 +1,261 @@
 # Recovery Checkpoint
 
+- **CHECKPOINT: 2026-10-31 (session 7) — EVERYTHING ON GITHUB; THE COMPLETE
+  LADDER BUILDS GREEN INCLUDING 5.4/5.5/5.7.** The concurrent session's
+  Navi33Memory (5.4, MemoryVerified), Navi33Queue (5.5, QueueVerified) and
+  Navi33UserClient (5.7, C4 contract + ClientBudget) stages are committed
+  (7b433aa) and CI-verified (green at 2458bb4 after fixing an unused
+  constant and giving ClientBudget a fail-closed default constructor). The
+  CI-green kext with every stage is installed to `E:\EFI\OC\Kexts\`.
+  Boot-args on the EFI remain read-only (`navi33bringup=1 navi33psp=1`);
+  the full write ladder runs when the operator extends boot-args with
+  `navi33psp_load=1 navi33psp_chain=1 navi33psp_ring=1 navi33psp_smu=1
+  navi33gc_load=1 navi33mem=1 navi33queue=1` (verify the exact tokens in
+  Navi33Bringup.cpp before booting). Metal remains 0 devices until the
+  ladder verifies and a real IOAccelerator exists.
+
+- **CHECKPOINT: 2026-10-31 (session 6) — gc11_regs.h (GC 11 register
+- **CHECKPOINT: 2026-10-31 (session 6) — gc11_regs.h (GC 11 register
+  constants generated from the real Linux gc_11_0_0 headers) + shared
+  ring-submit/smu13 helpers; TWO CONCURRENT AGENT SESSIONS MERGED.** A second
+  agent session worked this tree in parallel and has written (not yet
+  committed at checkpoint time) Navi33Memory (5.4: gfxhub/GART/VMID0 →
+  MemoryVerified), Navi33Queue (5.5: SDMA0 + GFX ring submission →
+  QueueVerified) and Navi33UserClient (5.7). This session's duplicate SDMA
+  port was discarded in favour of theirs; the surviving contributions are:
+  - `gc11_regs.h` + `tools/gen-navi33-gc-regs.py`: 61 registers + 37 field
+    masks extracted (hard-fail generator) from the REAL Linux gc_11_0_0
+    asic_reg headers — the register file GC 11.0.2 uses (only GC 11.0.3 has
+    its own gfxhub layout). The memory/queue stages should consume these
+    instead of open-coded hex; provenance records torvalds/linux master
+    36aad21d50d1.
+  - `Navi33RingSubmit.hpp`: shared ringSubmit + ringVramZero + smu13Send for
+    the post-ring stages.
+  - CI-blocking fixes across the concurrent session's stages (strstr, IOKit
+    includes, duplicate MP0 base, namespace closes).
+  CI green at adbaa7d; kext installed to `E:\EFI\OC\Kexts\` (backups kept).
+  Boot-args on the EFI still carry only `navi33bringup=1 navi33psp=1` (safe
+  read-only boot); the full write ladder runs when the operator adds
+  `navi33psp_load=1 navi33psp_chain=1 navi33psp_ring=1 navi33psp_smu=1
+  navi33gc_load=1` (+ memory/queue args once those stages land). Every
+  behaviour stays UNVERIFIED until the card answers.
+
+- **CHECKPOINT: 2026-10-31 (session 5) — THE WRITE LADDER IS FULLY WRITTEN
+  AND CI-BUILT: PSP CHAIN → RING → TOC/TMR → SMU (M2b) → GC IMAGES → RLC
+  AUTOLOAD.** Note: a second concurrent agent session committed the PSP load
+  stage (3d01024) and the ring stage (9cc5243) in this working tree while
+  this session was porting the same stages; the duplicate port was discarded
+  and the sessions' work merged by building on theirs. This session added:
+  - `Navi33SmuLoad` (navi33psp_smu=1, M2b): stages the SMU 13.0.7 ucode via
+    LOAD_IP_FW (GFX_FW_TYPE_SMU), then the smu_v13 message protocol
+    (GetSmuVersion / GetDriverIfVersion / TestMessage). On a correct SMU
+    answer it publishes `Navi33Bringup,FirmwareVerified=true` — the property
+    the Navi33Accelerator compute gate consumes.
+  - `Navi33GcLoad` (navi33gc_load=1): the GC 11.0.2 / SDMA 6.0.2 image set
+    (26 images, AMDGPU_UCODE_ID order, RLC_G last) through LOAD_IP_FW, then
+    GFX_CMD_ID_AUTOLOAD_RLC, then a READ-ONLY autoload-completion check
+    (CP_STAT == 0, RLC_RLCS_BOOTLOAD_STATUS bit 31). The plan comes from the
+    pure bounds-checked parser (RS64 v2.0 / SDMA v2.0 / MES v1.0 / IMU v1.0 /
+    RLC v2.3), validated against the REAL hash-pinned blobs by
+    `navi33_gc_firmware_tests` (SMU ucode 0x526100 / 261632 bytes; 26 images
+    / 1333328 bytes; a corrupted header refuses the whole plan).
+  - `Navi33RingSubmit.hpp`: shared ring submission for the post-ring stages.
+  - Fixed the concurrent session's CI-blocking compile errors (strstr not in
+    libkern, missing IOKit includes in the load/ring stages, duplicate MP0
+    base, missing MP1 mailbox dwords).
+  Host verification: CTest **32/32** (Release + Debug, MSVC), safety
+  contracts for every stage. CI green; the kext with the full ladder is on
+  `kext-builds` and installed to `E:\EFI\OC\Kexts\Navi33Bringup.kext`
+  (previous kexts in `EFI_BACKUP_KEXT_BEFORE_PSPSTAGE_20261031/Kexts/`).
+  **The EFI boot-args still carry only `navi33bringup=1 navi33psp=1`: the
+  next macOS boot runs the read-only survey + mailbox readback with the
+  accelerator correctly blocked. The write ladder runs ONLY when the
+  operator extends boot-args with
+  `navi33psp_load=1 navi33psp_chain=1 navi33psp_ring=1 navi33psp_smu=1
+  navi33gc_load=1` — one boot then walks every stage with per-step logging
+  and stops at the first failure.** Every Navi 33 behaviour stays UNVERIFIED
+  until that boot; rollback is the USB-stick removal plus the kept kext
+  backups.
+
+- **CHECKPOINT: 2026-10-31 (session 4) — METAL-LAYER SKELETON WRITTEN AND
+  INSTALLED: CLIENT CONTRACTS (C4) + SELF-GATING ACCELERATOR (C6 DIRECTION).**
+  Per the operator's call to build the Metal layer ahead of the hardware
+  stages, the parts of C4/C6 that do not depend on hardware were implemented
+  as pure host-tested contracts plus a fail-closed kernel service, all in the
+  bring-up kext:
+  - `Navi33ClientContracts.hpp`: the versioned user-client ABI surface
+    (policy-driven buffer/alignment/budget/handle limits — synthetic in
+    tests until C2 derives real values), a fixed-capacity generation-tagged
+    handle table (stale handles cannot address recycled slots), and the
+    compute readiness gate, which deliberately requires only PCI transport +
+    firmware + memory + queue submission (headless compute; display,
+    IOAccelerator and Metal are C5/C6 milestones, not prerequisites).
+  - `Navi33Accelerator` (second class/personality in the same kext): attaches
+    to the Navi33Bringup node, evaluates the gate from published evidence
+    properties, publishes exactly why Metal dispatch is unavailable, and
+    performs zero hardware access in every state (source-level safety test
+    enforces this). Its evidence property names —
+    `Navi33Bringup,FirmwareVerified` / `MemoryVerified` / `QueueVerified` —
+    are the contract Stages 5.3–5.5 must publish for the gate to ever open.
+  - `Navi33IntegrationContracts.hpp` switched to `<stdint.h>` (freestanding-
+    safe for the -nostdinc kernel TU); host-only users add `<cstdint>`.
+  Host verification: client-contract unit tests + accelerator safety test +
+  CTest **25/25** (Release and Debug, MSVC). CI green; the kext with both
+  personalities (`Navi33Bringup`, `Navi33Accelerator`) was published to
+  `kext-builds` and installed to `E:\EFI\OC\Kexts\Navi33Bringup.kext`
+  (previous kext preserved as
+  `EFI_BACKUP_KEXT_BEFORE_PSPSTAGE_20261031/Kexts/Navi33Bringup.psp-stage.kext`).
+  **Honest boundary: Metal dispatch is still unavailable (0 devices) — the
+  gate is closed at the firmware layer by design until Stage 5.3 runs on the
+  card. On the next macOS boot the accelerator node will appear with
+  `State=blocked`, `BlockedReason=gate-closed-firmware` — that is the
+  correct, verified behavior.** The PSP mailbox readback (same reboot) is
+  what feeds Stage 5.3.
+
+- **CHECKPOINT: 2026-10-31 (session 3) — PSP-STAGE KEXT BUILT ON CI AND
+  INSTALLED INTO THE LIVE OPENCORE EFI; ONE REBOOT RUNS STAGE 3 + PSP SURVEY
+  TOGETHER.** The CI pipeline (`.github/workflows/build-kext.yml`) now builds
+  `Navi33Bringup.kext` end-to-end on a macOS runner: pinned linux-firmware
+  fetch + sha256 verification of all 14 blobs, host safety tests, the kext
+  build (the C++ kmod runtime ships in `Library/universal` of the fresh
+  acidanthera MacKernelSDK — the Makefile now accepts either layout), the
+  full research-core CTest suite on Apple clang (which required pinning
+  `cxx_std_17` on the SDK-less `ipdiscovery_bounds_tests` target), and a
+  publish step that commits the zip to the `kext-builds` branch
+  (`kext-latest/Navi33Bringup.kext.zip`) so the Windows side can pull it
+  without a token. The CI-built kext (with the `navi33psp=1` mailbox survey
+  compiled in — verified by its log strings) was installed to
+  `E:\EFI\OC\Kexts\Navi33Bringup.kext` (previous kext and config backed up in
+  `E:\EFI_BACKUP_KEXT_BEFORE_PSPSTAGE_20261031\`); the EFI config already
+  carries `navi33bringup=1 navi33psp=1`. **Next action: reboot into macOS
+  once and run
+  `sh ~/Developer/cherryred-macday-20261030/stage3/stage3_verify_after_reboot.sh`
+  — it proves Stage 3 injection AND captures the PSP/SMU mailbox readback in
+  the same boot.** The mailbox VALUES stay UNVERIFIED until then; no write
+  stage may be started from them. Metal/acceleration remain unimplemented.
+  CI reached fully green at `600d4bb` (kext build + publish + full research
+  CTest on Apple clang); the deliverable kext is refreshed on the
+  `kext-builds` branch on every green build.
+
+- **CHECKPOINT: 2026-10-31 (session 2) — PSP/SMU MAILBOX SURVEY STAGE
+  IMPLEMENTED; CI KEXT BUILD WIRED UP.** The next bring-up stage
+  (`navi33psp=1`, cumulative with `navi33bringup=1`) is implemented and
+  host-tested: the kext maps the MMIO register window (BAR5, 1 MiB) and
+  READS the PSP/SMU mailbox registers (MP0/MP1 `base[0]` `0x16000` dwords
+  from the card's captured IP Discovery table, SHA `4b809b32…`; offsets from
+  the shared PSP/SMU 13 register file; decodes mirror RedNavi's verified
+  Navi 32 M1.5). Zero-write contract holds: the PCI command register is only
+  read (memory decode is refused rather than enabled), every read is
+  bounds-checked against the mapped BAR, the IFWI wait is bounded at 2 s,
+  and the live IP-Discovery read (which would need MM_INDEX writes) is
+  deliberately deferred. Files: `Navi33PspMailbox.hpp` (pure, host-tested),
+  `Navi33PspSurvey.{hpp,cpp}` (the only translation unit allowed to map a
+  BAR, under its own contract test), `Navi33Bringup` gains
+  `pspStageEnabled()`; `Makefile` builds the new TU. Host verification:
+  bring-up safety test + new PSP survey safety test + CTest **23/23** on
+  MSVC. CI (`.github/workflows/build-kext.yml`) now builds
+  `Navi33Bringup.kext` on a macOS runner from the pinned linux-firmware
+  commit, hash-verifying all 14 blobs (fetch script pins upgraded from
+  UNKNOWN to the recorded `FIRMWARE-PROVENANCE.md` values; mismatches are
+  hard errors). `config.plist` on the OpenCore USB already carries
+  `navi33psp=1`. Design notes: `src/navi33-bringup/PSP_MAILBOX_STAGE.md`.
+  The Navi 33 mailbox VALUES remain UNVERIFIED until one reboot into macOS
+  collects the readback; Stage 3 injection verification is still pending the
+  same reboot.
+
+- **CHECKPOINT: 2026-10-31 (Windows-side integration) — MAC-DAY BUNDLE MERGED;
+  HOST SUITES RE-RUN ON MSVC; TWO COMMITTED DEFECTS FIXED.** The Mac-day git
+  bundle (7 commits on `research/rx7600-linux-evidence-2026-10-23`, head
+  `d9d932f`) was fetched from the USB handoff package and the local branch was
+  fast-forwarded to it; the superseded pre-Mac-day working-tree draft was
+  preserved as a stash. The RedNavi multi-target probe work (`gpu_target.h`:
+  Navi 31/32/33 identity table, Navi 32-only register path) was committed on
+  its own branch (`contrib/navi33-pci-profile`) after its host test passed
+  under MSVC. Verification of the merged tree found two defects committed on
+  the Mac-day side, fixed here: (1)
+  `src/navi33-research/CMakeLists.txt` had an unterminated `if/else` block, a
+  duplicate `add_test`, and a flags list omitting six pre-existing targets,
+  which tripped the no-exceptions compile guard; (2)
+  `src/navi33-survey/tests/test_survey_safety.py` still asserted the
+  pre-rewrite opt-in form. After the fixes: MSVC Debug build clean, CTest
+  **20/20 PASS**. Two Python suites are Windows-host-incompatible by
+  environment, not by regression: the symlink rejection case needs elevated
+  symlink privileges, and the Linux inventory tests create sysfs-like paths
+  containing colons, which Windows forbids; both passed on the macOS target
+  (recorded 2026-10-30). The target EFI carries boot-arg `navi33psp=1`, which
+  no committed kext source reads — inert, left untouched. **Stage 3 reboot
+  verification on the Tahoe target remains the next pending action; Metal and
+  acceleration remain unimplemented (Stages 5.3–5.7) and are not claimed.**
+
+- **LATEST CHECKPOINT: 2026-10-31 — MAC-DAY STAGES 0–2 COMPLETE ON TARGET;
+  Navi33Bringup.kext BUILT+SIGNED; STAGE 3 PACKED AND WAITING FOR ONE SUDO
+  COMMAND.** The bring-up scaffold was compiled for the first time on the
+  Tahoe target (`~/Developer/cherryred-macday-20261030/`; two required source
+  fixes recorded as patches there: `<stdint.h>`/`uint16_t` in
+  `Navi33PciMatch.hpp`, `UInt8` offset in `surveyPcieLink`). OSBundleLibraries
+  validated against the live BKC (pexpert no longer exists on Tahoe; declared
+  set matches loaded Lilu/WEG practice). Firmware 14/14 hash pins re-verified.
+  Full host suites all pass. Stage 3 (OpenCore injection + `navi33bringup=1`)
+  is fully prepared in `stage3/` (`stage3_apply.sh` with double ESP backup and
+  `--rollback`; `stage3_verify_after_reboot.sh` runs the Stage 4 comparison
+  without sudo) and is BLOCKED only on the user's sudo password — the ESP
+  cannot be mounted as user. Stage 4 pre-comparison (userspace ioreg vs Linux
+  evidence) is recorded: identity/link/VRAM and the three non-ReBAR BARs match
+  byte-for-byte; the two 64-bit prefetchable BARs differ exactly as
+  ReBAR-programmable BARs are expected to. NEXT ACTION after reboot:
+  `sh ~/Developer/cherryred-macday-20261030/stage3/stage3_verify_after_reboot.sh`
+  then record the kernel-survey evidence in the repo. Do not claim Metal or
+  acceleration: Stages 5.3–5.7 remain unimplemented and no IOAccelerator
+  exists. Previous checkpoint (2026-10-30) below.
+
+- **CHECKPOINT: 2026-10-30 — BOARD FIRMWARE MANIFEST + VBIOS IDENTITY
+  INTAKE COMPLETE; SESSION RUNS DIRECTLY ON THE TAHOE TARGET.** This session
+  executes on the target Mac itself (macOS 26.7.1 Tahoe x86_64, RX 7600
+  enumerated), so no Remote Desktop hop was required. Work completed:
+  1. Full baseline re-validated on the target: host C++ suites 35+32+21+16+18+
+     18+10+22 checks, IPD bounds (8 fixtures + 512 malformed), Navi48
+     isolation 4/4, DriverKit probe contract 4/4; Python suites 31+9+8+7;
+     survey kext rebuilt (codesign/plutil OK, NOT installed/loaded);
+     DriverKit probe rebuilt (build-only); Metal probes rebuilt — generic
+     runtime exits 2 (`MTLCreateSystemDefaultDevice()` nil) and the exact
+     RX 7600 probe exits 2 (`MTLCopyAllDevices()` empty). Metal dispatch
+     remains BLOCKED, reported as such.
+  2. Strict re-parse of the captured IP Discovery artifact: hash matches
+     `4b809b32…b75e6c89`; 39 records; GC 11.0.2, MP0/MP1 13.0.7, SDMA0/1
+     6.0.2, UMC 8.11.0, MMHUB 3.0.2, HDP 6.0.1, OSSSYS 6.0.2, DMU 3.2.1,
+     SMUIO 13.0.8; the volume original was re-hashed and is byte-identical.
+  3. The Cobalt64 evidence package on the mounted volume contained
+     board-attributed records not yet in the repo. Imported byte-preserving
+     copies: `evidence/rx7600-navi33-firmware-manifest-cobalt64.json` (14
+     required firmware files, gfx_target gfx1102, linux-firmware 20260916-1,
+     kernel clone `64a90897`) and a derived
+     `evidence/rx7600-vbios-identity-2026-10-23.json` recording ATOM BIOS
+     `113-EXT86626-001`, ver `022.003.001.027.000001`, 2023/04/25 from the
+     board's own Linux boot journal, hash-bound to the journal
+     (`db85fb97…c9818a`), plus runtime corroboration (8176M GDDR6 128-bit,
+     SMU OK, DCN 3.2.384, DMUB 0x07003300, VCN ENC 1.24/DEC 9 rev 34, SE 2 /
+     SH 2 / CU 8 / 32 active CUs). Identity strings only — NOT a VBIOS dump.
+  4. New `verify_board_firmware_manifest.py` + 17 synthetic tests
+     (`test_board_firmware_manifest.py`): cross-checks the manifest's firmware
+     filename prefixes against the parsed artifact versions, requires role
+     coverage, keeps HWIDs 282/286 explicitly unresolved, checks the VBIOS
+     record's exact PCI identity and `authentication: NONE`, and binds the
+     source journal hash. 17/17 pass; real-evidence run PASS with journal
+     binding. Evidence doc:
+     `evidence/RX7600_BOARD_FIRMWARE_EVIDENCE_2026-10-30.md`.
+  - **Effect on the C0 gate:** the "board-attributed IP Discovery + VBIOS
+    record" prerequisite is materially advanced (both artifacts now exist and
+    cross-check). Still open: VBIOS byte payload, independent authentication
+    of user-maintained records, per-blob hash/license review. No firmware blob
+    was copied into the repo. No hardware access, kext load, firmware load,
+    MMIO/VRAM, EFI/SIP/AMFI change, or reboot was performed. RX 7600 hardware
+    acceleration remains NOT achieved and is not claimed.
+- **Next gate:** independently authenticate the board records (e.g. a fresh
+  authorized Linux capture), acquire and hash the actual firmware blobs and
+  the VBIOS image under a reviewed license path, then begin the separately
+  reviewed GFX11 (C1) implementation with a tested recovery path. Do not
+  attempt hardware init, ID spoofing, or kext activation without them.
+
 - **LATEST CHECKPOINT: 2026-10-21 — PHASE 25 BOARD PRESENCE VERIFIED; TWO
   UNCOMMITTED SOURCE FIXES RESTORED AND HEAD REGRESSIONS CLEARED.** `1002:7480`
   moved from `UNVERIFIED (hardware presence unknown)` to **presence and PCI
@@ -1021,3 +1277,39 @@
   changes outside `tools/ipdisc/`; implementation work; dependency install;
   stage, commit, clean, reset, stash, or delete; claims of RX 7600 macOS
   support.
+
+
+## 2026-10-30 update — physical IP Discovery artifact recovered
+
+Current state supersedes older checkpoint statements that no raw IP Discovery
+binary was present. A previous Linux capture was found on the mounted
+`GameAndFile` volume under `Cobalt64/RX7600-Linux-Evidence` and copied
+byte-for-byte into the CherryRed repo:
+
+- `evidence/rx7600-amdgpu-discovery-2026-10-23.bin` (10,240 bytes)
+- SHA-256: `4b809b3279bd9fd164456f5fcdcb9743d2b4289acdd77f9ac2a2cd77b75e6c89`
+- Strict parser: PASS; one die, 39 IP records, 30 unique numeric HWIDs.
+- Parsed JSON and hash-bound provenance sidecar are adjacent to the binary.
+- Detailed report: `evidence/RX7600_IP_DISCOVERY_ANALYSIS_2026-10-30.md`.
+- GC 11.0.2; SDMA0 6.0.2; MMHUB 3.0.2; HDP 6.0.1; UMC 8.11.0 (instances
+  0-3); NBIF 4.3.1; MP0/MP1 13.0.7; OSSSYS 6.0.2; DMU 3.2.1.
+- Associated user-maintained Linux manifest/logs record Archcraft kernel
+  7.2.11-arch1-1, PCI 0000:03:00.0, 1002:7480, subsystem 148c:2421, and
+  amdgpu. Provenance remains UNVERIFIED pending independent authentication.
+
+Metal Toolchain 17F42 is installed. Generic Metal probe builds but runtime
+returns exit 2 because MTLCreateSystemDefaultDevice() is nil. Exact RX7600
+probe builds but runtime returns exit 2 because MTLCopyAllDevices() is empty.
+System Profiler reports RX 7600 PCI presence but No Kext Loaded. Metal hardware
+dispatch remains BLOCKED; no CPU fallback or spoofing is accepted.
+
+Read-only Linux capture helper: `tools/ipdisc/capture_rx7600_ip_discovery.sh`.
+It requires Linux with the exact device bound to amdgpu and debugfs mounted.
+Do not run it on macOS. No VBIOS has been acquired or authenticated.
+
+Validation on 2026-10-30: IP Discovery parser 30/30; firmware manifest tests
+9/9; Linux inventory collector tests 8/8; Navi33 host suite 172 checks passed;
+IPD bounds 8 fixtures + 512 malformed inputs; Navi48 isolation 4/4; PCI probe
+contract 4/4; Metal build contract PASS; git diff --check PASS. No hardware
+initialization, kext load, firmware load, BAR/MMIO, GPU reset, EFI/SIP/AMFI
+change, or reboot was performed.

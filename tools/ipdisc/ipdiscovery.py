@@ -19,16 +19,37 @@ class ValidationMode(str, Enum):
 
 
 class HwId(IntEnum):
+    # Numeric IDs cross-referenced against the preserved Linux
+    # soc15_hw_ip.h / amdgpu_discovery.c source snapshot. The source
+    # snapshot is not proven byte-identical to the capture kernel build.
     MP1 = 1
+    THM = 3
+    SMUIO = 4
+    FUSE = 5
+    CLKA = 6
+    PWR = 10
     GC = 11
+    UVD = 12
     MMHUB = 34
+    ATHUB = 35
+    DBGU_NBIO = 36
+    DFX = 37
     OSSSYS = 40
     HDP = 41
     SDMA0 = 42
+    SDMA1 = 43
+    DF = 46
+    CLKB = 47
+    DFX_DAP = 49
+    PCIE = 70
+    LSDMA = 91
     NBIF = 108
+    SYSTEMHUB = 128
     UMC = 150
     MP0 = 255
     DMU = 271
+    DIO = 272
+    DAZ = 274
 
 
 @dataclass(frozen=True)
