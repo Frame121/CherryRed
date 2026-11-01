@@ -10,7 +10,8 @@ its survey, preserving the original survey lifecycle.
 
 ## What it does
 - Probe and start both require display class 0x03.
-- Matches only `1002:7480`, and only when the boot-arg `navi33survey=1` is set.
+- Matches only `1002:7480` with subsystem `148c:2421` (the captured RX 7600 board),
+  and only when the boot-arg `navi33survey=1` is set.
 - Logs (via `IOLog`): PCI ids/revision/subsystem, BAR physical addresses and sizes,
   PCIe link speed/width, Resizable BAR capability and current size.
 

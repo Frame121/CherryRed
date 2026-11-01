@@ -1,4 +1,4 @@
-﻿# CherryRed ΓÇö inherited Navi 48 development notes (5 October 2026)
+# CherryRed — inherited Navi 48 development notes (5 October 2026)
 
 
 Kext: Navi48Bringup 0.0.664. Metal bundle: revision 20.

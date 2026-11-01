@@ -1,0 +1,84 @@
+{
+  "file": "RX7600-Linux-Evidence/amdgpu_discovery.bin",
+  "file_size": 10240,
+  "sha256": "4b809b3279bd9fd164456f5fcdcb9743d2b4289acdd77f9ac2a2cd77b75e6c89",
+  "binary_signature": "0x28211407",
+  "version": "1.3",
+  "declared_binary_size": 1280,
+  "binary_checksum_stored": "0x5784",
+  "binary_checksum_calculated": "0x5784",
+  "binary_checksum_pass": true,
+  "parser_strict_success": true,
+  "parser_error": null,
+  "parser_ip_count": 39,
+  "ipds_version": 3,
+  "ipds_size": 808,
+  "tables": [
+    {
+      "name": "IP_DISCOVERY",
+      "offset": 60,
+      "checksum_stored": 18850,
+      "size": 808,
+      "padding": 0,
+      "within_declared_binary": true,
+      "checksum_calculated": 18850,
+      "checksum_matches": true,
+      "signature_or_id": "0x53445049"
+    },
+    {
+      "name": "GC",
+      "offset": 868,
+      "checksum_stored": 727,
+      "size": 132,
+      "padding": 0,
+      "within_declared_binary": true,
+      "checksum_calculated": 727,
+      "checksum_matches": true,
+      "signature_or_id": "0x4347"
+    },
+    {
+      "name": "HARVEST_INFO",
+      "offset": 1000,
+      "checksum_stored": 305,
+      "size": 136,
+      "padding": 0,
+      "within_declared_binary": true,
+      "checksum_calculated": 305,
+      "checksum_matches": true,
+      "signature_or_id": "0x56524148"
+    },
+    {
+      "name": "VCN_INFO",
+      "offset": 1136,
+      "checksum_stored": 329,
+      "size": 96,
+      "padding": 0,
+      "within_declared_binary": true,
+      "checksum_calculated": 329,
+      "checksum_matches": true,
+      "signature_or_id": "0x4e4356"
+    },
+    {
+      "name": "MALL_INFO",
+      "offset": 1232,
+      "checksum_stored": 343,
+      "size": 48,
+      "padding": 0,
+      "within_declared_binary": true,
+      "checksum_calculated": 343,
+      "checksum_matches": true,
+      "signature_or_id": "0x4c4c414d"
+    },
+    {
+      "name": "NPS_INFO",
+      "offset": 0,
+      "checksum_stored": 0,
+      "size": 0,
+      "padding": 0,
+      "within_declared_binary": true,
+      "checksum_calculated": null,
+      "checksum_matches": null,
+      "signature_or_id": null
+    }
+  ]
+}

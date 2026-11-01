@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "source_root": "RX7600-Linux-Evidence/source-investigation/arch-linux-v7.2.11/drivers/gpu/drm/amd",
+  "firmware_root": "/usr/lib/firmware/amdgpu",
+  "source_file_count": 2756,
+  "firmware_reference_count": 14,
+  "entries": [
+    {
+      "path": "amdgpu/dcn_3_2_1_dmcub.bin",
+      "source_references": [
+        "display/amdgpu_dm/amdgpu_dm.c"
+      ],
+      "declared_module_firmware": false,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/dcn_3_2_1_dmcub.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/gc_11_0_2_imu.bin",
+      "source_references": [
+        "amdgpu/imu_v11_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/gc_11_0_2_imu.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/gc_11_0_2_me.bin",
+      "source_references": [
+        "amdgpu/gfx_v11_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/gc_11_0_2_me.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/gc_11_0_2_mec.bin",
+      "source_references": [
+        "amdgpu/gfx_v11_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/gc_11_0_2_mec.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/gc_11_0_2_mes.bin",
+      "source_references": [
+        "amdgpu/mes_v11_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/gc_11_0_2_mes.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/gc_11_0_2_mes1.bin",
+      "source_references": [
+        "amdgpu/mes_v11_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/gc_11_0_2_mes1.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/gc_11_0_2_mes_2.bin",
+      "source_references": [
+        "amdgpu/mes_v11_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/gc_11_0_2_mes_2.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/gc_11_0_2_pfp.bin",
+      "source_references": [
+        "amdgpu/gfx_v11_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/gc_11_0_2_pfp.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/gc_11_0_2_rlc.bin",
+      "source_references": [
+        "amdgpu/gfx_v11_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/gc_11_0_2_rlc.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/psp_13_0_7_sos.bin",
+      "source_references": [
+        "amdgpu/psp_v13_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/psp_13_0_7_sos.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/psp_13_0_7_ta.bin",
+      "source_references": [
+        "amdgpu/psp_v13_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/psp_13_0_7_ta.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/sdma_6_0_2.bin",
+      "source_references": [
+        "amdgpu/sdma_v6_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/sdma_6_0_2.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/smu_13_0_7.bin",
+      "source_references": [
+        "pm/swsmu/smu13/smu_v13_0.c"
+      ],
+      "declared_module_firmware": true,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/smu_13_0_7.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    },
+    {
+      "path": "amdgpu/vcn_4_0_4.bin",
+      "source_references": [
+        "amdgpu/amdgpu_vcn.c"
+      ],
+      "declared_module_firmware": false,
+      "local_payload_candidates": [
+        "/usr/lib/firmware/amdgpu/vcn_4_0_4.bin.zst"
+      ],
+      "local_file_present": true,
+      "evidence_limit": "Static source reference and local file presence only; not proof requested, loaded, compatible with macOS, or legally redistributable."
+    }
+  ]
+}

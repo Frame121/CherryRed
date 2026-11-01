@@ -1,0 +1,49 @@
+name: dcn32-build
+
+on:
+  push:
+    branches: [ CherryRed ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gnu-efi binutils make
+
+      - name: Toolchain versions
+        run: |
+          gcc --version | head -1
+          make --version | head -1
+          ld --version | head -1
+          objcopy --version | head -1
+
+      - name: GNU-EFI paths
+        run: |
+          ls /usr/include/efi/efi.h
+          ls /usr/include/efi/x86_64/efibind.h
+          dpkg -L gnu-efi | grep -E "libgnuefi|crt0|\.lds"
+
+      - name: Build --all
+        run: ./scripts/build-dcn32-efi.sh --all
+
+      - name: Build --efi-only
+        run: ./scripts/build-dcn32-efi.sh --efi-only
+
+      - name: Host C tests
+        run: make -C src/dcn32 test
+
+      - name: Collect EFI artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dcn32-efi
+          path: |
+            **/*.efi
+            build/**
+          if-no-files-found: warn
