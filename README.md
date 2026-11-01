@@ -40,9 +40,11 @@ Navi 32 boards (RX 7700 XT / 7800 XT) are in scope; reports from other 7000-seri
 
 The probe also recognizes the Navi 33 RX 7600 (PCI 1002:7480) as a separate
 read-only target. It publishes the PCI node's model and 8 GB VRAM metadata,
-then stops after IP-discovery and VBIOS collection. This does not enable the
-Navi 32 register/firmware path, native display output, acceleration, or Metal
-on Navi 33; those require separate hardware validation.
+then stops after IP-discovery and VBIOS collection. The measured Navi 33 IP
+versions and Linux-to-macOS bring-up map are documented in
+[research/rx7600-linux-2026-11-01/NAVI33-PORTING.md](research/rx7600-linux-2026-11-01/NAVI33-PORTING.md).
+This does not enable the Navi 32 register/firmware path, native display output,
+acceleration, or Metal on Navi 33; those require separate hardware validation.
 
 ## Building
 

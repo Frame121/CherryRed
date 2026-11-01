@@ -35,7 +35,7 @@ LDFLAGS := $(ARCH) -Xlinker -kext -nostdlib -lkmod -L$(SDK)/Library -lkmodc++ -l
 
 all: $(KEXT) $(FBKEXT)
 
-$(OUT)/kern_probe.o: RedNavi/kern_probe.cpp $(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h RedNavi/smu_fw.h RedNavi/gc_fw.h RedNavi/smu13.h compat/include/*/*.h)
+$(OUT)/kern_probe.o: RedNavi/kern_probe.cpp RedNavi/gpu_target.h RedNavi/gpu_ip_profile.h $(wildcard RedNavi/psp_fw.h RedNavi/dmub_fw.h RedNavi/smu_fw.h RedNavi/gc_fw.h RedNavi/smu13.h compat/include/*/*.h)
 	@mkdir -p $(OUT)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -106,3 +106,13 @@ test:
 	./build/gpu_target_test
 
 .PHONY: all clean test
+
+# ASIC/IP profile tests are standalone and can run on Linux without MacKernelSDK.
+test-navi33-profile:
+	@mkdir -p build
+	clang++ -std=c++17 -Wall -IRedNavi tests/host/gpu_ip_profile_test.cpp -o build/gpu_ip_profile_test
+	./build/gpu_ip_profile_test
+
+.PHONY: test-navi33-profile
+
+test: test-navi33-profile

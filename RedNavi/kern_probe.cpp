@@ -90,6 +90,7 @@
 #include "smu13.h"
 #include "gfx11.h"
 #include "gpu_target.h"
+#include "gpu_ip_profile.h"
 #include "gc_regs.h"
 
 #ifdef RN_HAVE_PSP_FW
@@ -1916,6 +1917,19 @@ bool RedNaviProbe::start(IOService *provider) {
     const uint16_t vendorId = pci->configRead16(kIOPCIConfigVendorID);
     const uint16_t deviceId = pci->configRead16(kIOPCIConfigDeviceID);
     const rednavi::GpuTargetProfile target = rednavi::identifyGpu(vendorId, deviceId);
+    const rednavi::GpuIpProfile ipProfile = rednavi::ipProfileForPci(vendorId, deviceId);
+    IOLog("RedNavi: IP profile GC %u.%u.%u SDMA %u.%u.%u PSP %u.%u.%u SMU %u.%u.%u DCN %u.%u.%u\n",
+          ipProfile.gc.major, ipProfile.gc.minor, ipProfile.gc.revision,
+          ipProfile.sdma.major, ipProfile.sdma.minor, ipProfile.sdma.revision,
+          ipProfile.psp.major, ipProfile.psp.minor, ipProfile.psp.revision,
+          ipProfile.smu.major, ipProfile.smu.minor, ipProfile.smu.revision,
+          ipProfile.dcn.major, ipProfile.dcn.minor, ipProfile.dcn.revision);
+    IOLog("RedNavi: validation discovery=%u gc-offsets=%u firmware=%u display=%u gfx-submit=%u\n",
+          ipProfile.ipDiscoveryObservedOnTarget,
+          ipProfile.gcRegisterOffsetsValidatedOnTarget,
+          ipProfile.firmwareSequenceValidatedOnTarget,
+          ipProfile.displayInitValidatedOnTarget,
+          ipProfile.graphicsSubmissionValidatedOnTarget);
 
     if (target.model && target.modelBytes) {
         OSData *m = OSData::withBytes(target.model, target.modelBytes);
