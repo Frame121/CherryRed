@@ -18,14 +18,14 @@
 </p>
 
 <p align="center">
-  <sub>Cherry Red edition · Research first, hardware claims backed by evidence.</sub>
+  <sub>CherryRed - Research first, hardware claims backed by evidence.</sub>
 </p>
 
 ---
 
 ## About CherryRed
 
-CherryRed is the renamed continuation of **Cobalt64**. The project preserves Cobalt64's existing code, research history, and third-party attributions while establishing CherryRed as the current project name. This repository investigates graphics-driver components and compatibility paths for modern AMD Radeon GPUs on macOS, including bring-up code, display-engine helpers, command-stream translation research, host-side tests, and hardware-evidence tools.
+CherryRed is an experimental research project exploring graphics-driver components and compatibility paths for modern AMD Radeon GPUs on macOS. The repository contains bring-up code, display-engine helpers, command-stream translation research, host-side tests, and hardware-evidence tools.
 
 The codebase includes an experimental RDNA 4 / Navi 48 bring-up path and a separate research track for RDNA 3 / Navi 33, including the Radeon RX 7600. These tracks have different evidence and validation states; passing a host-side test does **not** mean a GPU is supported by macOS.
 
@@ -33,8 +33,8 @@ The codebase includes an experimental RDNA 4 / Navi 48 bring-up path and a separ
 
 | GPU family | Example GPU | Current status |
 |---|---|---|
-| RDNA 4 / Navi 48 | Radeon RX 9070 XT | Experimental bring-up path inherited from Cobalt64. Reported results are limited to the documented test configuration; this is not a general-purpose release. |
-| RDNA 3 / Navi 33 | Radeon RX 7600 | **Research + bring-up prep. Not supported for working macOS graphics acceleration.** Real-card IP Discovery evidence, a fail-closed bring-up kext scaffold, firmware tooling, a DCN 3.2.1 register generator **plus the real `dcn321_regs.h` generated from the real headers**, and a Mac-day runbook now exist; hardware validation is still missing (no macOS host yet). |
+| RDNA 4 / Navi 48 | Radeon RX 9070 XT | Experimental bring-up path. Reported results are limited to the documented test configuration; this is not a general-purpose release. |
+| RDNA 3 / Navi 33 | Radeon RX 7600 | **Research + bring-up prep. Not supported for working macOS graphics acceleration.** Real-card IP Discovery evidence, a fail-closed bring-up kext scaffold, firmware tooling, a DCN 3.2.1 register generator **plus the real `dcn321_regs.h` generated from the real headers**, and a Mac-day runbook now exist; RX 7600 macOS hardware initialization and graphics acceleration remain unverified. |
 | Other GPUs | Varies | Not claimed as supported unless documented with reproducible evidence. |
 
 **Important:** CherryRed is not currently a plug-and-play driver. No installer or stable public release is provided here. Do not assume that a successful build, parser test, or OpenCore boot proves that a GPU is initialized or accelerated.
@@ -64,7 +64,7 @@ Done (prep, host-verified): the RX 7600 firmware + IP manifest (`RX7600-Linux-Ev
 
 Still required before claiming RX 7600 support:
 
-1. A macOS host + RX 7600 (the current blocker — no validation host yet).
+1. A macOS host + RX 7600 (the current blocker — the host is currently offline).
 2. Build the scaffold kext with MacKernelSDK and load the read-only survey; compare PCI/BAR/ReBAR/IP-Discovery against the Linux evidence.
 3. Validate the generated `src/dcn321/dcn321_regs.h` against the live card (confirm `seg[BASE_IDX] + offset` is inside the BAR5 window before any register access).
 4. Staged hardware bring-up (firmware → memory → interrupts → command → DCN 3.2.1 display → Metal), each stage evidence-gated.
@@ -76,7 +76,7 @@ See the [Navi 33 research notes](tools/ipdisc/RX7600_NAVI33_EVIDENCE.md), [evide
 
 | Path | Purpose |
 |---|---|
-| `src/navi48-bringup/` | Experimental Navi 48 IOKit bring-up code and host-side tests inherited from Cobalt64. |
+| `src/navi48-bringup/` | Experimental Navi 48 IOKit bring-up code and host-side tests. |
 | `src/dcn41/` | Display Core 4.1 helpers and register-related tooling. |
 | `src/dcn321/` | DCN 3.2.1 display register layer: generator + host test + **real `dcn321_regs.h` generated from the real headers** (not yet validated on hardware). |
 | `src/navi33-research/` | Isolated research code and tests for the Navi 33 investigation. |
@@ -117,9 +117,9 @@ The scanner is intended for static inspection of a driver file. It does not read
 - Back up the system and keep a known-good boot path before any hardware bring-up.
 - Firmware blobs and third-party components may have separate licences and are not automatically redistributed by this repository.
 
-## Credits and project history
+## Third-party acknowledgements
 
-CherryRed continues the **Cobalt64** project and credits the original Cobalt64 work, repository history, and contributors. It also builds on work from the Mesa/RADV project, Linux `amdgpu` contributors, RDNA4FB, mac-amdgpu, and metal2vulkan. See component notices and third-party licence files for details. Renaming this project does not transfer ownership of third-party code or supersede their licences and notices.
+CherryRed builds on work from the Mesa/RADV project, Linux amdgpu contributors, RDNA4FB, mac-amdgpu, and metal2vulkan. See component notices and the third-party licence inventory for applicable licences and required notices. These notices remain in force for all redistributed components.
 
 CherryRed is an independent project and is not affiliated with, endorsed by, or sponsored by AMD or Apple. AMD, Radeon, and RDNA are trademarks of Advanced Micro Devices, Inc. Apple, macOS, and Metal are trademarks of Apple Inc. Experimental kernel extensions can crash or damage a system; use them only if you understand the risks.
 
@@ -127,5 +127,5 @@ CherryRed is an independent project and is not affiliated with, endorsed by, or 
 
 <p align="center">
   <strong>Built with curiosity. Validated with evidence.</strong><br>
-  <sub>CherryRed · Continuing the Cobalt64 research legacy</sub>
+  <sub>CherryRed · Built with curiosity. Validated with evidence.</sub>
 </p>
