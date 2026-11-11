@@ -1,4 +1,4 @@
-﻿# CherryRed ΓÇö inherited Navi 48 development notes (5 October 2026)
+﻿# CherryRed ΓÇö Navi 48 development notes (5 October 2026)
 
 
 Kext: Navi48Bringup 0.0.664. Metal bundle: revision 20.
@@ -74,4 +74,4 @@ The expected display CRC is measured on the boot itself (or set with `AA_CRC_RG2
   translated Apple shaders (spvcache), build outputs, notes.
 
 
-Project history: these notes describe the inherited Cobalt64/Navi48-MacOS codebase. CherryRed preserves the original work and applicable third-party credits and licences.
+These notes record the Navi 48 development state for this dated snapshot. Refer to the component documentation and third-party licence notices for provenance and redistribution requirements.

@@ -25,7 +25,7 @@
 
 ## About CherryRed
 
-CherryRed is the renamed continuation of **Cobalt64**. The project preserves Cobalt64's existing code, research history, and third-party attributions while establishing CherryRed as the current project name. This repository investigates graphics-driver components and compatibility paths for modern AMD Radeon GPUs on macOS, including bring-up code, display-engine helpers, command-stream translation research, host-side tests, and hardware-evidence tools.
+CherryRed is an experimental research project investigating graphics-driver components and compatibility paths for modern AMD Radeon GPUs on macOS, including bring-up code, display-engine helpers, command-stream translation research, host-side tests, and hardware-evidence tools.
 
 The codebase includes an experimental RDNA 4 / Navi 48 bring-up path and a separate research track for RDNA 3 / Navi 33, including the Radeon RX 7600. These tracks have different evidence and validation states; passing a host-side test does **not** mean a GPU is supported by macOS.
 
@@ -33,8 +33,8 @@ The codebase includes an experimental RDNA 4 / Navi 48 bring-up path and a separ
 
 | GPU family | Example GPU | Current status |
 |---|---|---|
-| RDNA 4 / Navi 48 | Radeon RX 9070 XT | Experimental bring-up path inherited from Cobalt64. Reported results are limited to the documented test configuration; this is not a general-purpose release. |
-| RDNA 3 / Navi 33 | Radeon RX 7600 | **Research only. Not supported for working macOS graphics acceleration.** Real-card IP Discovery evidence and hardware validation are still missing. |
+| RDNA 4 / Navi 48 | Radeon RX 9070 XT | Experimental bring-up path. Reported results are limited to the documented test configuration; this is not a general-purpose release. |
+| RDNA 3 / Navi 33 | Radeon RX 7600 | **Research only. Not supported for working macOS graphics acceleration.** A local Linux-side IP Discovery capture exists; reproducible provenance and macOS hardware validation remain incomplete. |
 | Other GPUs | Varies | Not claimed as supported unless documented with reproducible evidence. |
 
 **Important:** CherryRed is not currently a plug-and-play driver. No installer or stable public release is provided here. Do not assume that a successful build, parser test, or OpenCore boot proves that a GPU is initialized or accelerated.
@@ -56,12 +56,12 @@ Current research includes:
   passed, hardware validation is pending, and it provides no display or Metal acceleration.
 - A read-only scanner for inspecting the installed Windows AMD driver file.
 - Evidence, provenance, and source-verification notes under [`tools/ipdisc/`](tools/ipdisc/).
-- A documented Windows-only workflow while a trusted Linux environment is unavailable.
+- Linux-side evidence collection and Windows-side parser/scanner validation are documented; source and package provenance remain under review.
 - An explicit separation between Navi 48 routing and unverified Navi 33 support.
 
 Still required before claiming RX 7600 support:
 
-1. A real-card IP Discovery artifact with reproducible provenance.
+1. Complete, independently reproducible provenance for the captured real-card IP Discovery artifact.
 2. Verified Navi 33 IP and firmware mapping from authoritative sources.
 3. A macOS build and review with the appropriate SDK/toolchain.
 4. Hardware validation of initialization, display output, memory handling, and Metal workloads.
@@ -72,7 +72,7 @@ See the [Navi 33 research notes](tools/ipdisc/RX7600_NAVI33_EVIDENCE.md), [evide
 
 | Path | Purpose |
 |---|---|
-| `src/navi48-bringup/` | Experimental Navi 48 IOKit bring-up code and host-side tests inherited from Cobalt64. |
+| `src/navi48-bringup/` | Experimental Navi 48 IOKit bring-up code and host-side tests. |
 | `src/dcn41/` | Display Core 4.1 helpers and register-related tooling. |
 | `src/navi33-research/` | Isolated research code and tests for the Navi 33 investigation. |
 | `src/navi33-probe/` | Read-only macOS PCI diagnostic source for `1002:7480`; no initialization or acceleration. |
@@ -108,9 +108,9 @@ The scanner is intended for static inspection of a driver file. It does not read
 - Back up the system and keep a known-good boot path before any hardware bring-up.
 - Firmware blobs and third-party components may have separate licences and are not automatically redistributed by this repository.
 
-## Credits and project history
+## Third-party acknowledgements
 
-CherryRed continues the **Cobalt64** project and credits the original Cobalt64 work, repository history, and contributors. It also builds on work from the Mesa/RADV project, Linux `amdgpu` contributors, RDNA4FB, mac-amdgpu, and metal2vulkan. See component notices and third-party licence files for details. Renaming this project does not transfer ownership of third-party code or supersede their licences and notices.
+CherryRed builds on work from the Mesa/RADV project, Linux amdgpu contributors, RDNA4FB, mac-amdgpu, and metal2vulkan. See component notices and the third-party licence inventory for applicable licences and required notices. These notices remain in force for all redistributed components.
 
 CherryRed is an independent project and is not affiliated with, endorsed by, or sponsored by AMD or Apple. AMD, Radeon, and RDNA are trademarks of Advanced Micro Devices, Inc. Apple, macOS, and Metal are trademarks of Apple Inc. Experimental kernel extensions can crash or damage a system; use them only if you understand the risks.
 
@@ -118,5 +118,5 @@ CherryRed is an independent project and is not affiliated with, endorsed by, or 
 
 <p align="center">
   <strong>Built with curiosity. Validated with evidence.</strong><br>
-  <sub>CherryRed ┬╖ Continuing the Cobalt64 research legacy</sub>
+  <sub>CherryRed - Built with curiosity. Validated with evidence.</sub>
 </p>
