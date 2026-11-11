@@ -73,7 +73,7 @@ cap is intentionally larger than the format's 16-bit declared binary size
 bytes while bounding memory and signature-scan work. The cap is a CLI intake
 policy; it does not change the in-memory parser API.
 
-To inspect the recorded pre-hardening Cobalt64 C++ behavior instead:
+To inspect the recorded pre-hardening C++ compatibility behavior instead:
 
 ```text
 python -B dump.py INPUT_FILE --mode compatibility
@@ -131,7 +131,7 @@ addresses. Version 4 with 64-bit bases is explicitly unsupported.
 
 The parser checks structure, not provenance or hardware compatibility. Passing
 a synthetic fixture or a real binary through this parser does not demonstrate
-that a GPU is supported by Cobalt64 or macOS.
+that a GPU is supported by CherryRed or macOS.
 
 ## RX 7600 research status
 
