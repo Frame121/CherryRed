@@ -1,2 +1,0 @@
-#!/bin/bash
-D=${FAKE_DIR:?}; echo "FAKE nohup $*" >>"$D/cmds.log"; touch "$D/st/watcher"
